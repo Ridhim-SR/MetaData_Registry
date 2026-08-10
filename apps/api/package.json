@@ -1,0 +1,10 @@
+{
+  "name": "api",
+  "private": true,
+  "scripts": {
+    "dev": ".venv\\Scripts\\python.exe -m uvicorn src.main:app --reload --port 8000",
+    "start": ".venv\\Scripts\\python.exe -m uvicorn src.main:app --port 8000",
+    "build": "echo 'api build (no-op for Python)'",
+    "lint": ".venv\\Scripts\\python.exe -m flake8 ."
+  }
+}
