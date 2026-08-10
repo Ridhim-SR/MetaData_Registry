@@ -2,3 +2,235 @@ node_modules/
 .turbo/
 dist/
 .next/
+
+
+
+# ============================================================
+# OS / System
+# ============================================================
+
+.DS_Store
+Thumbs.db
+desktop.ini
+
+
+# ============================================================
+# IDE / Editors
+# ============================================================
+
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/tasks.json
+!.vscode/launch.json
+
+.idea/
+*.swp
+*.swo
+*.swn
+
+
+# ============================================================
+# Environment / Secrets
+# ============================================================
+
+.env
+.env.*
+!.env.example
+
+*.pem
+*.key
+*.crt
+secrets/
+credentials/
+secrets.json
+credentials.json
+
+
+# ============================================================
+# Node.js / JavaScript / TypeScript
+# ============================================================
+
+node_modules/
+.npm/
+.pnpm-store/
+.yarn/
+.yarn-cache/
+
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+.npmrc
+
+dist/
+build/
+out/
+
+.next/
+.nuxt/
+.svelte-kit/
+.turbo/
+.cache/
+.parcel-cache/
+
+coverage/
+.nyc_output/
+
+*.tsbuildinfo
+
+
+# ============================================================
+# Python
+# ============================================================
+
+__pycache__/
+*.py[cod]
+*$py.class
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+
+.coverage
+.coverage.*
+htmlcov/
+
+.venv/
+venv/
+env/
+ENV/
+
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+wheels/
+
+build/
+dist/
+
+.pyre/
+.pytype/
+
+
+# ============================================================
+# Jupyter
+# ============================================================
+
+.ipynb_checkpoints/
+
+
+# ============================================================
+# Python packaging
+# ============================================================
+
+*.whl
+*.tar.gz
+
+
+# ============================================================
+# Data / ETL
+# ============================================================
+
+# Local/raw data
+data/raw/
+data/tmp/
+data/temp/
+
+# Generated datasets
+data/processed/
+data/output/
+
+# Local ETL artifacts
+*.parquet
+*.pkl
+*.pickle
+*.feather
+
+# Uncomment these if ALL CSV/Excel files are local data
+# *.csv
+# *.xlsx
+# *.xls
+
+
+# ============================================================
+# Logs
+# ============================================================
+
+*.log
+logs/
+
+
+# ============================================================
+# Databases / Local storage
+# ============================================================
+
+*.db
+*.sqlite
+*.sqlite3
+
+*.sqlitedb
+
+
+# ============================================================
+# Docker
+# ============================================================
+
+docker-compose.override.yml
+
+
+# ============================================================
+# Airflow
+# ============================================================
+
+airflow.cfg
+airflow.db
+airflow-webserver.pid
+airflow-scheduler.pid
+airflow-worker.pid
+
+airflow_logs/
+logs/
+
+
+# ============================================================
+# Temporary files
+# ============================================================
+
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+*~
+
+tmp/
+temp/
+
+
+# ============================================================
+# Test / Coverage artifacts
+# ============================================================
+
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+
+# ============================================================
+# Generated documentation
+# ============================================================
+
+site/
+
+
+# ============================================================
+# Local configuration
+# ============================================================
+
+*.local
+config/local/
+# CSV data files
+*.csv
