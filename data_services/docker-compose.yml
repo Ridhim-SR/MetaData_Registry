@@ -1,0 +1,150 @@
+services:
+  mysql:
+    image: mysql:8.0.36
+    container_name: openmetadata-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: openmetadata
+      MYSQL_DATABASE: openmetadata_db
+      MYSQL_USER: openmetadata_user
+      MYSQL_PASSWORD: openmetadata_password
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    command: --default-authentication-plugin=mysql_native_password
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-popenmetadata"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.1
+    container_name: openmetadata-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      - xpack.security.enabled=false
+      - xpack.security.http.ssl.enabled=false
+      - bootstrap.memory_lock=true
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+
+  execute-migrate-all:
+    image: openmetadata/server:1.5.3
+    container_name: execute_migrate_all
+    depends_on:
+      mysql:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_started
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: openmetadata_user
+      DB_USER_PASSWORD: openmetadata_password
+      OM_DATABASE: openmetadata_db
+      DB_DRIVER_CLASS: com.mysql.cj.jdbc.Driver
+      DB_SCHEME: mysql
+      DB_PARAMS: allowPublicKeyRetrieval=true&useSSL=false&serverTimezone=UTC
+      ES_HOST: elasticsearch
+      ES_PORT: 9200
+      ES_SCHEME: http
+    command: ["./bootstrap/openmetadata-ops.sh", "migrate"]
+
+  openmetadata:
+    image: openmetadata/server:1.5.3
+    container_name: openmetadata-server
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_started
+      execute-migrate-all:
+        condition: service_completed_successfully
+    ports:
+      - "8585:8585"
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: openmetadata_user
+      DB_PASSWORD: openmetadata_password
+      DB_USER_PASSWORD: openmetadata_password
+      OM_DATABASE: openmetadata_db
+      DB_DRIVER_CLASS: com.mysql.cj.jdbc.Driver
+      DB_SCHEME: mysql
+      DB_PARAMS: allowPublicKeyRetrieval=true&useSSL=false&serverTimezone=UTC
+      ES_HOST: elasticsearch
+      ES_PORT: 9200
+      ES_SCHEME: http
+      OM_BASE_URL: http://localhost:8585
+      SERVER_PORT: 8585
+    volumes:
+      - openmetadata-data:/opt/openmetadata/data
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8585/api/v1/system/version"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
+
+  csv-pipeline:
+    build: .
+    container_name: csv_pipeline
+    profiles: ["pipeline"]
+    depends_on:
+      openmetadata:
+        condition: service_healthy
+    environment:
+      SOURCE_FILE: /app/src/sample_data/sample_data.csv
+      OPENMETADATA_HOST_PORT: http://openmetadata:8585/api
+      OPENMETADATA_JWT_TOKEN: ${OPENMETADATA_JWT_TOKEN}
+      OM_SERVICE_NAME: my_service
+      OM_DATABASE_NAME: my_database
+      OM_SCHEMA_NAME: my_schema
+      OM_TABLE_NAME: industry_financials
+    volumes:
+      - pipeline_state:/app/state
+
+  postgres:
+    image: postgres:15
+    container_name: openmetadata-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: sampledb
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  ingestion:
+    image: openmetadata/ingestion:1.5.3
+    container_name: openmetadata-ingestion
+    restart: unless-stopped
+    depends_on:
+      openmetadata:
+        condition: service_healthy
+    command: ["airflow", "standalone"]
+    environment:
+      OPENMETADATA_SERVER_URL: http://openmetadata:8585
+      OPENMETADATA_AUTH_USERNAME: admin
+      OPENMETADATA_AUTH_PASSWORD: admin
+
+volumes:
+  mysql-data:
+  elasticsearch-data:
+  openmetadata-data:
+  postgres-data:
+  pipeline_state:
