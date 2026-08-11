@@ -106,7 +106,7 @@ services:
       openmetadata:
         condition: service_healthy
     environment:
-      SOURCE_FILE: /app/sample_data/annual-enterprise-survey-2025-financial-year-2025.csv
+      SOURCE_FILE: /app/src/sample_data/sample_data.csv
       OPENMETADATA_HOST_PORT: http://openmetadata:8585/api
       OPENMETADATA_JWT_TOKEN: ${OPENMETADATA_JWT_TOKEN}
       OM_SERVICE_NAME: my_service

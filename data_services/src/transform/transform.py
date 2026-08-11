@@ -2,6 +2,10 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
 
 class CSVTransformer:
     """
@@ -102,7 +106,7 @@ class CSVTransformer:
         dropped = before - len(df)
 
         if dropped:
-            print(f"Dropped {dropped} row(s) with non-numeric 'value'")
+            logger.info(f"Dropped {dropped} row(s) with non-numeric 'value'")
 
         return df
 
@@ -117,7 +121,7 @@ class CSVTransformer:
         dropped = before - len(df)
 
         if dropped:
-            print(f"Dropped {dropped} row(s) with missing key field(s)")
+            logger.info(f"Dropped {dropped} row(s) with missing key field(s)")
 
         return df
 
@@ -130,13 +134,14 @@ class CSVTransformer:
         dropped = before - len(df)
 
         if dropped:
-            print(f"Dropped {dropped} duplicate row(s) on {self.dedupe_keys}")
+            logger.info(f"Dropped {dropped} duplicate row(s) on {self.dedupe_keys}")
 
         return df
 
     def transform(self, df: pd.DataFrame) -> pd.DataFrame:
         """Run the full transformation pipeline."""
 
+        logger.info(f"Transforming {len(df)} row(s)")
         self.validate_columns(df)
 
         df = self.clean_text(df)
@@ -144,4 +149,5 @@ class CSVTransformer:
         df = self.drop_incomplete_rows(df)
         df = self.deduplicate(df)
 
+        logger.info(f"Transform complete: {len(df)} row(s) remain")
         return df.reset_index(drop=True)

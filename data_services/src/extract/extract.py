@@ -1,6 +1,10 @@
 from pathlib import Path
 import pandas as pd
 
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
 
 class CSVExtractor:
 
@@ -10,11 +14,11 @@ class CSVExtractor:
         "fiscal_year": "year",
         "yr": "year",
 
-        "industry_code_anszic": "industry_code",
+        "industry_code_anzsic": "industry_code",
         "industry_code": "industry_code",
         "anzsic_code": "industry_code",
 
-        "industry_name_anszic": "industry_name",
+        "industry_name_anzsic": "industry_name",
         "industry_name": "industry_name",
 
         "rme_size_grp": "size_group",
@@ -45,11 +49,14 @@ class CSVExtractor:
         """Get the last processed watermark."""
 
         if not self.watermark_file.exists():
+            logger.info(f"No watermark file at {self.watermark_file} -- starting from 0")
             return 0
 
         value = self.watermark_file.read_text().strip()
 
-        return int(value) if value else 0
+        watermark = int(value) if value else 0
+        logger.info(f"Loaded watermark: {watermark}")
+        return watermark
 
     def save_watermark(self, value: int) -> None:
         """Save the latest watermark."""
@@ -60,6 +67,7 @@ class CSVExtractor:
         )
 
         self.watermark_file.write_text(str(value))
+        logger.info(f"Saved watermark: {value}")
 
     def map_columns(self, df: pd.DataFrame) -> pd.DataFrame:
         """Map source column names to standard column names."""
@@ -80,6 +88,8 @@ class CSVExtractor:
             }
         )
 
+        df = df.drop(columns=[c for c in df.columns if c.startswith("unnamed")])
+
         return df
 
     def extract(self) -> pd.DataFrame:
@@ -88,6 +98,7 @@ class CSVExtractor:
         last_watermark = self.get_watermark()
 
         df = pd.read_csv(self.source_file)
+        logger.info(f"Read {len(df)} row(s) from {self.source_file}")
 
         # Map source columns to standard names
         df = self.map_columns(df)
@@ -120,4 +131,8 @@ class CSVExtractor:
             df[self.watermark_column] > last_watermark
         ].copy()
 
+        logger.info(
+            f"Extracted {len(extracted)} new row(s) "
+            f"(year > {last_watermark})"
+        )
         return extracted

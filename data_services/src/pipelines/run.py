@@ -1,12 +1,16 @@
 import os
 import sys
 
-from data_services.extract.extract import CSVExtractor
-from data_services.transform.transform import CSVTransformer
-from data_services.load.load import OpenMetadataLoader
+from src.utils.logger import get_logger
+from src.extract.extract import CSVExtractor
+from src.transform.transform import CSVTransformer
+from src.load.load import OpenMetadataLoader
+
+logger = get_logger(__name__)
 
 
 def run() -> None:
+    logger.info("Pipeline run started")
     extractor = CSVExtractor(
         source_file=os.environ["SOURCE_FILE"],
         watermark_file=os.environ.get("WATERMARK_FILE", "state/watermark.txt"),
@@ -16,14 +20,14 @@ def run() -> None:
     raw = extractor.extract()
 
     if raw.empty:
-        print("No new rows since last watermark -- nothing to do.")
+        logger.info("No new rows since last watermark -- nothing to do.")
         return
 
     transformer = CSVTransformer()
     clean = transformer.transform(raw)
 
     if clean.empty:
-        print("All new rows were dropped during cleaning -- nothing to load.")
+        logger.info("All new rows were dropped during cleaning -- nothing to load.")
         return
 
     loader = OpenMetadataLoader(
@@ -39,12 +43,12 @@ def run() -> None:
     loader.append(clean)
 
     extractor.save_watermark(int(clean["year"].max()))
-    print(f"Pipeline complete. New watermark: {extractor.get_watermark()}")
+    logger.info(f"Pipeline complete. New watermark: {extractor.get_watermark()}")
 
 
 if __name__ == "__main__":
     try:
         run()
     except Exception as exc:
-        print(f"Pipeline failed: {exc}", file=sys.stderr)
+        logger.error(f"Pipeline failed: {exc}", exc_info=True)
         sys.exit(1)

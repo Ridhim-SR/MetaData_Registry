@@ -1,2 +1,2 @@
 pandas>=2.0
-openmetadata-ingestion
+openmetadata-ingestion==1.5.3
