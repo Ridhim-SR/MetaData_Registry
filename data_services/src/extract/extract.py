@@ -68,7 +68,8 @@ class CSVExtractor:
             df.columns
             .str.strip()
             .str.lower()
-            .str.replace(" ", "_")
+            .str.replace(r"[^\w]+", "_", regex=True)
+            .str.strip("_")
         )
 
         df = df.rename(
