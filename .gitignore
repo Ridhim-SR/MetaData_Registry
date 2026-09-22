@@ -172,6 +172,13 @@ logs/
 
 *.sqlitedb
 
+# Local schema-registry / pipeline output (raw + curated CSV, watermarks)
+data_services/storage/
+data_services/state/
+
+# Raw department schema dumps (contain real production column names/data)
+data_services/samples/*.txt
+
 
 # ============================================================
 # Docker
@@ -234,3 +241,6 @@ site/
 config/local/
 # CSV data files
 *.csv
+
+# Claude Code project instructions
+CLAUDE.md
