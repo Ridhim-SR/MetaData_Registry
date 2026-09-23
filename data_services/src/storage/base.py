@@ -28,3 +28,9 @@ class ObjectStorage(ABC):
     @abstractmethod
     def list(self, prefix: str) -> list[str]:
         ...
+
+    @abstractmethod
+    def lock_path(self, path: str) -> str:
+        """A filesystem path usable with filelock.FileLock to serialize
+        concurrent read-modify-write access to the file at `path`."""
+        ...

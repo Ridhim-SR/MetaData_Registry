@@ -44,3 +44,8 @@ class LocalObjectStorage(ObjectStorage):
             for p in base.rglob("*")
             if p.is_file()
         )
+
+    def lock_path(self, path: str) -> str:
+        full = self._full_path(path)
+        full.parent.mkdir(parents=True, exist_ok=True)
+        return str(full) + ".lock"
