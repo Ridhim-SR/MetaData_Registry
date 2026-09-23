@@ -54,6 +54,12 @@ def run(
     source_format: str = "postgres_ddl",
     schema_name: str = "public",
     business_metadata_file: str | None = None,
+    owner: str = "",
+    fiduciary: str = "",
+    processor: str = "",
+    risk_classification: str = "",
+    retention_policy: str = "",
+    lineage: str = "",
 ) -> dict:
     """Parse a department's raw column-definition submission, validate/
     standardize it, and store both the raw and curated schema versions
@@ -79,6 +85,13 @@ def run(
     department, so departments are a deliberately controlled vocabulary
     rather than auto-created from whatever text a caller passes.
 
+    owner/fiduciary/processor/risk_classification/retention_policy/lineage
+    are dataset-level governance fields (needed for OpenMetadata's Owner
+    field and custom properties) stored once per dataset in
+    `_lookups/datasets.csv`, not repeated per column row. Left blank if
+    not yet confirmed -- re-run with the answer once it comes in to update
+    the existing entry.
+
     Storage layout (each table gets its own folder, since tables in the
     same dataset can have unrelated structures):
         department/<department_id>/<dataset_slug>/<table_slug>/raw/schemas/<timestamp>.csv
@@ -103,14 +116,18 @@ def run(
 
     logger.info(f"Schema ingestion started: {table_id} (format: {source_format})")
 
-    lookups.upsert_dataset(storage, dataset_id, department_id, dataset)
+    lookups.upsert_dataset(
+        storage, dataset_id, department_id, dataset,
+        owner=owner, fiduciary=fiduciary, processor=processor,
+        risk_classification=risk_classification, retention_policy=retention_policy, lineage=lineage,
+    )
     lookups.upsert_table(storage, table_id, dataset_id, table_name, schema_name)
 
-    parsed_columns = _PARSERS[source_format](source_file)
-    raw_columns = [{"table_id": table_id, **col} for col in parsed_columns]
-    logger.info(f"Parsed {len(raw_columns)} column(s) from {source_file}")
-
     ts = _timestamp()
+
+    parsed_columns = _PARSERS[source_format](source_file)
+    raw_columns = [{"table_id": table_id, "ingestion_timestamp": ts, **col} for col in parsed_columns]
+    logger.info(f"Parsed {len(raw_columns)} column(s) from {source_file}")
 
     raw_path = f"department/{department_id}/{dataset_slug}/{table_slug}/raw/schemas/{ts}.csv"
     storage.write_csv(raw_path, raw_columns)

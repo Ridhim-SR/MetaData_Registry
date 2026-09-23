@@ -20,18 +20,18 @@ def slugify(value: str) -> str:
 
 
 def _upsert(storage: ObjectStorage, path: str, key: str, row: dict) -> None:
-    """Add `row` to the lookup CSV at `path` unless its key already exists.
+    """Insert `row` into the lookup CSV at `path`, or replace the existing
+    row with the same key -- e.g. re-registering a dataset once its Owner/
+    Retention/Lineage are confirmed updates that row instead of being
+    silently ignored.
 
     Locked per-path so concurrent callers (parallel ingestion runs writing
-    to the same lookup file) can't race on the read-check-write and lose
+    to the same lookup file) can't race on the read-modify-write and lose
     or corrupt rows."""
 
     with FileLock(storage.lock_path(path)):
         rows = storage.read_csv(path) if storage.exists(path) else []
-
-        if any(r[key] == row[key] for r in rows):
-            return
-
+        rows = [r for r in rows if r[key] != row[key]]
         rows.append(row)
         storage.write_csv(path, rows)
 
@@ -60,12 +60,39 @@ def department_exists(storage: ObjectStorage, department_id: str) -> bool:
     return any(r["department_id"] == department_id for r in storage.read_csv(DEPARTMENTS_PATH))
 
 
-def upsert_dataset(storage: ObjectStorage, dataset_id: str, department_id: str, dataset_name: str) -> None:
+def upsert_dataset(
+    storage: ObjectStorage,
+    dataset_id: str,
+    department_id: str,
+    dataset_name: str,
+    owner: str = "",
+    fiduciary: str = "",
+    processor: str = "",
+    risk_classification: str = "",
+    retention_policy: str = "",
+    lineage: str = "",
+) -> None:
+    """Governance fields (owner/fiduciary/processor/risk/retention/lineage)
+    are dataset-level, not per-column, so they live here rather than being
+    repeated on every row of the curated schema CSV. Left blank ("") when
+    not yet confirmed -- call again once an answer comes in to update it,
+    same as unanswered Field Dictionary columns."""
+
     _upsert(
         storage,
         DATASETS_PATH,
         "dataset_id",
-        {"dataset_id": dataset_id, "department_id": department_id, "dataset_name": dataset_name},
+        {
+            "dataset_id": dataset_id,
+            "department_id": department_id,
+            "dataset_name": dataset_name,
+            "owner": owner,
+            "fiduciary": fiduciary,
+            "processor": processor,
+            "risk_classification": risk_classification,
+            "retention_policy": retention_policy,
+            "lineage": lineage,
+        },
     )
 
 

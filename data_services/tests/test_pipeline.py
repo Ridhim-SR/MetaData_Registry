@@ -35,6 +35,23 @@ def test_run_with_postgres_ddl_format(tmp_path):
     assert curated[1]["tag"] == "Financial"
 
 
+def test_curated_rows_carry_ingestion_timestamp(tmp_path):
+    """Audit requirement: ingestion timestamp must travel with the row data
+    itself, not only live in the filename -- otherwise it's lost if the CSV
+    is ever copied/extracted from its file path."""
+
+    ddl_file = tmp_path / "raw.txt"
+    ddl_file.write_text("sno integer NOT NULL")
+    storage = _storage_with_department(tmp_path)
+
+    result = run(department="pwd", dataset="vishwakarma", table_name="t1", source_file=str(ddl_file), storage=storage)
+
+    curated = storage.read_csv(result["curated_path"])
+    assert curated[0]["ingestion_timestamp"]
+    raw = storage.read_csv(result["raw_path"])
+    assert raw[0]["ingestion_timestamp"] == curated[0]["ingestion_timestamp"]
+
+
 def test_run_with_csv_format(tmp_path):
     csv_file = tmp_path / "raw.csv"
     csv_file.write_text("Field Name,Data Type\nroad_id,integer\nroad_name,varchar\n")

@@ -28,7 +28,34 @@ def test_upsert_dataset_links_to_department(tmp_path):
     storage = LocalObjectStorage(tmp_path)
     lookups.upsert_dataset(storage, "pwd.vishwakarma", "pwd", "vishwakarma")
     rows = storage.read_csv(lookups.DATASETS_PATH)
-    assert rows == [{"dataset_id": "pwd.vishwakarma", "department_id": "pwd", "dataset_name": "vishwakarma"}]
+    assert rows == [
+        {
+            "dataset_id": "pwd.vishwakarma",
+            "department_id": "pwd",
+            "dataset_name": "vishwakarma",
+            "owner": "",
+            "fiduciary": "",
+            "processor": "",
+            "risk_classification": "",
+            "retention_policy": "",
+            "lineage": "",
+        }
+    ]
+
+
+def test_upsert_dataset_governance_fields(tmp_path):
+    storage = LocalObjectStorage(tmp_path)
+    lookups.upsert_dataset(
+        storage, "pwd.vishwakarma", "pwd", "vishwakarma",
+        fiduciary="Superintendent Engineer, I.D.S. Circle, Lucknow",
+        processor="not defined",
+        risk_classification="4/5",
+    )
+    rows = storage.read_csv(lookups.DATASETS_PATH)
+    assert rows[0]["fiduciary"] == "Superintendent Engineer, I.D.S. Circle, Lucknow"
+    assert rows[0]["processor"] == "not defined"
+    assert rows[0]["risk_classification"] == "4/5"
+    assert rows[0]["owner"] == ""
 
 
 def test_upsert_table_links_to_dataset(tmp_path):
@@ -53,9 +80,10 @@ def test_two_datasets_same_department_both_kept(tmp_path):
     assert {d["dataset_id"] for d in datasets} == {"pwd.vishwakarma", "pwd.srishti"}
 
 
-def test_upsert_does_not_update_existing_row_fields(tmp_path):
-    """Known limitation: this is insert-if-missing, not a true upsert --
-    re-registering an existing key with different field values is ignored."""
+def test_upsert_updates_existing_row_fields(tmp_path):
+    """True upsert: re-registering an existing key with different field
+    values replaces the row -- needed so a dataset's Owner/Retention/etc.
+    can be filled in later once confirmed, without deleting/recreating it."""
 
     storage = LocalObjectStorage(tmp_path)
     lookups.upsert_table(storage, "pwd.vishwakarma.t1", "pwd.vishwakarma", "t1", "public")
@@ -63,4 +91,19 @@ def test_upsert_does_not_update_existing_row_fields(tmp_path):
 
     rows = storage.read_csv(lookups.TABLES_PATH)
     assert len(rows) == 1
-    assert rows[0]["schema_name"] == "public"
+    assert rows[0]["schema_name"] == "reporting"
+
+
+def test_upsert_dataset_update_does_not_disturb_other_datasets(tmp_path):
+    storage = LocalObjectStorage(tmp_path)
+    lookups.upsert_dataset(storage, "pwd.vishwakarma", "pwd", "vishwakarma")
+    lookups.upsert_dataset(storage, "pwd.srishti", "pwd", "srishti")
+
+    lookups.upsert_dataset(storage, "pwd.vishwakarma", "pwd", "vishwakarma", owner="Someone")
+
+    rows = storage.read_csv(lookups.DATASETS_PATH)
+    assert len(rows) == 2
+    vishwakarma = next(r for r in rows if r["dataset_id"] == "pwd.vishwakarma")
+    srishti = next(r for r in rows if r["dataset_id"] == "pwd.srishti")
+    assert vishwakarma["owner"] == "Someone"
+    assert srishti["owner"] == ""

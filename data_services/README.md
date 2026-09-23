@@ -83,7 +83,7 @@ One bad row logs an error and fails gracefully — it doesn't block the rest of 
 storage/
 ├── _lookups/
 │   ├── departments.csv   # department_id, department_name
-│   ├── datasets.csv      # dataset_id, department_id, dataset_name
+│   ├── datasets.csv      # dataset_id, department_id, dataset_name, owner, fiduciary, processor, risk_classification, retention_policy, lineage
 │   └── tables.csv        # table_id, dataset_id, table_name, schema_name
 └── department/<dept_id>/<dataset>/<table>/
     ├── raw/schemas/<timestamp>.csv       # parsed structure only
@@ -93,6 +93,19 @@ storage/
 Every run adds a new timestamped snapshot rather than overwriting the last one (version history). Re-running for an already-registered dataset/table is safe — lookups don't duplicate.
 
 To later fill in `business_description`/`tag`/`glossary_term` once a department answers your Field Dictionary questions, export their answers to a CSV (`name, business_description, tag, glossary_term, active`) and pass it as `business_metadata_file`.
+
+**Dataset-level governance fields** (`owner`, `fiduciary`, `processor`, `risk_classification`, `retention_policy`, `lineage`) live once per dataset in `datasets.csv`, not repeated per column row — pass them as optional keyword args to `run()`:
+```python
+run(
+    department="pwd", dataset="vishwakarma", table_name="TBD_confirm_with_pwd",
+    source_file="samples/pwd_vishwakarma_full_raw_columns.txt", storage=storage,
+    fiduciary="Superintendent Engineer, I.D.S. Circle, Lucknow",
+    processor="not defined",
+    risk_classification="4/5 - established incident response action plan, most data users aware, nominal compliance checks",
+    # owner, retention_policy left blank until confirmed -- re-run with the answer later to update
+)
+```
+Needed for OpenMetadata's Owner field and custom properties on the backend team's side — this is the structured source they'd pull from instead of a spreadsheet.
 
 ## Object storage backend
 
@@ -112,8 +125,8 @@ Covers the DDL/CSV parsers, curation/tagging rules, lookup dedup behavior, concu
 
 ## Known limitations
 
-- `lookups._upsert` is insert-if-missing, not a true upsert — re-registering an existing id with different field values doesn't update it.
 - `source_format="csv"` deliberately does not guess on semantically-inverted columns like `Required` (the opposite of `Nullable`) — add an explicit mapping in `csv_schema_parser.py` if a department's CSV needs it.
+- `processing_status` (one of the four processing modes: Initial Load/Append/Update/Full Refresh) is not yet tracked anywhere — every `run()` just writes a fresh snapshot; there's no mode-aware diffing against the previous curated version yet.
 
 ---
 
