@@ -7,3 +7,4 @@ email-validator>=2.3.0
 httpx>=0.28.0
 pydantic-settings>=2.14.0
 python-multipart>=0.0.9
+openmetadata-ingestion==2.0.2.0
