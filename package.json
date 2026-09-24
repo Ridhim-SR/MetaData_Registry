@@ -4,8 +4,10 @@
   "workspaces": [
     "apps/*"
   ],
-  "scripts": {
-    "dev": "turbo dev",
+   "scripts": {
+    "dev": "npm run dev:openmetadata && npm run dev:apps",
+    "dev:openmetadata": "docker compose -f infrastructure/openmetadata/docker-compose.yml up -d --wait",
+    "dev:apps": "turbo dev",
     "build": "turbo build",
     "lint": "turbo lint"
   },

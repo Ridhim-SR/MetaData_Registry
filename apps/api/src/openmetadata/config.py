@@ -19,6 +19,11 @@ class OpenMetadataSettings(BaseSettings):
         return f"{self.host}/api/{self.api_version}"
 
     @property
+    def host_port(self) -> str:
+        """Host + /api path as expected by the official SDK's OpenMetadataConnection."""
+        return f"{self.host}/api"
+
+    @property
     def auth_endpoint(self) -> str:
         return f"{self.base_url}/users/login"
 
