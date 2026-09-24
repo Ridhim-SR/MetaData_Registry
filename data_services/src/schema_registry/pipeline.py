@@ -3,10 +3,13 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
+from metadata.ingestion.ometa.ometa_api import OpenMetadata
+
 from src.schema_registry import lookups
 from src.schema_registry.csv_schema_parser import parse_csv_columns
 from src.schema_registry.curate import curate_schema
 from src.schema_registry.ddl_parser import parse_postgres_columns
+from src.schema_registry.openmetadata_publish import get_client, publish_table
 from src.storage.base import ObjectStorage
 from src.storage.local import LocalObjectStorage
 from src.utils.logger import get_logger
@@ -60,6 +63,7 @@ def run(
     risk_classification: str = "",
     retention_policy: str = "",
     lineage: str = "",
+    openmetadata_client: OpenMetadata | None = None,
 ) -> dict:
     """Parse a department's raw column-definition submission, validate/
     standardize it, and store both the raw and curated schema versions
@@ -96,6 +100,12 @@ def run(
     same dataset can have unrelated structures):
         department/<department_id>/<dataset_slug>/<table_slug>/raw/schemas/<timestamp>.csv
         department/<department_id>/<dataset_slug>/<table_slug>/curated/schemas/<timestamp>.csv
+
+    `openmetadata_client`: if given, the freshly curated snapshot is also
+    published to OpenMetadata (via openmetadata_publish.publish_table) as
+    the last step of this same call, so ingest -> curate -> publish is one
+    pipeline run instead of two separate manual steps. Omit it to keep
+    this call to storage only.
     """
 
     if source_format not in _PARSERS:
@@ -147,13 +157,18 @@ def run(
         f"({len(curated_columns)} column(s), {warning_count} warning(s))"
     )
 
-    return {
+    result = {
         "raw_path": raw_path,
         "curated_path": curated_path,
         "columns": curated_columns,
         "column_count": len(curated_columns),
         "warning_count": warning_count,
     }
+
+    if openmetadata_client is not None:
+        result["openmetadata"] = publish_table(openmetadata_client, storage, table_id)
+
+    return result
 
 
 if __name__ == "__main__":
@@ -164,6 +179,15 @@ if __name__ == "__main__":
     if os.environ.get("DEPARTMENT_NAME"):
         lookups.register_department(_storage, lookups.slugify(os.environ["DEPARTMENT"]), os.environ["DEPARTMENT_NAME"])
 
+    # OPENMETADATA_JWT_TOKEN is optional -- set it to publish to OpenMetadata
+    # as part of this same run; omit it to only write raw/curated to storage.
+    _client = None
+    if os.environ.get("OPENMETADATA_JWT_TOKEN"):
+        _client = get_client(
+            host_port=os.environ.get("OPENMETADATA_HOST_PORT", "http://localhost:8585/api"),
+            jwt_token=os.environ["OPENMETADATA_JWT_TOKEN"],
+        )
+
     run(
         department=os.environ["DEPARTMENT"],
         dataset=os.environ["DATASET"],
@@ -173,4 +197,5 @@ if __name__ == "__main__":
         source_format=os.environ.get("SOURCE_FORMAT", "postgres_ddl"),
         schema_name=os.environ.get("SCHEMA_NAME", "public"),
         business_metadata_file=os.environ.get("BUSINESS_METADATA_FILE"),
+        openmetadata_client=_client,
     )

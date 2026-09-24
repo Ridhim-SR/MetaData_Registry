@@ -1,6 +1,9 @@
+from unittest.mock import MagicMock
+
 import pytest
 
 from src.schema_registry import lookups
+from src.schema_registry.openmetadata_publish import _unwrap
 from src.schema_registry.pipeline import run
 from src.storage.local import LocalObjectStorage
 
@@ -9,6 +12,30 @@ def _storage_with_department(tmp_path, department_id="pwd", department_name="PWD
     storage = LocalObjectStorage(tmp_path / "storage")
     lookups.register_department(storage, department_id, department_name)
     return storage
+
+
+def _fake_om_client():
+    """Same minimal SDK stand-in as test_openmetadata_publish.py's
+    _fake_client(): get_by_name always reports "not found", create_or_update
+    echoes back a name/fullyQualifiedName so _fqn() can chain calls."""
+
+    client = MagicMock()
+    client.get_by_name.side_effect = Exception("Entity not found")
+
+    def _create_or_update(request):
+        entity = MagicMock()
+        name = _unwrap(getattr(request, "name", None))
+        parent = _unwrap(
+            getattr(request, "service", None)
+            or getattr(request, "database", None)
+            or getattr(request, "databaseSchema", None)
+        )
+        entity.fullyQualifiedName = f"{parent}.{name}" if parent else str(name)
+        entity.name = name
+        return entity
+
+    client.create_or_update.side_effect = _create_or_update
+    return client
 
 
 def test_run_with_postgres_ddl_format(tmp_path):
@@ -33,6 +60,40 @@ def test_run_with_postgres_ddl_format(tmp_path):
     curated = storage.read_csv(result["curated_path"])
     assert curated[0]["table_id"] == "pwd.vishwakarma.tbd_confirm_with_pwd"
     assert curated[1]["tag"] == "Financial"
+
+
+def test_run_with_openmetadata_client_publishes_in_the_same_call(tmp_path):
+    """The whole point of wiring publish into run(): passing a client makes
+    ingest -> curate -> publish one pipeline call instead of a separate
+    manual openmetadata_publish.publish_table() step afterward."""
+
+    ddl_file = tmp_path / "raw.txt"
+    ddl_file.write_text("sno integer NOT NULL, firm_name character varying(100)")
+    storage = _storage_with_department(tmp_path)
+    client = _fake_om_client()
+
+    result = run(
+        department="pwd",
+        dataset="vishwakarma",
+        table_name="t1",
+        source_file=str(ddl_file),
+        storage=storage,
+        openmetadata_client=client,
+    )
+
+    assert result["openmetadata"]["fully_qualified_name"] == "pwd.vishwakarma.public.t1"
+    assert result["openmetadata"]["column_count"] == 2
+    assert client.create_or_update.call_count == 4  # service, database, schema, table
+
+
+def test_run_without_openmetadata_client_skips_publish(tmp_path):
+    ddl_file = tmp_path / "raw.txt"
+    ddl_file.write_text("sno integer NOT NULL")
+    storage = _storage_with_department(tmp_path)
+
+    result = run(department="pwd", dataset="vishwakarma", table_name="t1", source_file=str(ddl_file), storage=storage)
+
+    assert "openmetadata" not in result
 
 
 def test_curated_rows_carry_ingestion_timestamp(tmp_path):

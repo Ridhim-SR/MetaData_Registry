@@ -60,6 +60,20 @@ def department_exists(storage: ObjectStorage, department_id: str) -> bool:
     return any(r["department_id"] == department_id for r in storage.read_csv(DEPARTMENTS_PATH))
 
 
+def _find(storage: ObjectStorage, path: str, key: str, value: str) -> dict | None:
+    if not storage.exists(path):
+        return None
+    return next((r for r in storage.read_csv(path) if r[key] == value), None)
+
+
+def get_dataset(storage: ObjectStorage, dataset_id: str) -> dict | None:
+    return _find(storage, DATASETS_PATH, "dataset_id", dataset_id)
+
+
+def get_table(storage: ObjectStorage, table_id: str) -> dict | None:
+    return _find(storage, TABLES_PATH, "table_id", table_id)
+
+
 def upsert_dataset(
     storage: ObjectStorage,
     dataset_id: str,
