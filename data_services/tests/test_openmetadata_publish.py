@@ -1,11 +1,20 @@
 from unittest.mock import MagicMock
 
 import pytest
+import requests
+from metadata.ingestion.ometa.client import APIError
 
 from src.schema_registry import lookups
-from src.schema_registry.openmetadata_publish import _unwrap, publish_table
+from src.schema_registry.openmetadata_publish import _create_or_update, _get_by_name, _unwrap, publish_table
 from src.schema_registry.pipeline import run
 from src.storage.local import LocalObjectStorage
+
+
+@pytest.fixture(autouse=True)
+def _no_real_sleep(monkeypatch):
+    """The retry tests below deliberately trigger tenacity's backoff --
+    skip the actual wait so the suite doesn't slow down."""
+    monkeypatch.setattr("tenacity.nap.time.sleep", lambda seconds: None)
 
 
 def _ingested_storage(tmp_path):
@@ -134,7 +143,10 @@ def test_publish_table_unmapped_data_type_raises(tmp_path):
 
 def test_publish_table_picks_latest_curated_snapshot(tmp_path):
     storage = _ingested_storage(tmp_path)
-    # re-run with a different column set -- should produce a newer snapshot
+    # re-run with a different (shrunk) column set -- should produce a newer
+    # snapshot; allow_column_removal=True since this deliberately drops
+    # columns from the previous run (see test_pipeline.py for the guard
+    # that rejects this without it).
     ddl_file = tmp_path / "raw2.txt"
     ddl_file.write_text("only_col integer NOT NULL")
     run(
@@ -144,6 +156,7 @@ def test_publish_table_picks_latest_curated_snapshot(tmp_path):
         source_file=str(ddl_file),
         storage=storage,
         source_format="postgres_ddl",
+        allow_column_removal=True,
     )
 
     client = _fake_client()
@@ -152,3 +165,66 @@ def test_publish_table_picks_latest_curated_snapshot(tmp_path):
     assert result["column_count"] == 1
     table_request = client.create_or_update.call_args_list[-1].args[0]
     assert [_unwrap(c.name) for c in table_request.columns] == ["only_col"]
+
+
+def _api_error(status_code: int) -> APIError:
+    error = APIError({"code": status_code, "message": "boom"})
+    error._http_error = MagicMock(response=MagicMock(status_code=status_code))
+    return error
+
+
+def test_create_or_update_retries_on_connection_error_then_succeeds():
+    client = MagicMock()
+    client.create_or_update.side_effect = [
+        requests.exceptions.ConnectionError("server unreachable"),
+        requests.exceptions.ConnectionError("still unreachable"),
+        "created",
+    ]
+
+    result = _create_or_update(client, MagicMock())
+
+    assert result == "created"
+    assert client.create_or_update.call_count == 3
+
+
+def test_create_or_update_retries_on_5xx_then_succeeds():
+    client = MagicMock()
+    client.create_or_update.side_effect = [_api_error(503), "created"]
+
+    result = _create_or_update(client, MagicMock())
+
+    assert result == "created"
+    assert client.create_or_update.call_count == 2
+
+
+def test_create_or_update_does_not_retry_on_4xx():
+    """A 4xx means the request itself is wrong (e.g. bad payload) --
+    retrying it just fails the same way every time, slower."""
+
+    client = MagicMock()
+    client.create_or_update.side_effect = _api_error(400)
+
+    with pytest.raises(APIError):
+        _create_or_update(client, MagicMock())
+
+    assert client.create_or_update.call_count == 1
+
+
+def test_create_or_update_gives_up_after_max_attempts():
+    client = MagicMock()
+    client.create_or_update.side_effect = requests.exceptions.ConnectionError("down")
+
+    with pytest.raises(requests.exceptions.ConnectionError):
+        _create_or_update(client, MagicMock())
+
+    assert client.create_or_update.call_count == 4  # stop_after_attempt(4)
+
+
+def test_get_by_name_retries_on_connection_error():
+    client = MagicMock()
+    client.get_by_name.side_effect = [requests.exceptions.ConnectionError("blip"), "found"]
+
+    result = _get_by_name(client, MagicMock(), "some.fqn")
+
+    assert result == "found"
+    assert client.get_by_name.call_count == 2

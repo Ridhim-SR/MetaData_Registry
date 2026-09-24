@@ -1,3 +1,4 @@
+import csv
 from unittest.mock import MagicMock
 
 import pytest
@@ -6,6 +7,15 @@ from src.schema_registry import lookups
 from src.schema_registry.openmetadata_publish import _unwrap
 from src.schema_registry.pipeline import run
 from src.storage.local import LocalObjectStorage
+
+
+def _write_business_metadata(tmp_path, filename: str, rows: list[dict]) -> str:
+    path = tmp_path / filename
+    with open(path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["name", "business_description", "tag", "glossary_term", "active"])
+        writer.writeheader()
+        writer.writerows(rows)
+    return str(path)
 
 
 def _storage_with_department(tmp_path, department_id="pwd", department_name="PWD"):
@@ -225,3 +235,125 @@ def test_unknown_source_format_raises(tmp_path):
             storage=storage,
             source_format="excel",
         )
+
+
+def test_first_run_never_blocked_by_column_removal_guard(tmp_path):
+    """A table's first-ever run has no previous snapshot to diff against,
+    so it always succeeds regardless of allow_column_removal (this is
+    "initial load")."""
+
+    ddl_file = tmp_path / "raw.txt"
+    ddl_file.write_text("col_a integer NOT NULL")
+    storage = _storage_with_department(tmp_path)
+
+    result = run(department="pwd", dataset="vishwakarma", table_name="t1", source_file=str(ddl_file), storage=storage)
+
+    assert result["column_count"] == 1
+
+
+def test_rerun_with_only_additions_succeeds_without_allow_column_removal(tmp_path):
+    storage = _storage_with_department(tmp_path)
+    ddl_v1 = tmp_path / "v1.txt"
+    ddl_v1.write_text("col_a integer NOT NULL")
+    run(department="pwd", dataset="vishwakarma", table_name="t1", source_file=str(ddl_v1), storage=storage)
+
+    ddl_v2 = tmp_path / "v2.txt"
+    ddl_v2.write_text("col_a integer NOT NULL, col_b character varying(50)")
+    result = run(department="pwd", dataset="vishwakarma", table_name="t1", source_file=str(ddl_v2), storage=storage)
+
+    assert result["column_count"] == 2
+
+
+def test_rerun_dropping_a_column_raises_without_allow_column_removal(tmp_path):
+    """The core guard: a source file missing a column that exists in the
+    previous curated snapshot is treated as a likely partial/incremental
+    submission, not an intentional removal -- it must fail loudly instead
+    of silently publishing a table with fewer columns."""
+
+    storage = _storage_with_department(tmp_path)
+    ddl_v1 = tmp_path / "v1.txt"
+    ddl_v1.write_text("col_a integer NOT NULL, col_b character varying(50)")
+    run(department="pwd", dataset="vishwakarma", table_name="t1", source_file=str(ddl_v1), storage=storage)
+
+    ddl_v2 = tmp_path / "v2.txt"
+    ddl_v2.write_text("col_a integer NOT NULL")  # col_b missing
+
+    with pytest.raises(ValueError, match="col_b"):
+        run(department="pwd", dataset="vishwakarma", table_name="t1", source_file=str(ddl_v2), storage=storage)
+
+    # the rejected run must not have written a new snapshot
+    assert len(storage.list("department/pwd/vishwakarma/t1/curated/schemas")) == 1
+
+
+def test_rerun_dropping_a_column_succeeds_with_allow_column_removal(tmp_path):
+    storage = _storage_with_department(tmp_path)
+    ddl_v1 = tmp_path / "v1.txt"
+    ddl_v1.write_text("col_a integer NOT NULL, col_b character varying(50)")
+    run(department="pwd", dataset="vishwakarma", table_name="t1", source_file=str(ddl_v1), storage=storage)
+
+    ddl_v2 = tmp_path / "v2.txt"
+    ddl_v2.write_text("col_a integer NOT NULL")
+
+    result = run(
+        department="pwd", dataset="vishwakarma", table_name="t1", source_file=str(ddl_v2), storage=storage,
+        allow_column_removal=True,
+    )
+
+    assert result["column_count"] == 1
+    assert [c["name"] for c in result["columns"]] == ["col_a"]
+
+
+def test_rerun_carries_forward_business_metadata_not_resubmitted(tmp_path):
+    """A department answering one column's Field Dictionary question
+    shouldn't erase another column's previously-recorded answer just
+    because this run's business_metadata_file doesn't mention it."""
+
+    storage = _storage_with_department(tmp_path)
+    ddl_v1 = tmp_path / "v1.txt"
+    ddl_v1.write_text("col_a integer NOT NULL, col_b character varying(50)")
+    meta_v1 = _write_business_metadata(tmp_path, "meta_v1.csv", [
+        {"name": "col_a", "business_description": "First column", "tag": "", "glossary_term": "", "active": "true"},
+        {"name": "col_b", "business_description": "Second column", "tag": "", "glossary_term": "", "active": "true"},
+    ])
+    run(
+        department="pwd", dataset="vishwakarma", table_name="t1", source_file=str(ddl_v1), storage=storage,
+        business_metadata_file=meta_v1,
+    )
+
+    # v2 only answers col_b, and adds col_c -- col_a's description should
+    # still be there, not blanked out
+    ddl_v2 = tmp_path / "v2.txt"
+    ddl_v2.write_text("col_a integer NOT NULL, col_b character varying(50), col_c double precision")
+    meta_v2 = _write_business_metadata(tmp_path, "meta_v2.csv", [
+        {"name": "col_b", "business_description": "Updated second column", "tag": "", "glossary_term": "", "active": "true"},
+    ])
+    result = run(
+        department="pwd", dataset="vishwakarma", table_name="t1", source_file=str(ddl_v2), storage=storage,
+        business_metadata_file=meta_v2,
+    )
+
+    by_name = {c["name"]: c for c in result["columns"]}
+    assert by_name["col_a"]["business_description"] == "First column"  # carried forward, not blanked
+    assert by_name["col_b"]["business_description"] == "Updated second column"  # file overlay wins
+    assert by_name["col_c"]["business_description"] == ""  # brand new column, nothing to carry forward
+
+
+def test_rerun_with_no_metadata_file_still_carries_forward_previous_answers(tmp_path):
+    storage = _storage_with_department(tmp_path)
+    ddl_v1 = tmp_path / "v1.txt"
+    ddl_v1.write_text("col_a integer NOT NULL")
+    meta_v1 = _write_business_metadata(tmp_path, "meta_v1.csv", [
+        {"name": "col_a", "business_description": "Only column", "tag": "PII", "glossary_term": "", "active": "true"},
+    ])
+    run(
+        department="pwd", dataset="vishwakarma", table_name="t1", source_file=str(ddl_v1), storage=storage,
+        business_metadata_file=meta_v1,
+    )
+
+    # v2: same column, no business_metadata_file at all
+    ddl_v2 = tmp_path / "v2.txt"
+    ddl_v2.write_text("col_a integer NOT NULL")
+    result = run(department="pwd", dataset="vishwakarma", table_name="t1", source_file=str(ddl_v2), storage=storage)
+
+    assert result["columns"][0]["business_description"] == "Only column"
+    assert result["columns"][0]["tag"] == "PII"

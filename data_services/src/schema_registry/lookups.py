@@ -110,6 +110,21 @@ def upsert_dataset(
     )
 
 
+def latest_curated_snapshot_path(
+    storage: ObjectStorage, department_id: str, dataset_slug: str, table_slug: str
+) -> str:
+    """Path of the most recently written curated schema snapshot for one
+    table. Filenames are fixed-width UTC timestamps, so lexical order ==
+    chronological order -- shared by openmetadata_publish.py (publish the
+    latest) and pipeline.py (diff a new run against the latest)."""
+
+    prefix = f"department/{department_id}/{dataset_slug}/{table_slug}/curated/schemas/"
+    files = storage.list(prefix)
+    if not files:
+        raise FileNotFoundError(f"No curated schema under {prefix} -- run the pipeline for this table first.")
+    return files[-1]
+
+
 def upsert_table(storage: ObjectStorage, table_id: str, dataset_id: str, table_name: str, schema_name: str) -> None:
     _upsert(
         storage,

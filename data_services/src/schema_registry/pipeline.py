@@ -3,6 +3,7 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
+from filelock import FileLock
 from metadata.ingestion.ometa.ometa_api import OpenMetadata
 
 from src.schema_registry import lookups
@@ -30,12 +31,10 @@ def _timestamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
 
 
-def _load_business_metadata(path: str) -> dict[str, dict]:
-    """Load a Field Dictionary export (CSV: name, business_description,
-    tag, glossary_term, active) keyed by field name."""
-
-    with open(path, newline="") as f:
-        rows = list(csv.DictReader(f))
+def _business_metadata_from_rows(rows: list[dict]) -> dict[str, dict]:
+    """Shape a list of CSV rows (a Field Dictionary export, or a previous
+    curated snapshot) into the {name: {business_description, tag,
+    glossary_term, active}} form curate_schema() expects."""
 
     return {
         row["name"]: {
@@ -46,6 +45,28 @@ def _load_business_metadata(path: str) -> dict[str, dict]:
         }
         for row in rows
     }
+
+
+def _load_business_metadata(path: str) -> dict[str, dict]:
+    """Load a Field Dictionary export (CSV: name, business_description,
+    tag, glossary_term, active) keyed by field name."""
+
+    with open(path, newline="") as f:
+        rows = list(csv.DictReader(f))
+    return _business_metadata_from_rows(rows)
+
+
+def _previous_curated_columns(
+    storage: ObjectStorage, department_id: str, dataset_slug: str, table_slug: str
+) -> list[dict] | None:
+    """The last curated snapshot for this table, or None if this is its
+    first-ever run (nothing to diff or carry forward against)."""
+
+    try:
+        path = lookups.latest_curated_snapshot_path(storage, department_id, dataset_slug, table_slug)
+    except FileNotFoundError:
+        return None
+    return storage.read_csv(path)
 
 
 def run(
@@ -64,6 +85,7 @@ def run(
     retention_policy: str = "",
     lineage: str = "",
     openmetadata_client: OpenMetadata | None = None,
+    allow_column_removal: bool = False,
 ) -> dict:
     """Parse a department's raw column-definition submission, validate/
     standardize it, and store both the raw and curated schema versions
@@ -106,6 +128,22 @@ def run(
     the last step of this same call, so ingest -> curate -> publish is one
     pipeline run instead of two separate manual steps. Omit it to keep
     this call to storage only.
+
+    Re-running for a table that's already been curated before diffs the new
+    source against the *previous* curated snapshot instead of blindly
+    trusting this run's input as the complete truth:
+      - Columns present before but missing from this run raise a ValueError
+        naming them, unless `allow_column_removal=True` -- this is what
+        catches a partial/incremental submission (e.g. a department sends
+        only its 2 new columns, expecting an "append") before it silently
+        drops every other previously-published column from OpenMetadata.
+      - `business_description`/`tag`/`glossary_term`/`active` for any
+        column not mentioned in this run's `business_metadata_file` (or
+        given no file at all) are carried forward from the previous
+        snapshot rather than reset to blank -- so answering one column's
+        Field Dictionary question doesn't erase everyone else's answers.
+      - A table's first-ever run has no previous snapshot to diff or carry
+        forward against, so it always succeeds (this is "initial load").
     """
 
     if source_format not in _PARSERS:
@@ -139,23 +177,43 @@ def run(
     raw_columns = [{"table_id": table_id, "ingestion_timestamp": ts, **col} for col in parsed_columns]
     logger.info(f"Parsed {len(raw_columns)} column(s) from {source_file}")
 
-    raw_path = f"department/{department_id}/{dataset_slug}/{table_slug}/raw/schemas/{ts}.csv"
-    storage.write_csv(raw_path, raw_columns)
-    logger.info(f"Stored raw schema -> {raw_path}")
+    # Locked per table: reading the previous snapshot, deciding whether a
+    # removal is allowed, and writing the new raw+curated snapshot must be
+    # one atomic step, or two concurrent runs for the same table (e.g. a
+    # double-triggered CLI call, two batch jobs targeting the same row)
+    # could both read the same "previous" state and both proceed on stale
+    # information.
+    lock_path = storage.lock_path(f"department/{department_id}/{dataset_slug}/{table_slug}/pipeline")
+    with FileLock(lock_path):
+        previous_curated = _previous_curated_columns(storage, department_id, dataset_slug, table_slug)
 
-    business_metadata = {}
-    if business_metadata_file:
-        business_metadata = _load_business_metadata(business_metadata_file)
+        if previous_curated is not None:
+            removed = {row["name"] for row in previous_curated} - {col["name"] for col in raw_columns}
+            if removed and not allow_column_removal:
+                raise ValueError(
+                    f"{table_id}: this run is missing {len(removed)} column(s) that exist in the "
+                    f"previous curated snapshot ({', '.join(sorted(removed))}). If this is an "
+                    f"intentional full refresh, pass allow_column_removal=True; if not, this source "
+                    f"file is likely a partial/incremental submission, not the full current schema."
+                )
 
-    curated_columns = curate_schema(raw_columns, business_metadata)
-    warning_count = sum(1 for c in curated_columns if c["validation_warning"])
+        raw_path = f"department/{department_id}/{dataset_slug}/{table_slug}/raw/schemas/{ts}.csv"
+        storage.write_csv(raw_path, raw_columns)
+        logger.info(f"Stored raw schema -> {raw_path}")
 
-    curated_path = f"department/{department_id}/{dataset_slug}/{table_slug}/curated/schemas/{ts}.csv"
-    storage.write_csv(curated_path, curated_columns)
-    logger.info(
-        f"Stored curated schema -> {curated_path} "
-        f"({len(curated_columns)} column(s), {warning_count} warning(s))"
-    )
+        business_metadata = _business_metadata_from_rows(previous_curated) if previous_curated else {}
+        if business_metadata_file:
+            business_metadata.update(_load_business_metadata(business_metadata_file))
+
+        curated_columns = curate_schema(raw_columns, business_metadata)
+        warning_count = sum(1 for c in curated_columns if c["validation_warning"])
+
+        curated_path = f"department/{department_id}/{dataset_slug}/{table_slug}/curated/schemas/{ts}.csv"
+        storage.write_csv(curated_path, curated_columns)
+        logger.info(
+            f"Stored curated schema -> {curated_path} "
+            f"({len(curated_columns)} column(s), {warning_count} warning(s))"
+        )
 
     result = {
         "raw_path": raw_path,
@@ -198,4 +256,5 @@ if __name__ == "__main__":
         schema_name=os.environ.get("SCHEMA_NAME", "public"),
         business_metadata_file=os.environ.get("BUSINESS_METADATA_FILE"),
         openmetadata_client=_client,
+        allow_column_removal=os.environ.get("ALLOW_COLUMN_REMOVAL", "").strip().lower() in _TRUE_VALUES,
     )

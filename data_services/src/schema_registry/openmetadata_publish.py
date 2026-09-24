@@ -1,5 +1,6 @@
 import os
 
+import requests
 from metadata.generated.schema.api.data.createDatabase import CreateDatabaseRequest
 from metadata.generated.schema.api.data.createDatabaseSchema import (
     CreateDatabaseSchemaRequest,
@@ -26,7 +27,9 @@ from metadata.generated.schema.entity.services.databaseService import (
 from metadata.generated.schema.security.client.openMetadataJWTClientConfig import (
     OpenMetadataJWTClientConfig,
 )
+from metadata.ingestion.ometa.client import APIError
 from metadata.ingestion.ometa.ometa_api import OpenMetadata
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from src.schema_registry import lookups
 from src.storage.base import ObjectStorage
@@ -34,6 +37,38 @@ from src.storage.local import LocalObjectStorage
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+def _is_transient_error(exc: BaseException) -> bool:
+    """Worth retrying: the server didn't answer at all (connection refused,
+    DNS blip, timeout) or answered with a 5xx (its own transient failure).
+    Never retry a 4xx (e.g. a genuinely unmapped type, bad request) --
+    retrying the same broken request just wastes time before failing the
+    same way."""
+
+    if isinstance(exc, (requests.exceptions.ConnectionError, requests.exceptions.Timeout)):
+        return True
+    if isinstance(exc, APIError):
+        return exc.status_code is not None and exc.status_code >= 500
+    return False
+
+
+_retry_transient = retry(
+    retry=retry_if_exception(_is_transient_error),
+    stop=stop_after_attempt(4),
+    wait=wait_exponential(multiplier=1, min=1, max=8),
+    reraise=True,
+)
+
+
+@_retry_transient
+def _get_by_name(client: OpenMetadata, entity, fqn: str):
+    return client.get_by_name(entity=entity, fqn=fqn)
+
+
+@_retry_transient
+def _create_or_update(client: OpenMetadata, request):
+    return client.create_or_update(request)
 
 # Only the Postgres types curate.py's KNOWN_POSTGRES_TYPES actually allows
 # through -- everything else already fails validation before it gets here.
@@ -87,7 +122,7 @@ def _fqn(entity) -> str:
 
 def _get_or_none(client: OpenMetadata, entity, fqn: str):
     try:
-        return client.get_by_name(entity=entity, fqn=fqn)
+        return _get_by_name(client, entity, fqn)
     except Exception as exc:  # noqa: BLE001
         if "not found" in str(exc).lower() or "404" in str(exc):
             return None
@@ -118,14 +153,15 @@ def _ensure_service(client: OpenMetadata, service_name: str) -> DatabaseService:
     existing = _get_or_none(client, DatabaseService, service_name)
     if existing:
         return existing
-    return client.create_or_update(
+    return _create_or_update(
+        client,
         CreateDatabaseServiceRequest(
             name=service_name,
             serviceType=DatabaseServiceType.CustomDatabase,
             connection=DatabaseConnection(
                 config=CustomDatabaseConnection(type="CustomDatabase", sourcePythonClass="custom")
             ),
-        )
+        ),
     )
 
 
@@ -134,7 +170,7 @@ def _ensure_database(client: OpenMetadata, service_fqn: str, database_name: str)
     existing = _get_or_none(client, Database, fqn)
     if existing:
         return existing
-    return client.create_or_update(CreateDatabaseRequest(name=database_name, service=service_fqn))
+    return _create_or_update(client, CreateDatabaseRequest(name=database_name, service=service_fqn))
 
 
 def _ensure_schema(client: OpenMetadata, database_fqn: str, schema_name: str) -> DatabaseSchema:
@@ -142,15 +178,7 @@ def _ensure_schema(client: OpenMetadata, database_fqn: str, schema_name: str) ->
     existing = _get_or_none(client, DatabaseSchema, fqn)
     if existing:
         return existing
-    return client.create_or_update(CreateDatabaseSchemaRequest(name=schema_name, database=database_fqn))
-
-
-def _latest_curated_path(storage: ObjectStorage, department_id: str, dataset_slug: str, table_slug: str) -> str:
-    prefix = f"department/{department_id}/{dataset_slug}/{table_slug}/curated/schemas/"
-    files = storage.list(prefix)
-    if not files:
-        raise FileNotFoundError(f"No curated schema under {prefix} -- run the pipeline for this table first.")
-    return files[-1]  # filenames are fixed-width UTC timestamps -> lexical order == chronological order
+    return _create_or_update(client, CreateDatabaseSchemaRequest(name=schema_name, database=database_fqn))
 
 
 def publish_table(client: OpenMetadata, storage: ObjectStorage, table_id: str, service_name: str | None = None) -> dict:
@@ -171,20 +199,21 @@ def publish_table(client: OpenMetadata, storage: ObjectStorage, table_id: str, s
     if table_row is None:
         raise ValueError(f"Unknown table_id '{table_id}' -- not found in {lookups.TABLES_PATH}")
 
-    curated_path = _latest_curated_path(storage, department_id, dataset_slug, table_slug)
+    curated_path = lookups.latest_curated_snapshot_path(storage, department_id, dataset_slug, table_slug)
     curated_columns = storage.read_csv(curated_path)
 
     service = _ensure_service(client, service_name or department_id)
     database = _ensure_database(client, _fqn(service), dataset_slug)
     schema = _ensure_schema(client, _fqn(database), table_row["schema_name"])
 
-    table = client.create_or_update(
+    table = _create_or_update(
+        client,
         CreateTableRequest(
             name=table_row["table_name"],
             tableType=TableType.Regular,
             databaseSchema=_fqn(schema),
             columns=[_to_column(row) for row in curated_columns],
-        )
+        ),
     )
 
     logger.info(f"Published {table_id} -> {_fqn(table)} ({len(curated_columns)} column(s)) from {curated_path}")

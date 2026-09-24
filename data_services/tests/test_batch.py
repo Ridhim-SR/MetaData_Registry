@@ -86,3 +86,59 @@ def test_batch_row_for_unregistered_department_fails_gracefully(tmp_path):
 
     assert results[0]["status"] == "failed"
     assert "Unknown department" in results[0]["error"]
+
+
+def test_batch_row_dropping_a_column_fails_without_allow_column_removal(tmp_path):
+    """Same guard as pipeline.run() -- a manifest row whose source is
+    missing a column from that table's previous curated snapshot fails
+    that row instead of silently publishing fewer columns."""
+
+    storage = LocalObjectStorage(tmp_path / "storage")
+    lookups.register_department(storage, "pwd", "PWD")
+
+    csv_v1 = tmp_path / "v1.csv"
+    csv_v1.write_text("Field Name,Data Type\ncol_a,integer\ncol_b,varchar\n")
+    manifest_v1 = tmp_path / "manifest_v1.csv"
+    manifest_v1.write_text(
+        "department,dataset,table_name,source_file,source_format\n"
+        f"pwd,vishwakarma,t1,{csv_v1},csv\n"
+    )
+    run_batch(str(manifest_v1), storage)
+
+    csv_v2 = tmp_path / "v2.csv"
+    csv_v2.write_text("Field Name,Data Type\ncol_a,integer\n")  # col_b missing
+    manifest_v2 = tmp_path / "manifest_v2.csv"
+    manifest_v2.write_text(
+        "department,dataset,table_name,source_file,source_format\n"
+        f"pwd,vishwakarma,t1,{csv_v2},csv\n"
+    )
+    results = run_batch(str(manifest_v2), storage)
+
+    assert results[0]["status"] == "failed"
+    assert "col_b" in results[0]["error"]
+
+
+def test_batch_row_dropping_a_column_succeeds_with_allow_column_removal(tmp_path):
+    storage = LocalObjectStorage(tmp_path / "storage")
+    lookups.register_department(storage, "pwd", "PWD")
+
+    csv_v1 = tmp_path / "v1.csv"
+    csv_v1.write_text("Field Name,Data Type\ncol_a,integer\ncol_b,varchar\n")
+    manifest_v1 = tmp_path / "manifest_v1.csv"
+    manifest_v1.write_text(
+        "department,dataset,table_name,source_file,source_format\n"
+        f"pwd,vishwakarma,t1,{csv_v1},csv\n"
+    )
+    run_batch(str(manifest_v1), storage)
+
+    csv_v2 = tmp_path / "v2.csv"
+    csv_v2.write_text("Field Name,Data Type\ncol_a,integer\n")
+    manifest_v2 = tmp_path / "manifest_v2.csv"
+    manifest_v2.write_text(
+        "department,dataset,table_name,source_file,source_format,allow_column_removal\n"
+        f"pwd,vishwakarma,t1,{csv_v2},csv,true\n"
+    )
+    results = run_batch(str(manifest_v2), storage)
+
+    assert results[0]["status"] == "ok"
+    assert results[0]["column_count"] == 1

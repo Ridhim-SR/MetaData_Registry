@@ -24,11 +24,15 @@ def run_batch(manifest_file: str, storage: ObjectStorage, openmetadata_client: O
     (optional -- a manifest is something you deliberately write, so a row
     naming a not-yet-registered department here explicitly registers it,
     unlike pipeline.run() which refuses to auto-create departments from
-    arbitrary text).
+    arbitrary text), allow_column_removal (optional, y/yes/true/1 -- see
+    pipeline.run()).
 
     One row failing doesn't stop the rest -- each result records its own
     status so a bad submission can be fixed and rerun without redoing
-    everything else.
+    everything else. This includes a row whose source file is missing
+    columns that exist in that table's previous curated snapshot: it fails
+    with a clear error instead of silently publishing a partial table,
+    unless that row's `allow_column_removal` says otherwise.
 
     `openmetadata_client`: if given, every row is also published to
     OpenMetadata as part of its own `run()` call -- a publish failure
@@ -56,6 +60,7 @@ def run_batch(manifest_file: str, storage: ObjectStorage, openmetadata_client: O
                 schema_name=row.get("schema_name") or "public",
                 business_metadata_file=row.get("business_metadata_file") or None,
                 openmetadata_client=openmetadata_client,
+                allow_column_removal=row.get("allow_column_removal", "").strip().lower() in {"y", "yes", "true", "1"},
             )
             results.append({"table_id": table_id, "status": "ok", **result})
         except Exception as exc:

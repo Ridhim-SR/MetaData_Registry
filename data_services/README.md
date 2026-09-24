@@ -20,6 +20,7 @@ raw file --parse--> raw columns --curate_schema()--> curated columns --publish_t
 - Pass an OpenMetadata client/token → all three stages run in one call (normal path).
 - Omit it → stops after writing the curated CSV. Publish later with `openmetadata_publish.py` (below), no re-ingest needed.
 - `batch.py` runs the same thing once per row of a manifest CSV, for many tables at once.
+- Every run diffs the new source against the table's previous curated snapshot: additions/updates go through automatically; a column that existed before but is missing now raises an error (naming it) unless you pass `allow_column_removal=True` — this catches a partial/incremental submission before it silently deletes a column from OpenMetadata. Answers not resubmitted in `business_metadata_file` carry forward from the previous run instead of being blanked.
 
 ## Quickstart
 
@@ -133,8 +134,9 @@ Covers parsers, curation/tagging, lookup dedup, concurrency, and the full pipeli
 ## Known limitations
 
 - `source_format="csv"` won't guess semantically-inverted columns (e.g. `Required` vs `Nullable`) — add a mapping in `csv_schema_parser.py` if needed.
-- No processing-mode tracking yet (Initial Load/Append/Update/Full Refresh) — every `run()` just writes a fresh snapshot.
+- No mode is tracked explicitly (Initial Load/Append/Update/Full Refresh) — `run()` infers safety from a diff against the previous snapshot (see [The pipeline](#the-pipeline)) rather than the caller declaring which one this is, and nothing persists *which* decision was made for audit purposes.
 - `publish_table()` ignores the curated `active` flag — a column marked inactive still gets published like any other.
+- Renaming a column looks like a delete + an add to the diff — it requires `allow_column_removal=True`, and the old name's business metadata won't carry over to the new name (matching is by exact column name only).
 
 ---
 
