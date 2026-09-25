@@ -176,3 +176,16 @@ docker compose down -v    # stop, wipe volumes -- careful
 `csv-pipeline` env vars: `SOURCE_FILE`, `OPENMETADATA_HOST_PORT`,
 `OPENMETADATA_JWT_TOKEN`, `OM_SERVICE_NAME`/`OM_DATABASE_NAME`/
 `OM_SCHEMA_NAME`/`OM_TABLE_NAME`.
+
+---
+
+## Run
+
+```bash
+cd ../infrastructure/openmetadata && docker compose up -d
+cd ../../data_services && source .venv/bin/activate
+OPENMETADATA_JWT_TOKEN=<token> \
+DEPARTMENT=pwd DATASET=vishwakarma TABLE_NAME=TBD_confirm_with_pwd \
+SOURCE_FILE=samples/pwd_vishwakarma_full_raw_columns.txt SOURCE_FORMAT=postgres_ddl \
+python3 -m src.schema_registry.pipeline
+```
