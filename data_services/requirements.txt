@@ -3,3 +3,5 @@ openmetadata-ingestion==2.0.2
 pytest>=8.0
 filelock>=3.13
 tenacity>=9.0
+boto3>=1.34
+moto[s3]>=5.0

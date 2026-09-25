@@ -6,8 +6,8 @@ from metadata.ingestion.ometa.ometa_api import OpenMetadata
 from src.schema_registry import lookups
 from src.schema_registry.openmetadata_publish import get_client
 from src.schema_registry.pipeline import run
+from src.storage import storage_from_env
 from src.storage.base import ObjectStorage
-from src.storage.local import LocalObjectStorage
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -82,6 +82,6 @@ if __name__ == "__main__":
 
     run_batch(
         manifest_file=os.environ["MANIFEST_FILE"],
-        storage=LocalObjectStorage(os.environ.get("STORAGE_ROOT", "storage")),
+        storage=storage_from_env(),
         openmetadata_client=_client,
     )

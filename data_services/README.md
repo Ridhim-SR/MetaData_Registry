@@ -93,13 +93,31 @@ field and custom properties.
 ## Object storage backend
 
 Everything goes through `ObjectStorage` (`src/storage/base.py`) — the
-backend is swappable without touching `schema_registry/`.
+backend is swappable without touching `schema_registry/`. Two
+implementations exist:
 
-- **Now**: `LocalObjectStorage` — plain filesystem.
-- **Target**: an S3-compatible backend (Wasabi, etc.) implementing the same
-  4 methods (`write_csv`, `read_csv`, `exists`, `list`) + `lock_path`.
-  Concurrency uses `filelock` locally; S3 will need conditional-PUT/ETag
-  instead.
+- **`LocalObjectStorage`** — plain filesystem, default for local dev.
+- **`S3ObjectStorage`** (`src/storage/s3.py`) — Wasabi, or any other
+  S3-compatible provider, via `boto3` with `endpoint_url` pointed at that
+  provider. `storage_from_env()` (`src/storage/__init__.py`) picks between
+  the two for every CLI entry point: set `WASABI_BUCKET` to switch to
+  Wasabi, leave it unset to keep using `LocalObjectStorage`.
+  ```bash
+  WASABI_BUCKET=my-bucket \
+  WASABI_ENDPOINT_URL=https://s3.us-east-1.wasabisys.com \
+  WASABI_ACCESS_KEY_ID=<key> WASABI_SECRET_ACCESS_KEY=<secret> \
+  DEPARTMENT=pwd DATASET=vishwakarma TABLE_NAME=t1 SOURCE_FILE=samples/x.txt \
+  python3 -m src.schema_registry.pipeline
+  ```
+  `WASABI_PREFIX` (optional) namespaces everything under a key prefix in
+  the bucket; `WASABI_REGION` is optional too (Wasabi doesn't require a
+  real AWS region, but boto3 wants something set).
+- **Concurrency**: `filelock` on the local filesystem for both backends —
+  `S3ObjectStorage.lock_path()` returns a *local* lock file (hashed from
+  the S3 key), not a distributed lock. Fine for today's single-machine
+  pipeline runs; multiple machines writing to the same bucket concurrently
+  would need conditional-PUT/ETag-based locking instead, which isn't
+  built yet.
 
 ## Publish to OpenMetadata
 

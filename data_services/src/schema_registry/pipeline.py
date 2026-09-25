@@ -11,8 +11,8 @@ from src.schema_registry.csv_schema_parser import parse_csv_columns
 from src.schema_registry.curate import curate_schema
 from src.schema_registry.ddl_parser import parse_postgres_columns
 from src.schema_registry.openmetadata_publish import get_client, publish_table
+from src.storage import storage_from_env
 from src.storage.base import ObjectStorage
-from src.storage.local import LocalObjectStorage
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -230,7 +230,7 @@ def run(
 
 
 if __name__ == "__main__":
-    _storage = LocalObjectStorage(os.environ.get("STORAGE_ROOT", "storage"))
+    _storage = storage_from_env()
 
     # DEPARTMENT_NAME is optional -- set it to register a new department in
     # the same command; omit it once the department is already registered.

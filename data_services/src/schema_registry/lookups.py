@@ -3,8 +3,8 @@ import re
 
 from filelock import FileLock
 
+from src.storage import storage_from_env
 from src.storage.base import ObjectStorage
-from src.storage.local import LocalObjectStorage
 
 DEPARTMENTS_PATH = "_lookups/departments.csv"
 DATASETS_PATH = "_lookups/datasets.csv"
@@ -136,7 +136,7 @@ def upsert_table(storage: ObjectStorage, table_id: str, dataset_id: str, table_n
 
 if __name__ == "__main__":
     register_department(
-        LocalObjectStorage(os.environ.get("STORAGE_ROOT", "storage")),
+        storage_from_env(),
         slugify(os.environ["DEPARTMENT_ID"]),
         os.environ["DEPARTMENT_NAME"],
     )

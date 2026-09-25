@@ -32,8 +32,8 @@ from metadata.ingestion.ometa.ometa_api import OpenMetadata
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from src.schema_registry import lookups
+from src.storage import storage_from_env
 from src.storage.base import ObjectStorage
-from src.storage.local import LocalObjectStorage
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -227,7 +227,7 @@ def publish_table(client: OpenMetadata, storage: ObjectStorage, table_id: str, s
 
 
 if __name__ == "__main__":
-    _storage = LocalObjectStorage(os.environ.get("STORAGE_ROOT", "storage"))
+    _storage = storage_from_env()
     _client = get_client(
         host_port=os.environ.get("OPENMETADATA_HOST_PORT", "http://localhost:8585/api"),
         jwt_token=os.environ["OPENMETADATA_JWT_TOKEN"],
