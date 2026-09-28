@@ -1,0 +1,56 @@
+column_name,data_type
+id,character varying
+created_at,timestamp without time zone
+created_by,character varying
+modified_at,timestamp without time zone
+modified_by,character varying
+status,integer
+applicable_subsidy,numeric
+booking_amount,numeric
+booking_date,timestamp without time zone
+bookings_id,character varying
+bookings_status,integer
+payment_mode,character varying
+transaction_id,character varying
+waiting_no,bigint
+crop_noncrop_name_id,character varying
+departmental_scheme_id,character varying
+online_booking_details_id,character varying
+online_booking_id,character varying
+variety_id,character varying
+payment_term,integer
+grant_id,character varying
+booking_person,integer
+sub_assistance_id,character varying
+payment_status,integer
+document_upload_validity,integer
+financial_year_id,character varying
+winning_date,timestamp without time zone
+cancel_date,timestamp without time zone
+sequence_no,integer
+booking_level,integer
+is_scheme_validation_available,boolean
+block_name,character varying
+district_name,character varying
+way_of_booking,integer
+block_id,character varying
+district_id,character varying
+village_id,character varying
+temp_column,integer
+repayment_date,timestamp without time zone
+repayment_amount,numeric
+repayment_mode,character varying
+repayment_transaction_id,character varying
+old_grant_id,character varying
+old_online_booking_details_id,character varying
+old_online_booking_id,character varying
+old83_grant_id,character varying
+old83_online_booking_id,character varying
+old83_online_booking_details_id,character varying
+revert83to11,character varying
+updatewating_status,integer
+old_wating_no,integer
+old_bookings_status,integer
+cancel_booking_flag,character varying
+promote_booking_flag,character varying
+isp_mandal_code,character varying

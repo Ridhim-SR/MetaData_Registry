@@ -1,0 +1,20 @@
+column_name,data_type
+id,character varying
+created_at,timestamp without time zone
+created_by,character varying
+modified_at,timestamp without time zone
+modified_by,character varying
+status,integer
+booking_amount,numeric
+booking_amount_required,boolean
+maxno_booking_allowed,integer
+repurchase_threshold,integer
+restrict_maxno_booking,boolean
+total_non_crop_distributed,integer
+upload_document,character varying
+crop_noncrop_name_id,character varying
+online_booking_id,character varying
+sub_assistance_id,character varying
+grant_id,character varying
+total_booking_allowed,integer
+document_upload_validity,integer
