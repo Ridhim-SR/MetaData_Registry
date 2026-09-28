@@ -70,8 +70,13 @@ variables (e.g. `DB_USER`, `DB_USER_PASSWORD`, `ELASTICSEARCH_HOST`,
 
 ## Data persistence
 
-- MySQL data is stored under `./docker-volume/db-data` (git-ignored).
+- MySQL data is stored in the named volume `mysql-data` (not a Windows
+  bind-mount — bind-mounting `./docker-volume/db-data` corrupts InnoDB on
+  case-insensitive filesystems, crash-looping MySQL and failing
+  `execute-migrate-all` on every run).
 - Elasticsearch data is stored in the named volume `es-data`.
+- Legacy `./docker-volume/db-data*` dirs (including `.bak-corrupt-*` /
+  `.corrupt-*`) are local-only backups, git-ignored, and no longer mounted.
 
 ## Stop / teardown
 

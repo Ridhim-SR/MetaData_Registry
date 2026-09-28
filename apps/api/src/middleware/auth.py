@@ -1,3 +1,4 @@
+import os
 from datetime import datetime, timedelta, timezone
 
 from fastapi import Depends, HTTPException, status
@@ -10,9 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database.database import get_session
 from database.models import User
 
-SECRET_KEY = "change-me-in-production"
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60
+SECRET_KEY = os.getenv("SECRET_KEY", "change-me-in-production")
+ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer()
@@ -23,7 +24,11 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain, hashed)
+    try:
+        return pwd_context.verify(plain, hashed)
+    except Exception:
+        # Unknown/legacy hash format -> treat as mismatch (401), not 500
+        return False
 
 
 def create_access_token(data: dict) -> str:
@@ -54,3 +59,44 @@ async def get_current_user(
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
     return user
+
+
+async def require_admin(user: User = Depends(get_current_user)) -> User:
+    """Only users with role == admin."""
+    if user.role.value != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+    return user
+
+
+def scoped_service(user: User, requested_service: str | None) -> str | None:
+    """Enforce department scoping: non-admin users are pinned to their department.
+
+    Convention: user.department maps 1:1 to an OM database service name
+    (e.g. department 'agriculture' -> service 'gov_agriculture', or the raw
+    service name if it already matches). Admins may query any service.
+    Returns the effective service filter to apply.
+    """
+    if user.role.value == "admin":
+        return requested_service
+    if not user.department:
+        # No department assigned: safest is to return the requested filter
+        # unchanged; deployment may choose to deny instead.
+        return requested_service
+    dept = user.department.strip()
+    candidates = {dept, f"gov_{dept}", dept.replace("gov_", "")}
+    if requested_service is None:
+        return None  # filtering happens post-fetch via allowed_services()
+    if requested_service in candidates:
+        return requested_service
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=f"Access denied for service '{requested_service}'",
+    )
+
+
+def allowed_services(user: User) -> set[str] | None:
+    """Set of OM service names a non-admin user may see, or None for admins / unscoped."""
+    if user.role.value == "admin" or not user.department:
+        return None
+    dept = user.department.strip()
+    return {dept, f"gov_{dept}", dept.replace("gov_", "")}

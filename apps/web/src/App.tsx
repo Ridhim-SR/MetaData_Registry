@@ -4,6 +4,7 @@ import { ProtectedRoute } from "./components/ProtectedRoute";
 import { DashboardPage } from "./pages/Dashboard";
 import { IngestionPage } from "./pages/Ingestion";
 import { LoginPage } from "./pages/Login";
+import { OAuthCallbackPage } from "./pages/OAuthCallback";
 import { RegisterPage } from "./pages/Register";
 import { UsersPage } from "./pages/Users";
 import { ExplorePage } from "./pages/Explore";
@@ -15,6 +16,7 @@ export default function App() {
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
+        <Route path="/auth/callback/:provider" element={<OAuthCallbackPage />} />
         <Route
           element={
             <ProtectedRoute>

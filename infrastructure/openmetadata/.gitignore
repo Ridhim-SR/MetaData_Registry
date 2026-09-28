@@ -1,3 +1,7 @@
 # Local Docker volume data (MySQL, Elasticsearch) - created at runtime
+# Note: MySQL now uses the named volume `mysql-data` (see docker-compose.yml).
+# Any docker-volume/db-data* dirs below are legacy / corrupt backups kept locally only.
 docker-volume/db-data/
-docker-volume/db-data.bak-corrupt-1.12.6/
+docker-volume/db-data*/
+*.sql
+*.err

@@ -16,20 +16,24 @@ export function UsersPage() {
         <div className="overflow-hidden rounded-lg border border-slate-200">
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-left text-slate-500">
-              <tr>
-                <th className="px-4 py-2 font-medium">ID</th>
-                <th className="px-4 py-2 font-medium">Username</th>
-                <th className="px-4 py-2 font-medium">Email</th>
-                <th className="px-4 py-2 font-medium">Role</th>
-                <th className="px-4 py-2 font-medium">Created</th>
-              </tr>
+                <tr>
+                  <th className="px-4 py-2 font-medium">ID</th>
+                  <th className="px-4 py-2 font-medium">Name</th>
+                  <th className="px-4 py-2 font-medium">Email</th>
+                  <th className="px-4 py-2 font-medium">Sign-in</th>
+                  <th className="px-4 py-2 font-medium">Role</th>
+                  <th className="px-4 py-2 font-medium">Created</th>
+                </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {users.map((u) => (
                 <tr key={u.id}>
                   <td className="px-4 py-2">{u.id}</td>
-                  <td className="px-4 py-2 font-medium">{u.username}</td>
+                  <td className="px-4 py-2 font-medium">
+                    {[u.first_name, u.last_name].filter(Boolean).join(" ") || u.username}
+                  </td>
                   <td className="px-4 py-2 text-slate-600">{u.email}</td>
+                  <td className="px-4 py-2 capitalize">{u.auth_provider}</td>
                   <td className="px-4 py-2 capitalize">{u.role}</td>
                   <td className="px-4 py-2 text-slate-500">{new Date(u.created_at).toLocaleString()}</td>
                 </tr>

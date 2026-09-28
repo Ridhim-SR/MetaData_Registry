@@ -1,6 +1,8 @@
 from anyio import to_thread
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from database.models import User
+from src.middleware.auth import get_current_user
 from src.openmetadata.schemas.dataset import DatasetCreate, DatasetResponse
 from src.openmetadata.service import store_dataset
 
@@ -8,7 +10,7 @@ router = APIRouter(prefix="/openmetadata/metadata", tags=["openmetadata"])
 
 
 @router.post("/tables", response_model=DatasetResponse, status_code=201)
-async def create_table_metadata(payload: DatasetCreate) -> DatasetResponse:
+async def create_table_metadata(payload: DatasetCreate, _user: User = Depends(get_current_user)) -> DatasetResponse:
     try:
         table = await to_thread.run_sync(store_dataset, payload)
     except ValueError as exc:
