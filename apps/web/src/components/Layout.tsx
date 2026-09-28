@@ -1,4 +1,5 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { displayName } from "../api/auth";
 import { useAuth } from "../contexts/AuthContext";
 
 const links = [
@@ -38,7 +39,7 @@ export function Layout() {
         </nav>
         <div className="border-t border-slate-200 p-4">
           <div className="mb-2 text-sm">
-            <div className="font-medium">{user?.username}</div>
+            <div className="font-medium">{displayName(user)}</div>
             <div className="text-xs text-slate-500">
               {user?.email} · {user?.role}
             </div>
