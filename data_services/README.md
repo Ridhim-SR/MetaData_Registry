@@ -46,6 +46,11 @@ python3 -m src.schema_registry.pipeline
 python3 -m pytest tests/
 ```
 
+**Config**: every CLI command above loads `.env` automatically (via
+`python-dotenv`) — copy `.env.example` to `.env` and fill in
+`OPENMETADATA_JWT_TOKEN` / Wasabi credentials there instead of exporting
+them each time. `.env` is gitignored; never commit it.
+
 ## Command reference
 
 | I want to... | Command |
@@ -101,13 +106,13 @@ implementations exist:
   S3-compatible provider, via `boto3` with `endpoint_url` pointed at that
   provider. `storage_from_env()` (`src/storage/__init__.py`) picks between
   the two for every CLI entry point: set `WASABI_BUCKET` to switch to
-  Wasabi, leave it unset to keep using `LocalObjectStorage`.
-  ```bash
-  WASABI_BUCKET=my-bucket \
-  WASABI_ENDPOINT_URL=https://s3.us-east-1.wasabisys.com \
-  WASABI_ACCESS_KEY_ID=<key> WASABI_SECRET_ACCESS_KEY=<secret> \
-  DEPARTMENT=pwd DATASET=vishwakarma TABLE_NAME=t1 SOURCE_FILE=samples/x.txt \
-  python3 -m src.schema_registry.pipeline
+  Wasabi, leave it unset to keep using `LocalObjectStorage`. Set these in
+  `.env` (see [Quickstart](#quickstart)) rather than exporting them:
+  ```
+  WASABI_BUCKET=my-bucket
+  WASABI_ENDPOINT_URL=https://s3.us-east-1.wasabisys.com
+  WASABI_ACCESS_KEY_ID=<key>
+  WASABI_SECRET_ACCESS_KEY=<secret>
   ```
   `WASABI_PREFIX` (optional) namespaces everything under a key prefix in
   the bucket; `WASABI_REGION` is optional too (Wasabi doesn't require a

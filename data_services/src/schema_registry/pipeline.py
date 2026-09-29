@@ -3,10 +3,11 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
+from dotenv import load_dotenv
 from filelock import FileLock
 from metadata.ingestion.ometa.ometa_api import OpenMetadata
 
-from src.schema_registry import lookups
+from src.schema_registry import lookups, paths
 from src.schema_registry.csv_schema_parser import parse_csv_columns
 from src.schema_registry.curate import curate_schema
 from src.schema_registry.ddl_parser import parse_postgres_columns
@@ -119,7 +120,8 @@ def run(
     the existing entry.
 
     Storage layout (each table gets its own folder, since tables in the
-    same dataset can have unrelated structures):
+    same dataset can have unrelated structures) -- defined once in
+    paths.py, not repeated as an f-string in every function that needs it:
         department/<department_id>/<dataset_slug>/<table_slug>/raw/schemas/<timestamp>.csv
         department/<department_id>/<dataset_slug>/<table_slug>/curated/schemas/<timestamp>.csv
 
@@ -183,7 +185,7 @@ def run(
     # double-triggered CLI call, two batch jobs targeting the same row)
     # could both read the same "previous" state and both proceed on stale
     # information.
-    lock_path = storage.lock_path(f"department/{department_id}/{dataset_slug}/{table_slug}/pipeline")
+    lock_path = storage.lock_path(paths.pipeline_lock_path(department_id, dataset_slug, table_slug))
     with FileLock(lock_path):
         previous_curated = _previous_curated_columns(storage, department_id, dataset_slug, table_slug)
 
@@ -197,7 +199,7 @@ def run(
                     f"file is likely a partial/incremental submission, not the full current schema."
                 )
 
-        raw_path = f"department/{department_id}/{dataset_slug}/{table_slug}/raw/schemas/{ts}.csv"
+        raw_path = paths.raw_schema_path(department_id, dataset_slug, table_slug, ts)
         storage.write_csv(raw_path, raw_columns)
         logger.info(f"Stored raw schema -> {raw_path}")
 
@@ -208,7 +210,7 @@ def run(
         curated_columns = curate_schema(raw_columns, business_metadata)
         warning_count = sum(1 for c in curated_columns if c["validation_warning"])
 
-        curated_path = f"department/{department_id}/{dataset_slug}/{table_slug}/curated/schemas/{ts}.csv"
+        curated_path = paths.curated_schema_path(department_id, dataset_slug, table_slug, ts)
         storage.write_csv(curated_path, curated_columns)
         logger.info(
             f"Stored curated schema -> {curated_path} "
@@ -230,6 +232,7 @@ def run(
 
 
 if __name__ == "__main__":
+    load_dotenv()
     _storage = storage_from_env()
 
     # DEPARTMENT_NAME is optional -- set it to register a new department in

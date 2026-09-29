@@ -1,8 +1,10 @@
 import os
 import re
 
+from dotenv import load_dotenv
 from filelock import FileLock
 
+from src.schema_registry import paths
 from src.storage import storage_from_env
 from src.storage.base import ObjectStorage
 
@@ -118,7 +120,7 @@ def latest_curated_snapshot_path(
     chronological order -- shared by openmetadata_publish.py (publish the
     latest) and pipeline.py (diff a new run against the latest)."""
 
-    prefix = f"department/{department_id}/{dataset_slug}/{table_slug}/curated/schemas/"
+    prefix = paths.curated_schemas_prefix(department_id, dataset_slug, table_slug)
     files = storage.list(prefix)
     if not files:
         raise FileNotFoundError(f"No curated schema under {prefix} -- run the pipeline for this table first.")
@@ -135,6 +137,7 @@ def upsert_table(storage: ObjectStorage, table_id: str, dataset_id: str, table_n
 
 
 if __name__ == "__main__":
+    load_dotenv()
     register_department(
         storage_from_env(),
         slugify(os.environ["DEPARTMENT_ID"]),

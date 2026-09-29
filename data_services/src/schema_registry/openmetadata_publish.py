@@ -1,6 +1,7 @@
 import os
 
 import requests
+from dotenv import load_dotenv
 from metadata.generated.schema.api.data.createDatabase import CreateDatabaseRequest
 from metadata.generated.schema.api.data.createDatabaseSchema import (
     CreateDatabaseSchemaRequest,
@@ -227,6 +228,7 @@ def publish_table(client: OpenMetadata, storage: ObjectStorage, table_id: str, s
 
 
 if __name__ == "__main__":
+    load_dotenv()
     _storage = storage_from_env()
     _client = get_client(
         host_port=os.environ.get("OPENMETADATA_HOST_PORT", "http://localhost:8585/api"),
