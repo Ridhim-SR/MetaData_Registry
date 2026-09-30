@@ -1,6 +1,8 @@
 from anyio import to_thread
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from database.database import get_session as db_get_session
 from database.models import User
 from src.middleware.auth import get_current_user
 from src.openmetadata.schemas.dataset import DatasetCreate, DatasetResponse
@@ -10,7 +12,11 @@ router = APIRouter(prefix="/openmetadata/metadata", tags=["openmetadata"])
 
 
 @router.post("/tables", response_model=DatasetResponse, status_code=201)
-async def create_table_metadata(payload: DatasetCreate, _user: User = Depends(get_current_user)) -> DatasetResponse:
+async def create_table_metadata(
+    payload: DatasetCreate,
+    _user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(db_get_session),
+) -> DatasetResponse:
     try:
         table = await to_thread.run_sync(store_dataset, payload)
     except ValueError as exc:
@@ -27,6 +33,15 @@ async def create_table_metadata(payload: DatasetCreate, _user: User = Depends(ge
                 detail="OpenMetadata rejected the credentials. Check OPENMETADATA_JWT_TOKEN.",
             )
         raise HTTPException(status_code=502, detail=message[:500])
+    # Record access metadata (FastAPI is the policy enforcement point).
+    from src.openmetadata.routers.registry import upsert_table_visibility
+
+    await upsert_table_visibility(
+        session,
+        fqn=table["fully_qualified_name"],
+        visibility=payload.visibility,
+        department=payload.department,
+    )
     return DatasetResponse(
         success=True,
         message="Metadata stored successfully",

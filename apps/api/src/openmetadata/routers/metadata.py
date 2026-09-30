@@ -1,11 +1,35 @@
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from database.models import User
-from src.middleware.auth import allowed_services, get_current_user, scoped_service
+from database.database import get_session as db_get_session
+from database.models import DatasetVisibility, User
+from src.middleware.auth import allowed_services, get_current_user, scoped_service, user_context
+from src.openmetadata import visibility as vis
 from src.openmetadata.client import OpenMetadataClient
 
 router = APIRouter(prefix="/openmetadata/metadata", tags=["openmetadata"])
+
+
+async def _visibility_map(session: AsyncSession, fqns: list[str]) -> dict[str, dict]:
+    if not fqns:
+        return {}
+    rows = (
+        await session.execute(select(DatasetVisibility).where(DatasetVisibility.fqn.in_(fqns)))
+    ).scalars().all()
+    return {r.fqn: {"visibility": r.visibility.value, "department": r.department} for r in rows}
+
+
+async def _visible_full(session: AsyncSession, tables: list[dict], user: User) -> list[dict]:
+    """Keep tables the caller may open; annotate with access_level/department.
+
+    Public tables bypass department scoping; everything else follows the
+    existing service policy plus the visibility sidecar.
+    """
+    vmap = await _visibility_map(session, [t.get("fullyQualifiedName") or "" for t in tables])
+    full, _ = vis.visible_tables(tables, vmap, user_context(user))
+    return full
 
 
 def _filter_allowed(items: list[dict], allowed: set[str] | None) -> list[dict]:
@@ -23,25 +47,20 @@ async def list_tables(
     limit: int = Query(default=200, ge=1, le=1000),
     after: str | None = Query(default=None, description="Paging cursor from previous response"),
     user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(db_get_session),
 ) -> list[dict]:
     """Legacy list shape (array) for backward compat with current web UI."""
     effective_service = scoped_service(user, service)
-    allowed = allowed_services(user)
     async with OpenMetadataClient() as client:
-        return await client.list_tables(
+        raw = await client.list_tables(
             search=search,
             service=effective_service,
             database=database,
             schema=schema,
             limit=limit,
             after=after,
-        ) if allowed is None else [
-            t for t in await client.list_tables(
-                search=search, service=effective_service, database=database,
-                schema=schema, limit=limit, after=after,
-            )
-            if (t.get("fullyQualifiedName") or "").split(".")[0] in allowed
-        ]
+        )
+    return await _visible_full(session, raw, user)
 
 
 @router.get("/tables/paged")
@@ -53,15 +72,18 @@ async def list_tables_paged(
     limit: int = Query(default=50, ge=1, le=1000),
     after: str | None = None,
     user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(db_get_session),
 ) -> dict:
     """Paged envelope {data, paging{total, after}} for scalable Explore UI."""
     effective_service = scoped_service(user, service)
     async with OpenMetadataClient() as client:
-        return await client.list_tables_paged(
+        page = await client.list_tables_paged(
             search=search, service=effective_service, database=database,
             schema=schema, limit=limit, after=after,
             allowed_services=allowed_services(user),
         )
+    page["data"] = await _visible_full(session, page["data"], user)
+    return page
 
 
 @router.get("/tables/by-fqn")
@@ -77,7 +99,11 @@ async def get_table_by_fqn(fqn: str, user: User = Depends(get_current_user)) -> 
 
 
 @router.get("/tables/{table_id}")
-async def get_table(table_id: str, user: User = Depends(get_current_user)) -> dict:
+async def get_table(
+    table_id: str,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(db_get_session),
+) -> dict:
     async with OpenMetadataClient() as client:
         try:
             table = await client.get_table(table_id)
@@ -85,10 +111,12 @@ async def get_table(table_id: str, user: User = Depends(get_current_user)) -> di
             if exc.response.status_code == 404:
                 raise HTTPException(status_code=404, detail="Table not found")
             raise
-        allowed = allowed_services(user)
-        if allowed is not None and (table.get("fullyQualifiedName") or "").split(".")[0] not in allowed:
+        fqn = table.get("fullyQualifiedName") or ""
+        vmap = await _visibility_map(session, [fqn])
+        full, _ = vis.visible_tables([table], vmap, user_context(user))
+        if not full:
             raise HTTPException(status_code=403, detail="Access denied for this table")
-        return table
+        return full[0]
 
 
 @router.get("/tables/{table_id}/lineage")

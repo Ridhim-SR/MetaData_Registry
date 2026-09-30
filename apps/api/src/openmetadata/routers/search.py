@@ -1,7 +1,11 @@
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from database.models import User
-from src.middleware.auth import allowed_services, get_current_user, scoped_service
+from database.database import get_session as db_get_session
+from database.models import DatasetVisibility, User
+from src.middleware.auth import allowed_services, get_current_user, scoped_service, user_context
+from src.openmetadata import visibility as vis
 from src.openmetadata.client import OpenMetadataClient
 from src.openmetadata.search.pipeline import SearchPipeline
 
@@ -15,16 +19,18 @@ async def search(
     page: int = Query(default=1, ge=1),
     size: int = Query(default=20, ge=1, le=100),
     user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(db_get_session),
 ) -> dict:
     async with OpenMetadataClient() as client:
         try:
-            return await client.search_tables(
+            result = await client.search_tables(
                 query=q,
                 service=scoped_service(user, service),
                 limit=size,
                 page=page,
                 allowed_services=allowed_services(user),
             )
+            candidates, total, fallback = result.get("data", []), result.get("total"), False
         except Exception:
             # Fallback to metadata list filter when search index is unavailable
             page_data = await client.list_tables_paged(
@@ -33,7 +39,17 @@ async def search(
                 limit=size,
                 allowed_services=allowed_services(user),
             )
-            return {"data": page_data["data"], "total": page_data["paging"].get("total"), "page": page, "fallback": True}
+            candidates, total, fallback = page_data["data"], page_data["paging"].get("total"), True
+        rows = (
+            await session.execute(
+                select(DatasetVisibility).where(
+                    DatasetVisibility.fqn.in_([t.get("fullyQualifiedName") or "" for t in candidates])
+                )
+            )
+        ).scalars().all() if candidates else []
+        vmap = {r.fqn: {"visibility": r.visibility.value, "department": r.department} for r in rows}
+        full, teasers = vis.visible_tables(candidates, vmap, user_context(user))
+        return {"data": full, "teasers": teasers, "total": total, "page": page, "fallback": fallback}
 
 
 @router.post("/reindex")

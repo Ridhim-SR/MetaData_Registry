@@ -3,7 +3,8 @@ import { displayName } from "../api/auth";
 import { useAuth } from "../contexts/AuthContext";
 
 const links = [
-  { to: "/", label: "Dashboard" },
+  { to: "/", label: "Home" },
+  { to: "/dashboard", label: "Dashboard" },
   { to: "/explore", label: "Explore" },
   { to: "/ingestion", label: "Ingestion" },
   { to: "/users", label: "Users" },
@@ -52,8 +53,11 @@ export function Layout() {
           </button>
         </div>
       </aside>
-      <main className="flex-1 overflow-auto p-8">
-        <Outlet />
+      <main className="flex-1 overflow-auto p-4 sm:p-6 lg:p-8">
+        {/* Constrained container: keeps admin pages compact & centered on wide monitors */}
+        <div className="mx-auto w-full max-w-7xl">
+          <Outlet />
+        </div>
       </main>
     </div>
   );

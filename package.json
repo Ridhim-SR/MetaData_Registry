@@ -5,11 +5,19 @@
     "apps/*"
   ],
    "scripts": {
-    "dev": "npm run dev:openmetadata && npm run dev:apps",
-    "dev:openmetadata": "docker compose -f infrastructure/openmetadata/docker-compose.yml up -d --wait mysql elasticsearch && docker compose -f infrastructure/openmetadata/docker-compose.yml up --exit-code-from execute-migrate-all execute-migrate-all && docker compose -f infrastructure/openmetadata/docker-compose.yml up -d --wait",
-    "dev:apps": "turbo dev",
+     "dev": "npm run dev:openmetadata && npm run dev:apps",
+     "dev:openmetadata": "docker compose -f infrastructure/openmetadata/docker-compose.yml up -d --wait mysql elasticsearch && docker compose -f infrastructure/openmetadata/docker-compose.yml up --exit-code-from execute-migrate-all execute-migrate-all && docker compose -f infrastructure/openmetadata/docker-compose.yml up -d --wait",
+     "dev:apps": "turbo dev",
+     "dev:api": "turbo dev --filter=api",
+     "dev:web": "turbo dev --filter=web",
     "build": "turbo build",
-    "lint": "turbo lint"
+    "lint": "turbo lint",
+    "pm2:start": "pm2 start ecosystem.config.js",
+    "pm2:stop": "pm2 stop ecosystem.config.js",
+    "pm2:restart": "pm2 restart ecosystem.config.js",
+    "pm2:delete": "pm2 delete ecosystem.config.js",
+    "pm2:logs": "pm2 logs",
+    "pm2:save": "pm2 save"
   },
   "packageManager": "npm@11.16.0",
   "devDependencies": {

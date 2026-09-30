@@ -1,134 +1,203 @@
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
-import { listMetadataTables, type MetadataTable } from "../api/openmetadata";
-import { ApiError } from "../api/client";
-
-function fqnPath(table: MetadataTable): string {
-  return (table.fullyQualifiedName ?? "").split(".").slice(0, -1).join(" / ");
-}
+import { Link, useSearchParams } from "react-router-dom";
+import { listDatasets, searchRegistry } from "../api/registry";
+import { AccessBadge } from "../components/registry/AccessBadge";
+import { DatasetCard, RestrictedTeaser } from "../components/registry/DatasetCard";
+import { EmptyBlock, ErrorBlock, Skeleton } from "../components/registry/StateBlocks";
+import { useAuth } from "../contexts/AuthContext";
 
 export function ExplorePage() {
-  const [search, setSearch] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [service, setService] = useState("");
-  const [database, setDatabase] = useState("");
-  const [schema, setSchema] = useState("");
+  const [params, setParams] = useSearchParams();
+  const q = params.get("q") ?? "";
+  const department = params.get("department") ?? "";
+  const visibility = params.get("visibility") ?? "";
+  const [search, setSearch] = useState(q);
+  const { isAuthenticated } = useAuth();
 
-  const allTables = useQuery({
-    queryKey: ["metadata-facets"],
-    queryFn: () => listMetadataTables(),
+  useEffect(() => {
+    setSearch(q);
+  }, [q]);
+
+  const trimmed = q.trim();
+  const isSearch = trimmed.length > 0;
+
+  const searchQuery = useQuery({
+    queryKey: ["registry-search", trimmed, department],
+    queryFn: () => searchRegistry({ q: trimmed, department: department || undefined }),
+    enabled: isSearch,
+    retry: false,
   });
 
-  const facets = useMemo(() => {
-    const tables = allTables.data ?? [];
-    const services = new Set<string>();
-    const databases = new Set<string>();
-    const schemas = new Set<string>();
-    for (const t of tables) {
-      const parts = (t.fullyQualifiedName ?? "").split(".");
-      if (parts[0]) services.add(parts[0]);
-      if (parts[1]) databases.add(parts[1]);
-      if (parts[2]) schemas.add(parts[2]);
-    }
-    return {
-      services: [...services].sort(),
-      databases: [...databases].sort(),
-      schemas: [...schemas].sort(),
-    };
-  }, [allTables.data]);
-
-  const tablesQuery = useQuery({
-    queryKey: ["metadata-tables", debouncedSearch, service, database, schema],
-    queryFn: () =>
-      listMetadataTables({
-        search: debouncedSearch || undefined,
-        service: service || undefined,
-        database: database || undefined,
-        schema: schema || undefined,
-      }),
+  const catalogQuery = useQuery({
+    queryKey: ["registry-catalog", department],
+    queryFn: () => listDatasets({ department: department || undefined }),
+    enabled: !isSearch,
+    retry: false,
   });
 
-  const error = tablesQuery.error instanceof ApiError ? tablesQuery.error.detail : null;
+  const onSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const next = new URLSearchParams(params);
+    if (search.trim()) next.set("q", search.trim());
+    else next.delete("q");
+    setParams(next);
+  };
+
+  const clearFilters = () => setParams(new URLSearchParams());
+
+  const error: Error | null = searchQuery.error ?? catalogQuery.error;
+  const isPending = isSearch ? searchQuery.isPending : catalogQuery.isPending;
+
+  const cards = isSearch ? [] : (catalogQuery.data?.items ?? []);
+  const results = isSearch ? (searchQuery.data?.data ?? []) : [];
+  const teasers = isSearch ? (searchQuery.data?.teasers ?? []) : (catalogQuery.data?.teasers ?? []);
+  const visibleCards =
+    !isSearch && visibility === "public" ? cards.filter((c) => c.access_level === "public") : cards;
 
   return (
-    <div>
-      <h1 className="mb-6 text-2xl font-semibold">Explore datasets</h1>
+    <div className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+      <h1 className="text-2xl font-bold text-slate-900">Catalog</h1>
+      <p className="mt-1 text-sm text-slate-600">
+        Search across metadata. Access levels are applied automatically
+        {isAuthenticated ? " for your account" : " for public browsing"}.
+      </p>
 
-      <div className="mb-4 flex flex-wrap gap-3">
+      <form onSubmit={onSubmit} role="search" className="mt-4 flex flex-col gap-2 sm:flex-row">
+        <label htmlFor="catalog-search" className="sr-only">
+          Search datasets, tables, keywords
+        </label>
         <input
+          id="catalog-search"
+          type="search"
           value={search}
-          onChange={(e) => {
-            setSearch(e.target.value);
-            window.setTimeout(() => setDebouncedSearch(e.target.value), 300);
-          }}
-          placeholder="Search tables, columns, descriptions…"
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search datasets, tables, keywords..."
           className="min-w-64 flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-slate-900 focus:outline-none"
         />
-        <select
-          value={service}
-          onChange={(e) => setService(e.target.value)}
-          className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+        <button
+          type="submit"
+          className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700"
         >
-          <option value="">All services</option>
-          {facets.services.map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </select>
-        <select
-          value={database}
-          onChange={(e) => setDatabase(e.target.value)}
-          className="rounded-md border border-slate-300 px-3 py-2 text-sm"
-        >
-          <option value="">All databases</option>
-          {facets.databases.map((d) => (
-            <option key={d} value={d}>
-              {d}
-            </option>
-          ))}
-        </select>
-        <select
-          value={schema}
-          onChange={(e) => setSchema(e.target.value)}
-          className="rounded-md border border-slate-300 px-3 py-2 text-sm"
-        >
-          <option value="">All schemas</option>
-          {facets.schemas.map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </select>
-      </div>
+          Search
+        </button>
+        {(q || department || visibility) && (
+          <button
+            type="button"
+            onClick={clearFilters}
+            className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+          >
+            Clear
+          </button>
+        )}
+      </form>
 
-      {error && <div className="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
-
-      {tablesQuery.isPending && <p className="text-slate-500">Loading…</p>}
-
-      {tablesQuery.data && tablesQuery.data.length === 0 && (
-        <p className="text-slate-500">No datasets match. Try a different search or clear filters.</p>
+      {(department || visibility) && (
+        <p className="mt-3 text-sm text-slate-600">
+          Filtered by {department && <span className="font-medium">department: {department}</span>}
+          {department && visibility && " · "}
+          {visibility && <span className="font-medium">visibility: {visibility}</span>}
+        </p>
       )}
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        {(tablesQuery.data ?? []).map((table) => (
-          <Link
-            key={table.id}
-            to={`/explore/${table.id}`}
-            className="rounded-lg border border-slate-200 p-4 transition-shadow hover:shadow-md"
-          >
-            <div className="text-sm text-slate-500">{fqnPath(table)}</div>
-            <div className="mt-1 text-lg font-semibold text-slate-900">{table.name}</div>
-            <div className="mt-1 line-clamp-2 text-sm text-slate-600">
-              {table.description || "No description"}
+      <div className="mt-6">
+        {isPending && (
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2" role="status" aria-label="Loading results">
+            {[0, 1, 2, 3].map((i) => (
+              <Skeleton key={i} className="h-36" />
+            ))}
+          </div>
+        )}
+
+        {error && (
+          <ErrorBlock
+            message="Unable to load catalog information. Please try again."
+            onRetry={() => (isSearch ? searchQuery.refetch() : catalogQuery.refetch())}
+          />
+        )}
+
+        {!isPending && !error && isSearch && results.length === 0 && teasers.length === 0 && (
+          <EmptyBlock
+            title={`No results for "${trimmed}".`}
+            body="Try different keywords, or browse departments and public data instead."
+          />
+        )}
+
+        {!isPending && !error && !isSearch && visibleCards.length === 0 && teasers.length === 0 && (
+          <EmptyBlock
+            title="No datasets match these filters."
+            body="Try clearing the filters or browse public data."
+            action={
+              <button
+                onClick={clearFilters}
+                className="inline-flex rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700"
+              >
+                Clear filters
+              </button>
+            }
+          />
+        )}
+
+        {!isPending && !error && isSearch && (
+          <div>
+            <p className="mb-3 text-sm text-slate-600" role="status">
+              {searchQuery.data?.total ?? 0} result{(searchQuery.data?.total ?? 0) === 1 ? "" : "s"} for “{trimmed}”
+            </p>
+            <ul className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              {results.map((t) => (
+                <li
+                  key={t.id}
+                  className="rounded-lg border border-slate-200 bg-white p-4 transition-shadow hover:shadow-md"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <Link to={`/explore/${t.id}`} className="text-base font-semibold text-slate-900 hover:underline">
+                      {t.name}
+                    </Link>
+                    <AccessBadge level={t.access_level} />
+                  </div>
+                  <p className="mt-1 text-xs text-slate-500">{t.fullyQualifiedName}</p>
+                  <p className="mt-1 line-clamp-2 text-sm text-slate-600">{t.description || "No description"}</p>
+                  <p className="mt-2 text-xs text-slate-500">{t.columns?.length ?? 0} columns</p>
+                </li>
+              ))}
+              {teasers.map((t) => (
+                <li key={t.id}>
+                  <RestrictedTeaser table={t} />
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {!isPending && !error && !isSearch && (
+          <div>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {visibleCards.map((card) => (
+                <DatasetCard key={card.dataset} card={card} />
+              ))}
             </div>
-            <div className="mt-3 flex gap-4 text-xs text-slate-500">
-              <span>{table.columns?.length ?? 0} columns</span>
-              {table.service?.name && <span>{table.service.name}</span>}
-            </div>
-          </Link>
-        ))}
+            {teasers.length > 0 && (
+              <div className="mt-8">
+                <h2 className="text-lg font-semibold text-slate-900">Restricted</h2>
+                <p className="mt-1 text-sm text-slate-600">These require authorization to view.</p>
+                <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {teasers.map((t) => (
+                    <RestrictedTeaser key={t.id} table={t} />
+                  ))}
+                </div>
+              </div>
+            )}
+            {!isAuthenticated && (
+              <p className="mt-4 text-sm text-slate-600">
+                Some results may be hidden.{" "}
+                <Link to="/login" className="font-medium underline">
+                  Sign in
+                </Link>{" "}
+                to see metadata available to your department.
+              </p>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

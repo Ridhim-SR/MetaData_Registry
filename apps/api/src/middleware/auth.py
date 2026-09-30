@@ -17,6 +17,7 @@ ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60")
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer()
+optional_security = HTTPBearer(auto_error=False)
 
 
 def hash_password(password: str) -> str:
@@ -66,6 +67,36 @@ async def require_admin(user: User = Depends(get_current_user)) -> User:
     if user.role.value != "admin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
     return user
+
+
+async def get_optional_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(optional_security),
+    session: AsyncSession = Depends(get_session),
+) -> User | None:
+    """Authenticated user when a valid Bearer token is present, else None.
+
+    Used by public registry endpoints so anonymous users see public metadata
+    while logged-in users additionally see their department's metadata.
+    Invalid tokens are treated as anonymous (not 401) on public routes.
+    """
+    if credentials is None:
+        return None
+    payload = decode_access_token(credentials.credentials)
+    if payload is None:
+        return None
+    try:
+        user_id = int(payload.get("sub", 0))
+    except (TypeError, ValueError):
+        return None
+    result = await session.execute(select(User).where(User.id == user_id))
+    return result.scalar_one_or_none()
+
+
+def user_context(user: User | None) -> dict | None:
+    """Minimal policy context for visibility helpers (never trust the client)."""
+    if user is None:
+        return None
+    return {"role": user.role.value, "department": user.department}
 
 
 def scoped_service(user: User, requested_service: str | None) -> str | None:
