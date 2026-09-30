@@ -1,4 +1,4 @@
-from src.schema_registry.ddl_parser import parse_postgres_columns
+from src.schema_registry.parsers.ddl_parser import parse_postgres_columns
 
 
 def test_not_null_with_no_default():

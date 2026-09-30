@@ -8,10 +8,10 @@ from filelock import FileLock
 from metadata.ingestion.ometa.ometa_api import OpenMetadata
 
 from src.schema_registry import lookups, paths
-from src.schema_registry.csv_schema_parser import parse_csv_columns
 from src.schema_registry.curate import curate_schema
-from src.schema_registry.ddl_parser import parse_postgres_columns
 from src.schema_registry.openmetadata_publish import get_client, publish_table
+from src.schema_registry.parsers.csv_schema_parser import parse_csv_columns
+from src.schema_registry.parsers.ddl_parser import parse_postgres_columns
 from src.storage import storage_from_env
 from src.storage.base import ObjectStorage
 from src.utils.logger import get_logger

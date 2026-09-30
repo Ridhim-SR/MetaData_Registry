@@ -166,7 +166,7 @@ Covers parsers, curation/tagging, lookup dedup, concurrency, and the full pipeli
 
 ## Known limitations
 
-- `source_format="csv"` won't guess semantically-inverted columns (e.g. `Required` vs `Nullable`) — add a mapping in `csv_schema_parser.py` if needed.
+- `source_format="csv"` won't guess semantically-inverted columns (e.g. `Required` vs `Nullable`) — add a mapping in `parsers/csv_schema_parser.py` if needed.
 - No mode is tracked explicitly (Initial Load/Append/Update/Full Refresh) — `run()` infers safety from a diff against the previous snapshot (see [The pipeline](#the-pipeline)) rather than the caller declaring which one this is, and nothing persists *which* decision was made for audit purposes.
 - `publish_table()` ignores the curated `active` flag — a column marked inactive still gets published like any other.
 - Renaming a column looks like a delete + an add to the diff — it requires `allow_column_removal=True`, and the old name's business metadata won't carry over to the new name (matching is by exact column name only).
