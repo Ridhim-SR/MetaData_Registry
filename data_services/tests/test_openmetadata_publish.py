@@ -5,6 +5,7 @@ import requests
 from metadata.ingestion.ometa.client import APIError
 
 from src.schema_registry import lookups
+from src.schema_registry.curate import CLASSIFICATION_LEVELS
 from src.schema_registry.openmetadata_publish import _create_or_update, _get_by_name, _unwrap, publish_table
 from src.schema_registry.pipeline import run
 from src.storage.local import LocalObjectStorage
@@ -76,12 +77,30 @@ def test_publish_table_builds_full_entity_chain(tmp_path):
     assert result["fully_qualified_name"] == "pwd.vishwakarma.public.TBD_confirm_with_pwd"
 
     created = [call.args[0] for call in client.create_or_update.call_args_list]
-    assert _unwrap(created[0].name) == "pwd"  # service defaults to department_id
-    assert _unwrap(created[1].name) == "vishwakarma"  # database == dataset slug
-    assert _unwrap(created[2].name) == "public"  # schema_name from tables.csv
-    table_request = created[3]
+
+    # the MDSF classification + its 7 level tags are ensured first so the
+    # column tags below have real tagFQNs to resolve against
+    classification_requests = [r for r in created if type(r).__name__ == "CreateClassificationRequest"]
+    assert [_unwrap(r.name) for r in classification_requests] == ["MDSF"]
+    tag_requests = [r for r in created if type(r).__name__ == "CreateTagRequest"]
+    assert [_unwrap(r.name) for r in tag_requests] == list(CLASSIFICATION_LEVELS)
+
+    service_request = next(r for r in created if type(r).__name__ == "CreateDatabaseServiceRequest")
+    database_request = next(r for r in created if type(r).__name__ == "CreateDatabaseRequest")
+    schema_request = next(r for r in created if type(r).__name__ == "CreateDatabaseSchemaRequest")
+    table_request = next(r for r in created if type(r).__name__ == "CreateTableRequest")
+
+    assert _unwrap(service_request.name) == "pwd"  # service defaults to department_id
+    assert _unwrap(database_request.name) == "vishwakarma"  # database == dataset slug
+    assert _unwrap(schema_request.name) == "public"  # schema_name from tables.csv
     assert _unwrap(table_request.name) == "TBD_confirm_with_pwd"
     assert [_unwrap(c.name) for c in table_request.columns] == ["sno", "firm_name", "total_cost"]
+
+    # each column carries its curated classification as an MDSF tag
+    assert [
+        [str(_unwrap(t.tagFQN)) for t in (c.tags or [])]
+        for c in table_request.columns
+    ] == [["MDSF.Internal"], ["MDSF.PII"], ["MDSF.Financial"]]
 
 
 def test_publish_table_reuses_existing_entities_instead_of_recreating(tmp_path):
@@ -96,6 +115,32 @@ def test_publish_table_reuses_existing_entities_instead_of_recreating(tmp_path):
     # every level found an existing entity, so create_or_update was only
     # called once -- for the table itself, which is always created/updated
     assert client.create_or_update.call_count == 1
+
+
+def test_ensure_classification_is_idempotent(tmp_path):
+    """Re-publishing must not recreate the MDSF classification/tags --
+    an existing classification and its tags are left alone."""
+
+    storage = _ingested_storage(tmp_path)
+    client = _fake_client()
+
+    publish_table(client, storage, "pwd.vishwakarma.tbd_confirm_with_pwd")
+    first_count = client.create_or_update.call_count
+
+    # second publish: classification + tags all resolve as existing
+    client.reset_mock()
+    client.get_by_name.side_effect = None
+    client.get_by_name.return_value = MagicMock(fullyQualifiedName="MDSF", name="MDSF")
+
+    publish_table(client, storage, "pwd.vishwakarma.tbd_confirm_with_pwd")
+
+    # only the table (and service/database/schema chain re-checks) -- no
+    # classification/tag re-creation
+    created_types = [type(call.args[0]).__name__ for call in client.create_or_update.call_args_list]
+    assert "CreateClassificationRequest" not in created_types
+    assert "CreateTagRequest" not in created_types
+    assert created_types == ["CreateTableRequest"]
+    assert first_count > 1  # first run did create them
 
 
 def test_publish_table_unknown_table_id_raises(tmp_path):

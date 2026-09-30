@@ -34,7 +34,7 @@ def _timestamp() -> str:
 def _business_metadata_from_rows(rows: list[dict]) -> dict[str, dict]:
     """Shape a list of CSV rows (a Field Dictionary export, or a previous
     curated snapshot) into the {name: {business_description, tag,
-    glossary_term, active}} form curate_schema() expects."""
+    glossary_term, active, classification}} form curate_schema() expects."""
 
     return {
         row["name"]: {
@@ -42,6 +42,7 @@ def _business_metadata_from_rows(rows: list[dict]) -> dict[str, dict]:
             "tag": row.get("tag", ""),
             "glossary_term": row.get("glossary_term", ""),
             "active": row.get("active", "").strip().lower() in _TRUE_VALUES,
+            "classification": row.get("classification", "").strip(),
         }
         for row in rows
     }

@@ -244,3 +244,23 @@ config/local/
 
 # Claude Code project instructions
 CLAUDE.md
+
+# ============================================================
+# Local scratch / accidental artifacts (not part of the repo)
+# ============================================================
+
+# Stray virtualenv created at repo root
+/Lib/
+/Scripts/
+
+# Scratch files
+/test.py
+/openmetadata_ingest.py
+/sda_baseline_quality_test_suite.yaml
+/sda_dcat_ndsap_schema.json
+
+# Separate ingestion pipeline (not wired into schema_registry)
+/data_services/src/ingestion/
+/data_services/data/
+/data_services/src/utils/env.py
+/data_services/configs/sample.yaml

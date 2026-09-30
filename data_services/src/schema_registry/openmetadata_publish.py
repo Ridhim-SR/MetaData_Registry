@@ -1,6 +1,10 @@
 import os
 
 import requests
+from metadata.generated.schema.api.classification.createClassification import (
+    CreateClassificationRequest,
+)
+from metadata.generated.schema.api.classification.createTag import CreateTagRequest
 from metadata.generated.schema.api.data.createDatabase import CreateDatabaseRequest
 from metadata.generated.schema.api.data.createDatabaseSchema import (
     CreateDatabaseSchemaRequest,
@@ -9,9 +13,12 @@ from metadata.generated.schema.api.data.createTable import CreateTableRequest
 from metadata.generated.schema.api.services.createDatabaseService import (
     CreateDatabaseServiceRequest,
 )
+from metadata.generated.schema.entity.classification.classification import Classification
+from metadata.generated.schema.entity.classification.tag import Tag
 from metadata.generated.schema.entity.data.database import Database
 from metadata.generated.schema.entity.data.databaseSchema import DatabaseSchema
 from metadata.generated.schema.entity.data.table import Column, DataType, TableType
+from metadata.generated.schema.type.tagLabel import LabelType, State, TagLabel, TagSource
 from metadata.generated.schema.entity.services.connections.database.customDatabaseConnection import (
     CustomDatabaseConnection,
 )
@@ -32,11 +39,31 @@ from metadata.ingestion.ometa.ometa_api import OpenMetadata
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from src.schema_registry import lookups
+from src.schema_registry.curate import CLASSIFICATION_LEVELS
 from src.storage.base import ObjectStorage
 from src.storage.local import LocalObjectStorage
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+# The tag classification holding the MDSF per-field levels (Public,
+# Internal, Confidential, Restricted, PII, Financial, Health). Every
+# curated column's `classification` value becomes a tag under this
+# category, so the levels show up as column tags in OpenMetadata's UI.
+CLASSIFICATION_NAME = "MDSF"
+CLASSIFICATION_DESCRIPTION = (
+    "MDSF per-field data classification levels, ordered from least to "
+    "most restrictive. Applied per column by the schema-registry pipeline."
+)
+_TAG_DESCRIPTIONS = {
+    "Public": "No risk of disclosure or re-identification.",
+    "Internal": "Internal use only; low sensitivity.",
+    "Confidential": "Sensitive; restricted access.",
+    "Restricted": "Highly sensitive; need-to-know basis.",
+    "PII": "Personally identifiable information.",
+    "Financial": "Financial data requiring protection.",
+    "Health": "Health or medical data.",
+}
 
 
 def _is_transient_error(exc: BaseException) -> bool:
@@ -94,6 +121,7 @@ _TYPE_MAP: dict[str, DataType] = {
     "json": DataType.JSON,
     "jsonb": DataType.JSON,
     "uuid": DataType.UUID,
+    "bytea": DataType.BYTEA,
 }
 # OM server rejects these types without an explicit dataLength.
 _LENGTH_REQUIRED_TYPES = {DataType.CHAR, DataType.VARCHAR}
@@ -146,7 +174,53 @@ def _to_column(row: dict) -> Column:
     if data_type in _LENGTH_REQUIRED_TYPES:
         length = row.get("length")
         kwargs["dataLength"] = int(length) if length else _DEFAULT_LENGTH
+
+    classification = (row.get("classification") or "").strip()
+    if classification:
+        kwargs["tags"] = [
+            TagLabel(
+                tagFQN=f"{CLASSIFICATION_NAME}.{classification}",
+                name=classification,
+                description=_TAG_DESCRIPTIONS.get(classification),
+                source=TagSource.Classification,
+                labelType=LabelType.Manual,
+                state=State.Confirmed,
+            )
+        ]
     return Column(**kwargs)
+
+
+def _ensure_classification(client: OpenMetadata) -> None:
+    """Create the MDSF tag classification and its level tags if missing.
+
+    Idempotent: an already-existing classification (or individual tag) is
+    left alone, so re-publishing tables never duplicates or resets them.
+    Runs before the first column is built, because OpenMetadata rejects a
+    column whose tagFQN doesn't resolve to a real tag.
+    """
+
+    if _get_or_none(client, Classification, CLASSIFICATION_NAME) is None:
+        _create_or_update(
+            client,
+            CreateClassificationRequest(
+                name=CLASSIFICATION_NAME,
+                description=CLASSIFICATION_DESCRIPTION,
+                mutuallyExclusive=True,
+            ),
+        )
+        logger.info(f"Created tag classification '{CLASSIFICATION_NAME}'")
+
+    for level in CLASSIFICATION_LEVELS:
+        if _get_or_none(client, Tag, f"{CLASSIFICATION_NAME}.{level}") is None:
+            _create_or_update(
+                client,
+                CreateTagRequest(
+                    name=level,
+                    description=_TAG_DESCRIPTIONS.get(level, ""),
+                    classification=CLASSIFICATION_NAME,
+                ),
+            )
+            logger.info(f"Created tag '{CLASSIFICATION_NAME}.{level}'")
 
 
 def _ensure_service(client: OpenMetadata, service_name: str) -> DatabaseService:
@@ -201,6 +275,8 @@ def publish_table(client: OpenMetadata, storage: ObjectStorage, table_id: str, s
 
     curated_path = lookups.latest_curated_snapshot_path(storage, department_id, dataset_slug, table_slug)
     curated_columns = storage.read_csv(curated_path)
+
+    _ensure_classification(client)
 
     service = _ensure_service(client, service_name or department_id)
     database = _ensure_database(client, _fqn(service), dataset_slug)
