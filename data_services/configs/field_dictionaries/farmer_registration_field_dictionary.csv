@@ -1,0 +1,19 @@
+name,business_description,tag,glossary_term,active,classification
+aadhar_no,"Unique Aadhaar number for identity verification",PII,UIDAI_Aadhaar,true,PII
+mobile_no,"Farmer's registered mobile number for communication",PII,Contact_Information,true,PII
+bank_account_no,"Bank account number for direct benefit transfer",Financial,Banking_Information,true,Financial
+ifsc_code,"IFSC code of the bank branch",Financial,Banking_Information,true,Financial
+name,"Full name of the farmer as per Aadhaar",PII,Personal_Information,true,PII
+father_name,"Father's name of the farmer",PII,Personal_Information,true,PII
+address,"Residential address of the farmer",PII,Personal_Information,true,PII
+date_of_birth,"Date of birth of the farmer",PII,Personal_Information,true,PII
+email_id,"Email address of the farmer",PII,Contact_Information,true,PII
+caste,"Caste category for beneficiary classification",PII,Demographic_Information,true,PII
+gender,"Gender of the farmer",PII,Demographic_Information,true,PII
+image,"Photograph of the farmer",PII,Biometric_Data,true,PII
+verified_from_aadhar,"Whether Aadhaar verification is complete",PII,Verification_Status,true,PII
+rashan_card_no,"Ration card number for PDS benefits",PII,Government_ID,true,PII
+application_no,"Application number for farmer registration",Internal,Application_Reference,true,Internal
+registration_no,"Registration number assigned after approval",Internal,Registration_Reference,true,Internal
+district_id,"District identifier for geographic classification",Internal,Geographic_Reference,true,Internal
+block_id,"Block identifier for geographic classification",Internal,Geographic_Reference,true,Internal

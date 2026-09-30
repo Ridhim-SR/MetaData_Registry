@@ -1,0 +1,19 @@
+column_name,data_type
+id,character varying
+created_at,timestamp without time zone
+created_by,character varying
+modified_at,timestamp without time zone
+modified_by,character varying
+status,integer
+allocation_type,integer
+assign_by,integer
+assign_to,integer
+project_budget_amount,numeric
+project_remaining_amount,numeric
+recent_received_sanction_amount,numeric
+total_cumulative_sanction_amount,numeric
+departmental_scheme_id,character varying
+financial_year_id,character varying
+office_type_id,character varying
+parent_id,character varying
+umbrella_scheme_id,character varying

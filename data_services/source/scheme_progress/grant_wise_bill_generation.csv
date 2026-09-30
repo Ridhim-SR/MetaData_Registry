@@ -1,0 +1,37 @@
+column_name,data_type
+id,character varying
+created_at,timestamp without time zone
+created_by,character varying
+modified_at,timestamp without time zone
+modified_by,character varying
+status,integer
+action_status,integer
+beneficiary_id,character varying
+district_id,character varying
+farmer_id,character varying
+farmer_name,character varying
+father_name,character varying
+funding_pattern_id,character varying
+record_id,character varying
+record_type,character varying
+record_type_id,integer
+beneficiary_category_id,character varying
+departmental_scheme_id,character varying
+grant_id,character varying
+email_id,character varying
+mobile_no,character varying
+registration_no,character varying
+vendor_address,character varying
+vendor_name,character varying
+vendor_registration_id,character varying
+dbt_date,character varying
+dbt_no,character varying
+loan_bank_name,character varying
+loan_branch_name,character varying
+loan_ifsc,character varying
+loan_account_no,character varying
+iswithloan,integer
+office_type_id,character varying
+unit_id,character varying
+role_id,character varying
+financial_year_id,character varying
