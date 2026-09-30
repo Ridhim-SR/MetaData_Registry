@@ -63,11 +63,15 @@ module.exports = {
       },
     },
     {
-      // Frontend: serves apps/web/dist (run the Step-3 build first).
+      // Frontend: pure-JS static server over apps/web/dist (vite preview needs
+      // a Rollup native binary that old glibc hosts can't load — serve has none).
+      // Build dist on a machine where `vite build` works, then copy dist/ over:
+      //   VITE_API_BASE_URL=https://<backend-host>:8000 npm run build --workspace=web
+      //   scp -r apps/web/dist <user>@<host>:~/MetaData_Registry/apps/web/dist
       name: "registry-web",
       cwd: "./apps/web",
       script: "npm",
-      args: `run preview -- --host 0.0.0.0 --port ${WEB_PORT} --strictPort`,
+      args: `run serve -- -l tcp://0.0.0.0:${WEB_PORT}`,
       autorestart: true,
       max_restarts: 15,
       min_uptime: "10s",
