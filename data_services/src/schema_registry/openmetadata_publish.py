@@ -1,17 +1,32 @@
 import os
+from collections.abc import Iterable
 
 import requests
 from dotenv import load_dotenv
+from metadata.generated.schema.api.classification.createClassification import (
+    CreateClassificationRequest,
+)
+from metadata.generated.schema.api.classification.createTag import CreateTagRequest
 from metadata.generated.schema.api.data.createDatabase import CreateDatabaseRequest
 from metadata.generated.schema.api.data.createDatabaseSchema import (
     CreateDatabaseSchemaRequest,
+)
+from metadata.generated.schema.api.data.createGlossary import CreateGlossaryRequest
+from metadata.generated.schema.api.data.createGlossaryTerm import (
+    CreateGlossaryTermRequest,
 )
 from metadata.generated.schema.api.data.createTable import CreateTableRequest
 from metadata.generated.schema.api.services.createDatabaseService import (
     CreateDatabaseServiceRequest,
 )
+from metadata.generated.schema.entity.classification.classification import (
+    Classification,
+)
+from metadata.generated.schema.entity.classification.tag import Tag
 from metadata.generated.schema.entity.data.database import Database
 from metadata.generated.schema.entity.data.databaseSchema import DatabaseSchema
+from metadata.generated.schema.entity.data.glossary import Glossary
+from metadata.generated.schema.entity.data.glossaryTerm import GlossaryTerm
 from metadata.generated.schema.entity.data.table import Column, DataType, TableType
 from metadata.generated.schema.entity.services.connections.database.customDatabaseConnection import (
     CustomDatabaseConnection,
@@ -28,6 +43,7 @@ from metadata.generated.schema.entity.services.databaseService import (
 from metadata.generated.schema.security.client.openMetadataJWTClientConfig import (
     OpenMetadataJWTClientConfig,
 )
+from metadata.generated.schema.type.tagLabel import LabelType, State, TagLabel, TagSource
 from metadata.ingestion.ometa.client import APIError
 from metadata.ingestion.ometa.ometa_api import OpenMetadata
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
@@ -70,6 +86,16 @@ def _get_by_name(client: OpenMetadata, entity, fqn: str):
 @_retry_transient
 def _create_or_update(client: OpenMetadata, request):
     return client.create_or_update(request)
+
+
+# Where curate.py's per-column `tag`/`classification`/`glossary_term`
+# values land in OpenMetadata -- one fixed Classification for each of the
+# first two (their values are a small, code-defined vocabulary: AUTO_TAG_RULES
+# and PII_CLASSIFICATION_RULES in curate.py), one fixed Glossary for the third
+# (its values are free text from a department's Field Dictionary).
+_TAG_CLASSIFICATION = "FieldTag"
+_SENSITIVITY_CLASSIFICATION = "DataSensitivity"
+_GLOSSARY = "BusinessGlossary"
 
 # Only the Postgres types curate.py's KNOWN_POSTGRES_TYPES actually allows
 # through -- everything else already fails validation before it gets here.
@@ -130,6 +156,28 @@ def _get_or_none(client: OpenMetadata, entity, fqn: str):
         raise
 
 
+def _tag_label(tag_fqn: str, source: TagSource) -> TagLabel:
+    # Automated/Confirmed: curate.py assigned this, not a human clicking a
+    # tag on in the OpenMetadata UI, and we're not hedging it as a mere
+    # suggestion -- it's the pipeline's actual answer for this column.
+    return TagLabel(tagFQN=tag_fqn, source=source, labelType=LabelType.Automated, state=State.Confirmed)
+
+
+def _column_tags(row: dict) -> list[TagLabel]:
+    """curate.py's `tag`/`classification`/`glossary_term` columns, mapped to
+    where publish_table() ensures them to live in OpenMetadata (see
+    _ensure_tags_and_terms)."""
+
+    tags = []
+    if row.get("tag"):
+        tags.append(_tag_label(f"{_TAG_CLASSIFICATION}.{row['tag']}", TagSource.Classification))
+    if row.get("classification"):
+        tags.append(_tag_label(f"{_SENSITIVITY_CLASSIFICATION}.{row['classification']}", TagSource.Classification))
+    if row.get("glossary_term"):
+        tags.append(_tag_label(f"{_GLOSSARY}.{row['glossary_term']}", TagSource.Glossary))
+    return tags
+
+
 def _to_column(row: dict) -> Column:
     raw_type = row["data_type"].strip().lower()
     data_type = _TYPE_MAP.get(raw_type)
@@ -143,6 +191,11 @@ def _to_column(row: dict) -> Column:
         "name": row["name"],
         "dataType": data_type,
         "description": row.get("business_description") or None,
+        # Explicit [] on purpose, not None: OpenMetadata treats a missing
+        # `tags` field as "leave existing tags alone", so a column that had
+        # a tag/classification/glossary_term removed on this run would keep
+        # its old, now-stale tags forever unless we say so explicitly.
+        "tags": _column_tags(row),
     }
     if data_type in _LENGTH_REQUIRED_TYPES:
         length = row.get("length")
@@ -182,6 +235,93 @@ def _ensure_schema(client: OpenMetadata, database_fqn: str, schema_name: str) ->
     return _create_or_update(client, CreateDatabaseSchemaRequest(name=schema_name, database=database_fqn))
 
 
+def _ensure_classification(client: OpenMetadata, name: str, description: str) -> Classification:
+    existing = _get_or_none(client, Classification, name)
+    if existing:
+        return existing
+    return _create_or_update(client, CreateClassificationRequest(name=name, description=description))
+
+
+def _ensure_tag(client: OpenMetadata, classification_name: str, tag_name: str, description: str) -> Tag:
+    fqn = f"{classification_name}.{tag_name}"
+    existing = _get_or_none(client, Tag, fqn)
+    if existing:
+        return existing
+    return _create_or_update(
+        client, CreateTagRequest(classification=classification_name, name=tag_name, description=description)
+    )
+
+
+def _ensure_glossary(client: OpenMetadata, name: str, description: str) -> Glossary:
+    existing = _get_or_none(client, Glossary, name)
+    if existing:
+        return existing
+    return _create_or_update(client, CreateGlossaryRequest(name=name, description=description))
+
+
+def _ensure_glossary_term(client: OpenMetadata, glossary_name: str, term_name: str, description: str) -> GlossaryTerm:
+    fqn = f"{glossary_name}.{term_name}"
+    existing = _get_or_none(client, GlossaryTerm, fqn)
+    if existing:
+        return existing
+    return _create_or_update(
+        client, CreateGlossaryTermRequest(glossary=glossary_name, name=term_name, description=description)
+    )
+
+
+def _unique_in_order(values: Iterable[str]) -> list[str]:
+    return list(dict.fromkeys(v for v in values if v))
+
+
+# MDSF (Model Data Sharing Framework) Section 5.1's own category definitions,
+# reused verbatim as the OpenMetadata Tag description so anyone browsing the
+# catalog sees what a CAT-x label actually means without leaving OpenMetadata.
+_CAT_DESCRIPTIONS = {
+    "CAT-1": "Open Access -- fully anonymised, aggregated or non-personal data. No risk of re-identification.",
+    "CAT-2": "Registered Access -- de-identified data. Individual identity not exposed.",
+    "CAT-3": "Restricted Access -- personal or sensitive data at individual/entity level. "
+    "Shared only with DPDPA-compliant consent or a specific legal mandate.",
+}
+
+
+def _ensure_tags_and_terms(client: OpenMetadata, curated_columns: list[dict]) -> None:
+    """Create-or-reuse every Classification/Tag/Glossary/GlossaryTerm the
+    curated columns reference, before the table request tries to attach
+    them as TagLabels -- OpenMetadata won't accept a TagLabel pointing at a
+    tag/term that doesn't exist yet."""
+
+    tags = _unique_in_order(row.get("tag", "") for row in curated_columns)
+    classifications = _unique_in_order(row.get("classification", "") for row in curated_columns)
+    glossary_terms = _unique_in_order(row.get("glossary_term", "") for row in curated_columns)
+
+    if tags:
+        _ensure_classification(client, _TAG_CLASSIFICATION, "Rule-based field categories auto-assigned by curate_schema() (see AUTO_TAG_RULES).")
+        for tag in tags:
+            _ensure_tag(client, _TAG_CLASSIFICATION, tag, f"Columns matching curate.py's AUTO_TAG_RULES pattern for '{tag}'.")
+    if classifications:
+        _ensure_classification(
+            client,
+            _SENSITIVITY_CLASSIFICATION,
+            "Model Data Sharing Framework data classification (CAT-1 Open / CAT-2 Registered / "
+            "CAT-3 Restricted), assigned per column by curate_schema().",
+        )
+        for classification in classifications:
+            _ensure_tag(
+                client,
+                _SENSITIVITY_CLASSIFICATION,
+                classification,
+                _CAT_DESCRIPTIONS.get(classification, f"MDSF data classification category {classification}."),
+            )
+    if glossary_terms:
+        _ensure_glossary(
+            client, _GLOSSARY, "Business terms attached to columns via a department's Field Dictionary (business_metadata_file)."
+        )
+        for term in glossary_terms:
+            _ensure_glossary_term(
+                client, _GLOSSARY, term, "Business term supplied via a department's Field Dictionary (business_metadata_file)."
+            )
+
+
 def publish_table(client: OpenMetadata, storage: ObjectStorage, table_id: str, service_name: str | None = None) -> dict:
     """Publish one table's latest curated schema snapshot into OpenMetadata
     as a Table entity (Service -> Database -> Schema -> Table -> Columns).
@@ -207,13 +347,18 @@ def publish_table(client: OpenMetadata, storage: ObjectStorage, table_id: str, s
     database = _ensure_database(client, _fqn(service), dataset_slug)
     schema = _ensure_schema(client, _fqn(database), table_row["schema_name"])
 
+    # Built (and, if invalid, raised) before touching tags/glossary terms in
+    # OpenMetadata, so a bad data type fails fast without side effects.
+    columns = [_to_column(row) for row in curated_columns]
+    _ensure_tags_and_terms(client, curated_columns)
+
     table = _create_or_update(
         client,
         CreateTableRequest(
             name=table_row["table_name"],
             tableType=TableType.Regular,
             databaseSchema=_fqn(schema),
-            columns=[_to_column(row) for row in curated_columns],
+            columns=columns,
         ),
     )
 

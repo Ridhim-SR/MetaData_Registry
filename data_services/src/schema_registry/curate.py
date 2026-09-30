@@ -29,6 +29,33 @@ def auto_tag(field_name: str) -> str | None:
     return None
 
 
+# (classification, pattern over field name) -- first match wins. These are
+# the direct identifiers the Model Data Sharing Framework's PII removal
+# checklist names (name, Aadhaar, PAN, mobile, email, address, DOB, ...) --
+# a column matching one of these always carries at least CAT-3 (Restricted
+# Access) risk, so it's auto-classified rather than left for a department to
+# forget. Anything not matched here is left blank, never guessed as
+# non-sensitive -- when in doubt, MDSF says the higher category applies, so
+# we only auto-assign when confident.
+PII_CLASSIFICATION_RULES: list[tuple[str, re.Pattern]] = [
+    (
+        "CAT-3",
+        re.compile(
+            r"(aadhaar|pan_?number|voter_?id|passport|driving_?licen[sc]e|vehicle_registration|"
+            r"mobile|phone|email|bank_?account|^name$|residential_address|date_of_birth|\bdob\b)",
+            re.IGNORECASE,
+        ),
+    ),
+]
+
+
+def auto_classification(field_name: str) -> str | None:
+    for classification, pattern in PII_CLASSIFICATION_RULES:
+        if pattern.search(field_name):
+            return classification
+    return None
+
+
 def validate_column(column: dict) -> list[str]:
     """Return validation warnings for one column (empty list = clean)."""
 
@@ -55,6 +82,11 @@ def curate_schema(
 
     Returns one row per field, each carrying its own `validation_warning`
     (empty string if clean) so the whole thing writes straight to CSV.
+
+    `classification` (CAT-1/CAT-2/CAT-3, per the Model Data Sharing
+    Framework) works the same way as `tag`: a business-metadata override
+    wins, otherwise it falls back to `auto_classification()`, otherwise
+    blank for a human to assign later.
     """
 
     business_metadata = business_metadata or {}
@@ -73,6 +105,7 @@ def curate_schema(
                 **column,
                 "business_description": meta.get("business_description", ""),
                 "tag": meta.get("tag") or auto_tag(name) or "",
+                "classification": meta.get("classification") or auto_classification(name) or "",
                 "glossary_term": meta.get("glossary_term", ""),
                 "active": meta.get("active", True),
                 "validation_warning": "; ".join(warnings),

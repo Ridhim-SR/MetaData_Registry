@@ -38,7 +38,7 @@ DEPARTMENT_ID=pwd DEPARTMENT_NAME="Public Works Department" python3 -m src.schem
 
 # 4. Run the full pipeline: ingest -> curate -> publish
 OPENMETADATA_JWT_TOKEN=<token> \
-DEPARTMENT=pwd DATASET=vishwakarma TABLE_NAME=TBD_confirm_with_pwd \
+DEPARTMENT=pwd DATASET=vishwakarma TABLE_NAME=vishwakarma_master \
 SOURCE_FILE=samples/pwd_vishwakarma_full_raw_columns.txt SOURCE_FORMAT=postgres_ddl \
 python3 -m src.schema_registry.pipeline
 
@@ -50,6 +50,12 @@ python3 -m pytest tests/
 `python-dotenv`) — copy `.env.example` to `.env` and fill in
 `OPENMETADATA_JWT_TOKEN` / Wasabi credentials there instead of exporting
 them each time. `.env` is gitignored; never commit it.
+
+**`vishwakarma_master` is a provisional table name**, not a confirmed one —
+PWD's raw submission was only a column-list dump with no `CREATE TABLE
+<name>`, so the real Postgres table/schema/database name is still unknown.
+Rename it (re-run with a different `TABLE_NAME`, then delete the old one)
+once PWD confirms the actual name.
 
 ## Command reference
 
@@ -82,7 +88,7 @@ storage/
 ├── _lookups/{departments,datasets,tables}.csv   # registry + dataset-level governance fields (owner, fiduciary, retention, ...)
 └── department/<dept>/<dataset>/<table>/
     ├── raw/schemas/<ts>.csv       # parsed structure only
-    └── curated/schemas/<ts>.csv   # + business_description, tag, glossary_term, active, validation_warning
+    └── curated/schemas/<ts>.csv   # + business_description, tag, classification, glossary_term, active, validation_warning
 ```
 
 Every run adds a new timestamped snapshot (version history); re-running
@@ -135,7 +141,11 @@ below calls it directly.
 
 **Mapping**: department → service, dataset → database, `schema_name` →
 schema, `table_name` → table. Columns from the curated CSV's `data_type`
-(unrecognized types fail loudly, never guessed).
+(unrecognized types fail loudly, never guessed). Each column's `tag` /
+`classification` / `glossary_term` are pushed as OpenMetadata TagLabels —
+`tag` under a `FieldTag` Classification, `classification` (MDSF's CAT-1/
+CAT-2/CAT-3) under a `DataSensitivity` Classification, `glossary_term` under
+a `BusinessGlossary` Glossary — created on first use, reused after.
 
 **Re-running is safe** — existing services/databases/schemas are reused;
 the table is a create-or-update, so removed columns are actually removed
@@ -144,7 +154,7 @@ in OpenMetadata too, not left behind.
 **Standalone republish** (no re-ingest):
 ```bash
 OPENMETADATA_JWT_TOKEN=<token> OPENMETADATA_HOST_PORT=http://localhost:8585/api \
-TABLE_ID=pwd.vishwakarma.tbd_confirm_with_pwd python3 -m src.schema_registry.openmetadata_publish
+TABLE_ID=pwd.vishwakarma.vishwakarma_master python3 -m src.schema_registry.openmetadata_publish
 ```
 
 ## Tests
@@ -208,7 +218,7 @@ docker compose down -v    # stop, wipe volumes -- careful
 cd ../infrastructure/openmetadata && docker compose up -d
 cd ../../data_services && source .venv/bin/activate
 OPENMETADATA_JWT_TOKEN=<token> \
-DEPARTMENT=pwd DATASET=vishwakarma TABLE_NAME=TBD_confirm_with_pwd \
+DEPARTMENT=pwd DATASET=vishwakarma TABLE_NAME=vishwakarma_master \
 SOURCE_FILE=samples/pwd_vishwakarma_full_raw_columns.txt SOURCE_FORMAT=postgres_ddl \
 python3 -m src.schema_registry.pipeline
 ```

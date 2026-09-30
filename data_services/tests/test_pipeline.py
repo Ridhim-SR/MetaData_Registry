@@ -93,7 +93,9 @@ def test_run_with_openmetadata_client_publishes_in_the_same_call(tmp_path):
 
     assert result["openmetadata"]["fully_qualified_name"] == "pwd.vishwakarma.public.t1"
     assert result["openmetadata"]["column_count"] == 2
-    assert client.create_or_update.call_count == 4  # service, database, schema, table
+    # service, database, schema, table, + the "FieldTag" classification and
+    # "Firm/Contractor-Identifier" tag that firm_name auto-tags into
+    assert client.create_or_update.call_count == 6
 
 
 def test_run_without_openmetadata_client_skips_publish(tmp_path):

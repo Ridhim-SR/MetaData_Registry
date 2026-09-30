@@ -55,6 +55,8 @@ def _fake_client():
             getattr(request, "service", None)
             or getattr(request, "database", None)
             or getattr(request, "databaseSchema", None)
+            or getattr(request, "classification", None)
+            or getattr(request, "glossary", None)
         )
         fqn = f"{parent}.{name}" if parent else str(name)
         entity.fullyQualifiedName = fqn
@@ -79,9 +81,57 @@ def test_publish_table_builds_full_entity_chain(tmp_path):
     assert _unwrap(created[0].name) == "pwd"  # service defaults to department_id
     assert _unwrap(created[1].name) == "vishwakarma"  # database == dataset slug
     assert _unwrap(created[2].name) == "public"  # schema_name from tables.csv
-    table_request = created[3]
+    # firm_name auto-tags "Firm/Contractor-Identifier", total_cost auto-tags
+    # "Financial" (see curate.py's AUTO_TAG_RULES) -- both ensured under one
+    # "FieldTag" classification before the table itself is created.
+    assert _unwrap(created[3].name) == "FieldTag"
+    assert _unwrap(created[4].name) == "Firm/Contractor-Identifier"
+    assert _unwrap(created[5].name) == "Financial"
+    table_request = created[6]
     assert _unwrap(table_request.name) == "TBD_confirm_with_pwd"
-    assert [_unwrap(c.name) for c in table_request.columns] == ["sno", "firm_name", "total_cost"]
+    columns = {_unwrap(c.name): c for c in table_request.columns}
+    assert list(columns) == ["sno", "firm_name", "total_cost"]
+    assert columns["sno"].tags == []
+    assert [t.tagFQN.root for t in columns["firm_name"].tags] == ["FieldTag.Firm/Contractor-Identifier"]
+    assert [t.tagFQN.root for t in columns["total_cost"].tags] == ["FieldTag.Financial"]
+
+
+def test_publish_table_pushes_classification_and_glossary_term(tmp_path):
+    storage = LocalObjectStorage(tmp_path / "storage")
+    lookups.register_department(storage, "pwd", "Public Works Department")
+    ddl_file = tmp_path / "raw.txt"
+    ddl_file.write_text("beneficiary_email character varying(100), remarks text")
+    metadata_file = tmp_path / "meta.csv"
+    metadata_file.write_text(
+        "name,business_description,tag,glossary_term,active,classification\n"
+        "remarks,General notes,,Field Note,true,CAT-2\n"
+    )
+    run(
+        department="pwd",
+        dataset="vishwakarma",
+        table_name="t1",
+        source_file=str(ddl_file),
+        storage=storage,
+        source_format="postgres_ddl",
+        business_metadata_file=str(metadata_file),
+    )
+
+    client = _fake_client()
+    publish_table(client, storage, "pwd.vishwakarma.t1")
+
+    table_request = client.create_or_update.call_args_list[-1].args[0]
+    columns = {_unwrap(c.name): c for c in table_request.columns}
+
+    # beneficiary_email got no business metadata -- auto-classified as
+    # CAT-3 purely from its name (curate.py's PII_CLASSIFICATION_RULES).
+    assert [t.tagFQN.root for t in columns["beneficiary_email"].tags] == ["DataSensitivity.CAT-3"]
+
+    # remarks' classification/glossary_term came from the business metadata
+    # file, not auto-detection.
+    assert sorted(t.tagFQN.root for t in columns["remarks"].tags) == [
+        "BusinessGlossary.Field Note",
+        "DataSensitivity.CAT-2",
+    ]
 
 
 def test_publish_table_reuses_existing_entities_instead_of_recreating(tmp_path):
