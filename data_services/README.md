@@ -176,3 +176,31 @@ Then: add a test that reproduces it, confirm the full suite passes, and verify t
 - `publish_table()` ignores the curated `active` flag — a column marked inactive still gets published like any other.
 - Renaming a column looks like a delete + an add to the diff — it requires `allow_column_removal=True`, and the old name's business metadata won't carry over (matching is by exact column name only).
 - OpenMetadata's PUT merges tags/extension rather than replacing them by default — `_ensure_database()` works around this with an explicit JSON-Patch replace so a cleared `category`/custom property actually clears; column-level tags on the Table entity don't have this fix yet, so clearing a stale column `tag`/`classification` still needs a manual JSON-Patch `remove`.
+
+## Just run it
+
+Every option lives in `.env` — copy `.env.example`, fill it in once, then
+the command itself never changes:
+
+```bash
+cd /Users/adityaoffice/Desktop/UP_SDA/MetaData_Registry/data_services
+source .venv/bin/activate
+python3 -m src.schema_registry.pipeline
+```
+
+`.env.example` documents every key, required and optional, with what each
+one does — nothing hidden in `pipeline.py` that you'd have to go read
+source code to discover:
+
+| Key | Required? | Notes |
+|---|---|---|
+| `OPENMETADATA_JWT_TOKEN` | yes | Settings → Bots → ingestion-bot in the OpenMetadata UI. An admin session token expires in ~1hr — refresh it if a run fails with 401 (see `.env`'s comment for the exact `curl`) |
+| `DEPARTMENT` | yes | must already be registered (see Quickstart) |
+| `DATASET` | yes | auto-creates on first use |
+| `TABLE_NAME` | yes | |
+| `SOURCE_FILE` | yes | |
+| `SOURCE_FORMAT` | yes | `postgres_ddl` or `csv` |
+| `WASABI_BUCKET` | no | leave blank for local storage; fill in once Wasabi is confirmed clean (see [Storage layout](#storage-layout)) |
+| `CATEGORY`/`API_AVAILABLE`/`OWNER`/`FREQUENCY`/`TIMELINE`/`DATASET_DESCRIPTION` | no | dataset-level fields (see [Concepts](#concepts)) — type a real value only once you have it; blank/omitted carries forward whatever was last set, so these rarely need touching after the first time |
+
+To run a different table, just edit `.env` and run the same command again.
