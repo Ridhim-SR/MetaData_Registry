@@ -3,16 +3,17 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
+from dotenv import load_dotenv
 from filelock import FileLock
 from metadata.ingestion.ometa.ometa_api import OpenMetadata
 
-from src.schema_registry import lookups
-from src.schema_registry.csv_schema_parser import parse_csv_columns
+from src.schema_registry.registry import lookups, paths
 from src.schema_registry.curate import curate_schema
-from src.schema_registry.ddl_parser import parse_postgres_columns
-from src.schema_registry.openmetadata_publish import get_client, publish_table
+from src.schema_registry.openmetadata.publish import get_client, publish_table
+from src.schema_registry.parsers.csv_schema_parser import parse_csv_columns
+from src.schema_registry.parsers.ddl_parser import parse_postgres_columns
+from src.storage import storage_from_env
 from src.storage.base import ObjectStorage
-from src.storage.local import LocalObjectStorage
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -34,12 +35,13 @@ def _timestamp() -> str:
 def _business_metadata_from_rows(rows: list[dict]) -> dict[str, dict]:
     """Shape a list of CSV rows (a Field Dictionary export, or a previous
     curated snapshot) into the {name: {business_description, tag,
-    glossary_term, active}} form curate_schema() expects."""
+    classification, glossary_term, active}} form curate_schema() expects."""
 
     return {
         row["name"]: {
             "business_description": row.get("business_description", ""),
             "tag": row.get("tag", ""),
+            "classification": row.get("classification", ""),
             "glossary_term": row.get("glossary_term", ""),
             "active": row.get("active", "").strip().lower() in _TRUE_VALUES,
         }
@@ -78,12 +80,12 @@ def run(
     source_format: str = "postgres_ddl",
     schema_name: str = "public",
     business_metadata_file: str | None = None,
+    category: str = "",
+    api_available: str = "",
     owner: str = "",
-    fiduciary: str = "",
-    processor: str = "",
-    risk_classification: str = "",
-    retention_policy: str = "",
-    lineage: str = "",
+    frequency: str = "",
+    timeline: str = "",
+    dataset_description: str = "",
     openmetadata_client: OpenMetadata | None = None,
     allow_column_removal: bool = False,
 ) -> dict:
@@ -111,20 +113,22 @@ def run(
     department, so departments are a deliberately controlled vocabulary
     rather than auto-created from whatever text a caller passes.
 
-    owner/fiduciary/processor/risk_classification/retention_policy/lineage
-    are dataset-level governance fields (needed for OpenMetadata's Owner
-    field and custom properties) stored once per dataset in
-    `_lookups/datasets.csv`, not repeated per column row. Left blank if
-    not yet confirmed -- re-run with the answer once it comes in to update
-    the existing entry.
+    category/api_available/owner/frequency/timeline/dataset_description are
+    dataset-level fields (decided in the governance meeting) stored once
+    per dataset in `_lookups/datasets.csv`, not repeated per column row --
+    `category` (MDSF CAT-1/2/3/4) and `dataset_description` are also pushed
+    to OpenMetadata as the Database entity's tag/description by
+    publish_table(). Left blank if not yet confirmed -- re-run with the
+    answer once it comes in to update the existing entry.
 
     Storage layout (each table gets its own folder, since tables in the
-    same dataset can have unrelated structures):
+    same dataset can have unrelated structures) -- defined once in
+    paths.py, not repeated as an f-string in every function that needs it:
         department/<department_id>/<dataset_slug>/<table_slug>/raw/schemas/<timestamp>.csv
         department/<department_id>/<dataset_slug>/<table_slug>/curated/schemas/<timestamp>.csv
 
     `openmetadata_client`: if given, the freshly curated snapshot is also
-    published to OpenMetadata (via openmetadata_publish.publish_table) as
+    published to OpenMetadata (via openmetadata.publish.publish_table) as
     the last step of this same call, so ingest -> curate -> publish is one
     pipeline run instead of two separate manual steps. Omit it to keep
     this call to storage only.
@@ -166,8 +170,8 @@ def run(
 
     lookups.upsert_dataset(
         storage, dataset_id, department_id, dataset,
-        owner=owner, fiduciary=fiduciary, processor=processor,
-        risk_classification=risk_classification, retention_policy=retention_policy, lineage=lineage,
+        category=category, api_available=api_available, owner=owner,
+        frequency=frequency, timeline=timeline, dataset_description=dataset_description,
     )
     lookups.upsert_table(storage, table_id, dataset_id, table_name, schema_name)
 
@@ -183,7 +187,7 @@ def run(
     # double-triggered CLI call, two batch jobs targeting the same row)
     # could both read the same "previous" state and both proceed on stale
     # information.
-    lock_path = storage.lock_path(f"department/{department_id}/{dataset_slug}/{table_slug}/pipeline")
+    lock_path = storage.lock_path(paths.pipeline_lock_path(department_id, dataset_slug, table_slug))
     with FileLock(lock_path):
         previous_curated = _previous_curated_columns(storage, department_id, dataset_slug, table_slug)
 
@@ -197,7 +201,7 @@ def run(
                     f"file is likely a partial/incremental submission, not the full current schema."
                 )
 
-        raw_path = f"department/{department_id}/{dataset_slug}/{table_slug}/raw/schemas/{ts}.csv"
+        raw_path = paths.raw_schema_path(department_id, dataset_slug, table_slug, ts)
         storage.write_csv(raw_path, raw_columns)
         logger.info(f"Stored raw schema -> {raw_path}")
 
@@ -208,7 +212,7 @@ def run(
         curated_columns = curate_schema(raw_columns, business_metadata)
         warning_count = sum(1 for c in curated_columns if c["validation_warning"])
 
-        curated_path = f"department/{department_id}/{dataset_slug}/{table_slug}/curated/schemas/{ts}.csv"
+        curated_path = paths.curated_schema_path(department_id, dataset_slug, table_slug, ts)
         storage.write_csv(curated_path, curated_columns)
         logger.info(
             f"Stored curated schema -> {curated_path} "
@@ -230,7 +234,8 @@ def run(
 
 
 if __name__ == "__main__":
-    _storage = LocalObjectStorage(os.environ.get("STORAGE_ROOT", "storage"))
+    load_dotenv()
+    _storage = storage_from_env()
 
     # DEPARTMENT_NAME is optional -- set it to register a new department in
     # the same command; omit it once the department is already registered.
@@ -255,6 +260,15 @@ if __name__ == "__main__":
         source_format=os.environ.get("SOURCE_FORMAT", "postgres_ddl"),
         schema_name=os.environ.get("SCHEMA_NAME", "public"),
         business_metadata_file=os.environ.get("BUSINESS_METADATA_FILE"),
+        # Dataset-level fields -- optional, only needed once per dataset
+        # (upsert_dataset() carries forward whatever's already set, so a
+        # later run for a different table in the same dataset can omit these).
+        category=os.environ.get("CATEGORY", ""),
+        api_available=os.environ.get("API_AVAILABLE", ""),
+        owner=os.environ.get("OWNER", ""),
+        frequency=os.environ.get("FREQUENCY", ""),
+        timeline=os.environ.get("TIMELINE", ""),
+        dataset_description=os.environ.get("DATASET_DESCRIPTION", ""),
         openmetadata_client=_client,
         allow_column_removal=os.environ.get("ALLOW_COLUMN_REMOVAL", "").strip().lower() in _TRUE_VALUES,
     )
