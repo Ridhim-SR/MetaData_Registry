@@ -7,6 +7,9 @@ import boto3
 from botocore.exceptions import ClientError
 
 from src.storage.base import ObjectStorage
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class S3ObjectStorage(ObjectStorage):
@@ -42,9 +45,29 @@ class S3ObjectStorage(ObjectStorage):
             region_name=region_name,
         )
         self.lock_dir = Path(lock_dir)
+        logger.info(f"S3ObjectStorage ready: bucket={bucket}, endpoint={endpoint_url}, prefix={self.prefix or '(none)'}")
 
     def _key(self, path: str) -> str:
         return f"{self.prefix}/{path}" if self.prefix else path
+
+    def _log_client_error(self, exc: ClientError, action: str, path: str) -> None:
+        """Surface exactly what boto3 is reporting -- a bad access key,
+        a wrong bucket/endpoint, and a missing permission all raise the same
+        generic ClientError otherwise, which is what made diagnosing a real
+        Wasabi credential issue this slow in the first place."""
+
+        code = exc.response.get("Error", {}).get("Code", "?")
+        if code in ("InvalidAccessKeyId", "SignatureDoesNotMatch", "AccessDenied", "403"):
+            logger.error(
+                f"S3 {action} failed on '{path}' (bucket={self.bucket}): {code} -- "
+                f"this is a credentials/permissions problem, not a code bug. "
+                f"Verify WASABI_ACCESS_KEY_ID/WASABI_SECRET_ACCESS_KEY independently "
+                f"(e.g. `aws s3 ls --endpoint-url <url>`) before changing any code."
+            )
+        elif code == "NoSuchBucket":
+            logger.error(f"S3 {action} failed on '{path}': bucket '{self.bucket}' doesn't exist at this endpoint.")
+        else:
+            logger.error(f"S3 {action} failed on '{path}' (bucket={self.bucket}): {code} -- {exc}")
 
     def write_csv(self, path: str, rows: list[dict]) -> None:
         buf = io.StringIO()
@@ -52,10 +75,18 @@ class S3ObjectStorage(ObjectStorage):
             writer = csv.DictWriter(buf, fieldnames=list(rows[0].keys()))
             writer.writeheader()
             writer.writerows(rows)
-        self.client.put_object(Bucket=self.bucket, Key=self._key(path), Body=buf.getvalue().encode("utf-8"))
+        try:
+            self.client.put_object(Bucket=self.bucket, Key=self._key(path), Body=buf.getvalue().encode("utf-8"))
+        except ClientError as exc:
+            self._log_client_error(exc, "write", path)
+            raise
 
     def read_csv(self, path: str) -> list[dict]:
-        obj = self.client.get_object(Bucket=self.bucket, Key=self._key(path))
+        try:
+            obj = self.client.get_object(Bucket=self.bucket, Key=self._key(path))
+        except ClientError as exc:
+            self._log_client_error(exc, "read", path)
+            raise
         text = obj["Body"].read().decode("utf-8")
         return list(csv.DictReader(io.StringIO(text)))
 
@@ -66,6 +97,7 @@ class S3ObjectStorage(ObjectStorage):
         except ClientError as exc:
             if exc.response["Error"]["Code"] in ("404", "NoSuchKey"):
                 return False
+            self._log_client_error(exc, "exists-check", path)
             raise
 
     def list(self, prefix: str) -> list[str]:

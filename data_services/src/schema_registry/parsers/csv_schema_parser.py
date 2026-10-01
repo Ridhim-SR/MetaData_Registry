@@ -1,6 +1,10 @@
 import csv
 import re
 
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
 # canonical field -> normalized (lowercase, underscored) header aliases.
 # "required"-style columns are deliberately not aliased to "nullable" here --
 # they're the inverse (required=true means nullable=false), so guessing
@@ -41,7 +45,12 @@ def _build_header_map(headers: list[str]) -> dict[str, str]:
 
     missing = [f for f in REQUIRED_FIELDS if f not in header_map]
     if missing:
+        logger.error(f"csv_schema_parser: missing required field(s) {missing}. Headers found: {headers}")
         raise ValueError(f"CSV is missing required field(s) {missing}. Headers found: {headers}")
+
+    unmapped = [f for f in COLUMN_ALIASES if f not in header_map]
+    if unmapped:
+        logger.info(f"csv_schema_parser: no header matched for optional field(s) {unmapped} -- will default")
 
     return header_map
 
@@ -71,4 +80,5 @@ def parse_csv_columns(path: str) -> list[dict]:
                 }
             )
 
+        logger.info(f"csv_schema_parser: parsed {len(columns)} column(s) from {path}")
         return columns

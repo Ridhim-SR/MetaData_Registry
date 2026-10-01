@@ -3,6 +3,9 @@ import os
 from src.storage.base import ObjectStorage
 from src.storage.local import LocalObjectStorage
 from src.storage.s3 import S3ObjectStorage
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def storage_from_env() -> ObjectStorage:
@@ -17,6 +20,7 @@ def storage_from_env() -> ObjectStorage:
 
     bucket = os.environ.get("WASABI_BUCKET")
     if bucket:
+        logger.info(f"Storage backend: S3/Wasabi (bucket={bucket}, endpoint={os.environ.get('WASABI_ENDPOINT_URL')})")
         return S3ObjectStorage(
             bucket=bucket,
             prefix=os.environ.get("WASABI_PREFIX", ""),
@@ -25,4 +29,6 @@ def storage_from_env() -> ObjectStorage:
             aws_secret_access_key=os.environ.get("WASABI_SECRET_ACCESS_KEY"),
             region_name=os.environ.get("WASABI_REGION"),
         )
-    return LocalObjectStorage(os.environ.get("STORAGE_ROOT", "storage"))
+    root = os.environ.get("STORAGE_ROOT", "storage")
+    logger.info(f"Storage backend: local filesystem (root={root})")
+    return LocalObjectStorage(root)

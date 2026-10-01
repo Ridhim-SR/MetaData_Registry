@@ -1,6 +1,10 @@
 import csv
 import re
 
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
 # (pattern over the start of the Format text, Postgres type) -- first match
 # wins. This file's "Format" column describes application/data-entry field
 # types in free text ("Numeric (12 Digits)", "Option: Bride, Guardian"),
@@ -32,6 +36,7 @@ def parse_format(format_text: str) -> tuple[str, int | None]:
             length = int(length_match.group(1)) if length_match else None
             return data_type, length
 
+    logger.error(f"field_dictionary_parser: unrecognized Format value '{format_text}'")
     raise ValueError(
         f"Unrecognized Format value '{format_text}' -- add a rule to FORMAT_TYPE_RULES in "
         f"field_dictionary_parser.py."
@@ -75,4 +80,7 @@ def parse_field_dictionary(path: str) -> dict[str, dict]:
                 "business_description": row.get("Data Description", "").strip(),
             }
 
+    for table_name, table in tables.items():
+        logger.info(f"field_dictionary_parser: '{table_name}' -> {len(table['columns'])} column(s)")
+    logger.info(f"field_dictionary_parser: parsed {len(tables)} table(s) from {path}")
     return tables

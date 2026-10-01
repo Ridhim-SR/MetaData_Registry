@@ -7,6 +7,9 @@ from filelock import FileLock
 from src.schema_registry.registry import paths
 from src.storage import storage_from_env
 from src.storage.base import ObjectStorage
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 DEPARTMENTS_PATH = "_lookups/departments.csv"
 DATASETS_PATH = "_lookups/datasets.csv"
@@ -48,12 +51,14 @@ def register_department(storage: ObjectStorage, department_id: str, department_n
     formatting, not synonyms/abbreviations of the same department).
     """
 
+    is_new = not department_exists(storage, department_id)
     _upsert(
         storage,
         DEPARTMENTS_PATH,
         "department_id",
         {"department_id": department_id, "department_name": department_name},
     )
+    logger.info(f"Department {'registered' if is_new else 're-registered'}: {department_id} ({department_name})")
 
 
 def department_exists(storage: ObjectStorage, department_id: str) -> bool:
@@ -122,6 +127,7 @@ def upsert_dataset(
             "dataset_description": dataset_description or existing.get("dataset_description", ""),
         },
     )
+    logger.info(f"Dataset {'created' if not existing else 'updated'}: {dataset_id}")
 
 
 def latest_curated_snapshot_path(
@@ -140,12 +146,14 @@ def latest_curated_snapshot_path(
 
 
 def upsert_table(storage: ObjectStorage, table_id: str, dataset_id: str, table_name: str, schema_name: str) -> None:
+    is_new = get_table(storage, table_id) is None
     _upsert(
         storage,
         TABLES_PATH,
         "table_id",
         {"table_id": table_id, "dataset_id": dataset_id, "table_name": table_name, "schema_name": schema_name},
     )
+    logger.info(f"Table {'registered' if is_new else 're-registered'}: {table_id}")
 
 
 if __name__ == "__main__":

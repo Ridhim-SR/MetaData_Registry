@@ -15,6 +15,9 @@ import requests
 from dotenv import load_dotenv
 
 from src.schema_registry.openmetadata.publish import _CUSTOM_PROPERTY_NAMES
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 _DESCRIPTIONS = {
     "apiAvailable": "Whether this dataset is exposed via an API (Y/N).",
@@ -41,7 +44,7 @@ def setup(host_port: str, jwt_token: str) -> None:
 
     for property_name in _CUSTOM_PROPERTY_NAMES.values():
         if property_name in existing:
-            print(f"'{property_name}' already exists -- skipping.")
+            logger.info(f"'{property_name}' already exists -- skipping.")
             continue
         patch = [
             {
@@ -59,8 +62,10 @@ def setup(host_port: str, jwt_token: str) -> None:
             headers={**auth, "Content-Type": "application/json-patch+json"},
             json=patch,
         )
+        if not resp.ok:
+            logger.error(f"Failed to add '{property_name}': {resp.status_code} {resp.text}")
         resp.raise_for_status()
-        print(f"Added '{property_name}' to the Database entity type.")
+        logger.info(f"Added '{property_name}' to the Database entity type.")
 
 
 if __name__ == "__main__":
