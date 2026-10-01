@@ -6,6 +6,7 @@ alembic>=1.18.0
 email-validator>=2.3.0
 httpx>=0.28.0
 pydantic-settings>=2.14.0
+python-dotenv>=1.0.0
 python-multipart>=0.0.9
 python-jose>=3.3.0
 passlib[bcrypt]>=1.7.4
