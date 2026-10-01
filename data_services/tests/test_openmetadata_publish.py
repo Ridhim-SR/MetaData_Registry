@@ -1,11 +1,12 @@
+import json
 from unittest.mock import MagicMock
 
 import pytest
 import requests
 from metadata.ingestion.ometa.client import APIError
 
-from src.schema_registry import lookups
-from src.schema_registry.openmetadata_publish import _create_or_update, _get_by_name, _unwrap, publish_table
+from src.schema_registry.registry import lookups
+from src.schema_registry.openmetadata.publish import _create_or_update, _get_by_name, _unwrap, publish_table
 from src.schema_registry.pipeline import run
 from src.storage.local import LocalObjectStorage
 
@@ -134,6 +135,89 @@ def test_publish_table_pushes_classification_and_glossary_term(tmp_path):
     ]
 
 
+def test_publish_table_pushes_dataset_category_and_description_to_database(tmp_path):
+    storage = LocalObjectStorage(tmp_path / "storage")
+    lookups.register_department(storage, "pwd", "Public Works Department")
+    run(
+        department="pwd",
+        dataset="vishwakarma",
+        table_name="t1",
+        source_file=_write_ddl(tmp_path),
+        storage=storage,
+        source_format="postgres_ddl",
+        category="CAT-2",
+        dataset_description="PWD's master works dataset.",
+    )
+
+    client = _fake_client()
+    publish_table(client, storage, "pwd.vishwakarma.t1")
+
+    database_request = next(
+        call.args[0] for call in client.create_or_update.call_args_list if _unwrap(call.args[0].name) == "vishwakarma"
+    )
+    assert database_request.description.root == "PWD's master works dataset."
+    assert [t.tagFQN.root for t in database_request.tags] == ["DataSensitivity.CAT-2"]
+
+
+def test_publish_table_clears_stale_category_and_description_on_republish(tmp_path):
+    """create_or_update()'s PUT merges tags/extension instead of replacing
+    them (same quirk as column tags) -- without _replace_entity_fields(), a
+    category/custom-property cleared in datasets.csv would stay stuck from
+    a previous run. Verified live against a real server; this locks in the
+    fix against the fake client's call history."""
+
+    storage = LocalObjectStorage(tmp_path / "storage")
+    lookups.register_department(storage, "pwd", "Public Works Department")
+    run(
+        department="pwd",
+        dataset="vishwakarma",
+        table_name="t1",
+        source_file=_write_ddl(tmp_path),
+        storage=storage,
+        source_format="postgres_ddl",
+        category="CAT-2",
+        owner="Someone",
+    )
+    client = _fake_client()
+    publish_table(client, storage, "pwd.vishwakarma.t1")
+
+    patch_call = client.client.patch.call_args
+    patch_body = {op["path"]: op["value"] for op in json.loads(patch_call.kwargs["data"])}
+    assert patch_body["/tags"] == [
+        {
+            "tagFQN": "DataSensitivity.CAT-2",
+            "source": "Classification",
+            "labelType": "Automated",
+            "state": "Confirmed",
+        }
+    ]
+    assert patch_body["/extension"] == {
+        "apiAvailable": "",
+        "datasetOwner": "Someone",
+        "frequency": "",
+        "timeline": "",
+    }
+
+    # now clear both -- upsert_dataset() itself carries forward unmentioned
+    # fields (see test_lookups.py), so deliberately clearing one means
+    # editing the lookup row directly, same as the real "known limitation"
+    # documented on upsert_dataset(). The next publish's replace-patch must
+    # carry the cleared (empty) values, not silently omit them (which would
+    # mean "leave the stale ones alone").
+    rows = storage.read_csv(lookups.DATASETS_PATH)
+    for row in rows:
+        if row["dataset_id"] == "pwd.vishwakarma":
+            row["category"] = ""
+            row["owner"] = ""
+    storage.write_csv(lookups.DATASETS_PATH, rows)
+    publish_table(client, storage, "pwd.vishwakarma.t1")
+
+    patch_call = client.client.patch.call_args
+    patch_body = {op["path"]: op["value"] for op in json.loads(patch_call.kwargs["data"])}
+    assert patch_body["/tags"] == []
+    assert patch_body["/extension"] == {"apiAvailable": "", "datasetOwner": "", "frequency": "", "timeline": ""}
+
+
 def test_publish_table_reuses_existing_entities_instead_of_recreating(tmp_path):
     storage = _ingested_storage(tmp_path)
     client = _fake_client()
@@ -143,9 +227,10 @@ def test_publish_table_reuses_existing_entities_instead_of_recreating(tmp_path):
 
     publish_table(client, storage, "pwd.vishwakarma.tbd_confirm_with_pwd")
 
-    # every level found an existing entity, so create_or_update was only
-    # called once -- for the table itself, which is always created/updated
-    assert client.create_or_update.call_count == 1
+    # service and schema found an existing entity and were reused; database
+    # and table are always create-or-update (dataset_description/category
+    # on the database, columns on the table, can change on a later run)
+    assert client.create_or_update.call_count == 2
 
 
 def test_publish_table_unknown_table_id_raises(tmp_path):

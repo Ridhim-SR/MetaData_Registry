@@ -1,3 +1,4 @@
+import json
 import os
 from collections.abc import Iterable
 
@@ -48,7 +49,7 @@ from metadata.ingestion.ometa.client import APIError
 from metadata.ingestion.ometa.ometa_api import OpenMetadata
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
-from src.schema_registry import lookups
+from src.schema_registry.registry import lookups
 from src.storage import storage_from_env
 from src.storage.base import ObjectStorage
 from src.utils.logger import get_logger
@@ -86,6 +87,19 @@ def _get_by_name(client: OpenMetadata, entity, fqn: str):
 @_retry_transient
 def _create_or_update(client: OpenMetadata, request):
     return client.create_or_update(request)
+
+
+@_retry_transient
+def _replace_entity_fields(client: OpenMetadata, rest_suffix: str, entity_id, fields: dict) -> None:
+    """create_or_update()'s PUT merges array/object fields (tags, extension)
+    instead of replacing them -- verified live: clearing a dataset's
+    `category`/custom-property value in _lookups/datasets.csv and
+    republishing left the old tag/extension values stuck in OpenMetadata.
+    A JSON-Patch `replace` on the exact fields that carry this risk is the
+    only way a cleared value actually clears here too."""
+
+    patch = [{"op": "replace", "path": f"/{field}", "value": value} for field, value in fields.items()]
+    client.client.patch(path=f"{rest_suffix}/{entity_id}", data=json.dumps(patch))
 
 
 # Where curate.py's per-column `tag`/`classification`/`glossary_term`
@@ -219,12 +233,57 @@ def _ensure_service(client: OpenMetadata, service_name: str) -> DatabaseService:
     )
 
 
-def _ensure_database(client: OpenMetadata, service_fqn: str, database_name: str) -> Database:
-    fqn = f"{service_fqn}.{database_name}"
-    existing = _get_or_none(client, Database, fqn)
-    if existing:
-        return existing
-    return _create_or_update(client, CreateDatabaseRequest(name=database_name, service=service_fqn))
+# Dataset-level fields (_lookups/datasets.csv) that don't map to a built-in
+# Database field -- pushed instead as OpenMetadata Custom Properties on the
+# Database entity type (one-time setup: see setup_custom_properties.py).
+_CUSTOM_PROPERTY_NAMES = {
+    "api_available": "apiAvailable",
+    "owner": "datasetOwner",
+    "frequency": "frequency",
+    "timeline": "timeline",
+}
+
+
+def _ensure_database(
+    client: OpenMetadata,
+    service_fqn: str,
+    database_name: str,
+    description: str = "",
+    category: str = "",
+    custom_properties: dict | None = None,
+) -> Database:
+    """Unlike _ensure_service/_ensure_schema, always create-or-update (never
+    short-circuits on an existing entity) -- `description`/`category`/
+    `custom_properties` are dataset-level fields from _lookups/datasets.csv
+    that can be confirmed or changed on a later run, same reasoning as why
+    the table itself is always create-or-update rather than get-or-create."""
+
+    tags = [_tag_label(f"{_SENSITIVITY_CLASSIFICATION}.{category}", TagSource.Classification)] if category else []
+    # Every custom property name is always included, blank ("") if unset --
+    # so the field is visibly present (not yet answered) rather than the
+    # whole `extension` silently disappearing when nothing's been set yet.
+    custom_properties = custom_properties or {}
+    extension = {name: custom_properties.get(field, "") for field, name in _CUSTOM_PROPERTY_NAMES.items()}
+    database = _create_or_update(
+        client,
+        CreateDatabaseRequest(
+            name=database_name,
+            service=service_fqn,
+            description=description or None,
+            tags=tags,
+            extension=extension,
+        ),
+    )
+    _replace_entity_fields(
+        client,
+        "/databases",
+        _unwrap(database.id),
+        {
+            "tags": [t.model_dump(mode="json", exclude_none=True) for t in tags],
+            "extension": extension,
+        },
+    )
+    return database
 
 
 def _ensure_schema(client: OpenMetadata, database_fqn: str, schema_name: str) -> DatabaseSchema:
@@ -284,6 +343,25 @@ _CAT_DESCRIPTIONS = {
 }
 
 
+def _ensure_sensitivity_tag(client: OpenMetadata, category: str) -> None:
+    """Shared by column-level `classification` (_ensure_tags_and_terms) and
+    the dataset-level `category` (publish_table) -- both are the same MDSF
+    CAT-1/2/3/4 vocabulary, just attached at different entity levels."""
+
+    _ensure_classification(
+        client,
+        _SENSITIVITY_CLASSIFICATION,
+        "Model Data Sharing Framework data classification (CAT-1 Open / CAT-2 Registered / "
+        "CAT-3 Restricted), assigned per column by curate_schema() and per dataset in _lookups/datasets.csv.",
+    )
+    _ensure_tag(
+        client,
+        _SENSITIVITY_CLASSIFICATION,
+        category,
+        _CAT_DESCRIPTIONS.get(category, f"MDSF data classification category {category}."),
+    )
+
+
 def _ensure_tags_and_terms(client: OpenMetadata, curated_columns: list[dict]) -> None:
     """Create-or-reuse every Classification/Tag/Glossary/GlossaryTerm the
     curated columns reference, before the table request tries to attach
@@ -298,20 +376,8 @@ def _ensure_tags_and_terms(client: OpenMetadata, curated_columns: list[dict]) ->
         _ensure_classification(client, _TAG_CLASSIFICATION, "Rule-based field categories auto-assigned by curate_schema() (see AUTO_TAG_RULES).")
         for tag in tags:
             _ensure_tag(client, _TAG_CLASSIFICATION, tag, f"Columns matching curate.py's AUTO_TAG_RULES pattern for '{tag}'.")
-    if classifications:
-        _ensure_classification(
-            client,
-            _SENSITIVITY_CLASSIFICATION,
-            "Model Data Sharing Framework data classification (CAT-1 Open / CAT-2 Registered / "
-            "CAT-3 Restricted), assigned per column by curate_schema().",
-        )
-        for classification in classifications:
-            _ensure_tag(
-                client,
-                _SENSITIVITY_CLASSIFICATION,
-                classification,
-                _CAT_DESCRIPTIONS.get(classification, f"MDSF data classification category {classification}."),
-            )
+    for classification in classifications:
+        _ensure_sensitivity_tag(client, classification)
     if glossary_terms:
         _ensure_glossary(
             client, _GLOSSARY, "Business terms attached to columns via a department's Field Dictionary (business_metadata_file)."
@@ -335,16 +401,33 @@ def publish_table(client: OpenMetadata, storage: ObjectStorage, table_id: str, s
     """
 
     department_id, dataset_slug, table_slug = table_id.split(".")
+    dataset_id = f"{department_id}.{dataset_slug}"
 
     table_row = lookups.get_table(storage, table_id)
     if table_row is None:
         raise ValueError(f"Unknown table_id '{table_id}' -- not found in {lookups.TABLES_PATH}")
+    dataset_row = lookups.get_dataset(storage, dataset_id) or {}
 
     curated_path = lookups.latest_curated_snapshot_path(storage, department_id, dataset_slug, table_slug)
     curated_columns = storage.read_csv(curated_path)
 
     service = _ensure_service(client, service_name or department_id)
-    database = _ensure_database(client, _fqn(service), dataset_slug)
+    category = dataset_row.get("category", "")
+    if category:
+        _ensure_sensitivity_tag(client, category)
+    database = _ensure_database(
+        client,
+        _fqn(service),
+        dataset_slug,
+        description=dataset_row.get("dataset_description", ""),
+        category=category,
+        custom_properties={
+            "api_available": dataset_row.get("api_available", ""),
+            "owner": dataset_row.get("owner", ""),
+            "frequency": dataset_row.get("frequency", ""),
+            "timeline": dataset_row.get("timeline", ""),
+        },
+    )
     schema = _ensure_schema(client, _fqn(database), table_row["schema_name"])
 
     # Built (and, if invalid, raised) before touching tags/glossary terms in

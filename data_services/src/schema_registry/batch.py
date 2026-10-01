@@ -4,8 +4,8 @@ import os
 from dotenv import load_dotenv
 from metadata.ingestion.ometa.ometa_api import OpenMetadata
 
-from src.schema_registry import lookups
-from src.schema_registry.openmetadata_publish import get_client
+from src.schema_registry.registry import lookups
+from src.schema_registry.openmetadata.publish import get_client
 from src.schema_registry.pipeline import run
 from src.storage import storage_from_env
 from src.storage.base import ObjectStorage

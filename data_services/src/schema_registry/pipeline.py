@@ -7,9 +7,9 @@ from dotenv import load_dotenv
 from filelock import FileLock
 from metadata.ingestion.ometa.ometa_api import OpenMetadata
 
-from src.schema_registry import lookups, paths
+from src.schema_registry.registry import lookups, paths
 from src.schema_registry.curate import curate_schema
-from src.schema_registry.openmetadata_publish import get_client, publish_table
+from src.schema_registry.openmetadata.publish import get_client, publish_table
 from src.schema_registry.parsers.csv_schema_parser import parse_csv_columns
 from src.schema_registry.parsers.ddl_parser import parse_postgres_columns
 from src.storage import storage_from_env
@@ -80,12 +80,12 @@ def run(
     source_format: str = "postgres_ddl",
     schema_name: str = "public",
     business_metadata_file: str | None = None,
+    category: str = "",
+    api_available: str = "",
     owner: str = "",
-    fiduciary: str = "",
-    processor: str = "",
-    risk_classification: str = "",
-    retention_policy: str = "",
-    lineage: str = "",
+    frequency: str = "",
+    timeline: str = "",
+    dataset_description: str = "",
     openmetadata_client: OpenMetadata | None = None,
     allow_column_removal: bool = False,
 ) -> dict:
@@ -113,12 +113,13 @@ def run(
     department, so departments are a deliberately controlled vocabulary
     rather than auto-created from whatever text a caller passes.
 
-    owner/fiduciary/processor/risk_classification/retention_policy/lineage
-    are dataset-level governance fields (needed for OpenMetadata's Owner
-    field and custom properties) stored once per dataset in
-    `_lookups/datasets.csv`, not repeated per column row. Left blank if
-    not yet confirmed -- re-run with the answer once it comes in to update
-    the existing entry.
+    category/api_available/owner/frequency/timeline/dataset_description are
+    dataset-level fields (decided in the governance meeting) stored once
+    per dataset in `_lookups/datasets.csv`, not repeated per column row --
+    `category` (MDSF CAT-1/2/3/4) and `dataset_description` are also pushed
+    to OpenMetadata as the Database entity's tag/description by
+    publish_table(). Left blank if not yet confirmed -- re-run with the
+    answer once it comes in to update the existing entry.
 
     Storage layout (each table gets its own folder, since tables in the
     same dataset can have unrelated structures) -- defined once in
@@ -127,7 +128,7 @@ def run(
         department/<department_id>/<dataset_slug>/<table_slug>/curated/schemas/<timestamp>.csv
 
     `openmetadata_client`: if given, the freshly curated snapshot is also
-    published to OpenMetadata (via openmetadata_publish.publish_table) as
+    published to OpenMetadata (via openmetadata.publish.publish_table) as
     the last step of this same call, so ingest -> curate -> publish is one
     pipeline run instead of two separate manual steps. Omit it to keep
     this call to storage only.
@@ -169,8 +170,8 @@ def run(
 
     lookups.upsert_dataset(
         storage, dataset_id, department_id, dataset,
-        owner=owner, fiduciary=fiduciary, processor=processor,
-        risk_classification=risk_classification, retention_policy=retention_policy, lineage=lineage,
+        category=category, api_available=api_available, owner=owner,
+        frequency=frequency, timeline=timeline, dataset_description=dataset_description,
     )
     lookups.upsert_table(storage, table_id, dataset_id, table_name, schema_name)
 
@@ -259,6 +260,15 @@ if __name__ == "__main__":
         source_format=os.environ.get("SOURCE_FORMAT", "postgres_ddl"),
         schema_name=os.environ.get("SCHEMA_NAME", "public"),
         business_metadata_file=os.environ.get("BUSINESS_METADATA_FILE"),
+        # Dataset-level fields -- optional, only needed once per dataset
+        # (upsert_dataset() carries forward whatever's already set, so a
+        # later run for a different table in the same dataset can omit these).
+        category=os.environ.get("CATEGORY", ""),
+        api_available=os.environ.get("API_AVAILABLE", ""),
+        owner=os.environ.get("OWNER", ""),
+        frequency=os.environ.get("FREQUENCY", ""),
+        timeline=os.environ.get("TIMELINE", ""),
+        dataset_description=os.environ.get("DATASET_DESCRIPTION", ""),
         openmetadata_client=_client,
         allow_column_removal=os.environ.get("ALLOW_COLUMN_REMOVAL", "").strip().lower() in _TRUE_VALUES,
     )

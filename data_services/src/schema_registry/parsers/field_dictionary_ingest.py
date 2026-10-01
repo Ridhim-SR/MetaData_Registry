@@ -95,7 +95,7 @@ if __name__ == "__main__":
 
     from dotenv import load_dotenv
 
-    from src.schema_registry.openmetadata_publish import get_client
+    from src.schema_registry.openmetadata.publish import get_client
     from src.storage import storage_from_env
 
     load_dotenv()

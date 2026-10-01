@@ -3,8 +3,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.schema_registry import lookups
-from src.schema_registry.openmetadata_publish import _unwrap
+from src.schema_registry.registry import lookups
+from src.schema_registry.openmetadata.publish import _unwrap
 from src.schema_registry.pipeline import run
 from src.storage.local import LocalObjectStorage
 

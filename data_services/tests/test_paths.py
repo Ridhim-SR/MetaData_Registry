@@ -1,4 +1,4 @@
-from src.schema_registry import paths
+from src.schema_registry.registry import paths
 
 
 def test_table_prefix_shape():

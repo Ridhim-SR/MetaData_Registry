@@ -2,7 +2,7 @@ import boto3
 import pytest
 from moto import mock_aws
 
-from src.schema_registry import lookups
+from src.schema_registry.registry import lookups
 from src.schema_registry.pipeline import run
 from src.storage.s3 import S3ObjectStorage
 

@@ -4,7 +4,7 @@ import re
 from dotenv import load_dotenv
 from filelock import FileLock
 
-from src.schema_registry import paths
+from src.schema_registry.registry import paths
 from src.storage import storage_from_env
 from src.storage.base import ObjectStorage
 
@@ -81,19 +81,31 @@ def upsert_dataset(
     dataset_id: str,
     department_id: str,
     dataset_name: str,
+    category: str = "",
+    api_available: str = "",
     owner: str = "",
-    fiduciary: str = "",
-    processor: str = "",
-    risk_classification: str = "",
-    retention_policy: str = "",
-    lineage: str = "",
+    frequency: str = "",
+    timeline: str = "",
+    dataset_description: str = "",
 ) -> None:
-    """Governance fields (owner/fiduciary/processor/risk/retention/lineage)
-    are dataset-level, not per-column, so they live here rather than being
-    repeated on every row of the curated schema CSV. Left blank ("") when
-    not yet confirmed -- call again once an answer comes in to update it,
-    same as unanswered Field Dictionary columns."""
+    """Dataset-level fields (per the governance meeting): `category` (MDSF
+    CAT-1/2/3/4 -- the dataset's overall classification, separate from
+    curate.py's per-column `classification`), `api_available` (Y/N),
+    `owner`, `frequency` (how often the data is refreshed/submitted), and
+    `timeline` (the period/date range the dataset covers). These live here,
+    once per dataset, rather than being repeated on every row of the
+    curated schema CSV.
 
+    A blank ("") argument means "not provided on this call" and carries
+    forward whatever this dataset already has for that field, rather than
+    wiping it -- same philosophy as business_metadata_file's carry-forward
+    for column metadata. This matters because run() calls this once per
+    table: without carry-forward, ingesting a dataset's 2nd/3rd/... table
+    without re-typing its already-confirmed owner/category/etc. every time
+    would silently blank them back out. To deliberately clear a field,
+    edit `_lookups/datasets.csv` directly."""
+
+    existing = get_dataset(storage, dataset_id) or {}
     _upsert(
         storage,
         DATASETS_PATH,
@@ -102,12 +114,12 @@ def upsert_dataset(
             "dataset_id": dataset_id,
             "department_id": department_id,
             "dataset_name": dataset_name,
-            "owner": owner,
-            "fiduciary": fiduciary,
-            "processor": processor,
-            "risk_classification": risk_classification,
-            "retention_policy": retention_policy,
-            "lineage": lineage,
+            "category": category or existing.get("category", ""),
+            "api_available": api_available or existing.get("api_available", ""),
+            "owner": owner or existing.get("owner", ""),
+            "frequency": frequency or existing.get("frequency", ""),
+            "timeline": timeline or existing.get("timeline", ""),
+            "dataset_description": dataset_description or existing.get("dataset_description", ""),
         },
     )
 
@@ -117,7 +129,7 @@ def latest_curated_snapshot_path(
 ) -> str:
     """Path of the most recently written curated schema snapshot for one
     table. Filenames are fixed-width UTC timestamps, so lexical order ==
-    chronological order -- shared by openmetadata_publish.py (publish the
+    chronological order -- shared by openmetadata/publish.py (publish the
     latest) and pipeline.py (diff a new run against the latest)."""
 
     prefix = paths.curated_schemas_prefix(department_id, dataset_slug, table_slug)

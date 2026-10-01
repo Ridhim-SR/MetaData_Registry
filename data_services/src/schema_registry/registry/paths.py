@@ -3,7 +3,7 @@ def table_prefix(department_id: str, dataset_slug: str, table_slug: str) -> str:
     built from this -- changing the folder structure for every department/
     dataset/table this project will ever handle means changing this
     function, not hunting down f-strings scattered across pipeline.py,
-    lookups.py, and openmetadata_publish.py."""
+    lookups.py, and openmetadata/publish.py."""
 
     return f"department/{department_id}/{dataset_slug}/{table_slug}"
 

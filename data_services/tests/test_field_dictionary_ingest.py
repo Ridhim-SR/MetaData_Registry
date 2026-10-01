@@ -1,4 +1,4 @@
-from src.schema_registry import lookups
+from src.schema_registry.registry import lookups
 from src.schema_registry.parsers.field_dictionary_ingest import run_field_dictionary
 from src.storage.local import LocalObjectStorage
 
