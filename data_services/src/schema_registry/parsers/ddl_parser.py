@@ -1,6 +1,10 @@
 import re
 from dataclasses import asdict, dataclass
 
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
 _DEFAULT_RE = re.compile(r"\bDEFAULT\s+(.+)$", re.IGNORECASE)
 _NOT_NULL_RE = re.compile(r"\bNOT\s+NULL\b", re.IGNORECASE)
 _COLLATE_RE = re.compile(r"\bCOLLATE\s+\S+", re.IGNORECASE)
@@ -63,6 +67,9 @@ def parse_column(entry: str) -> ColumnDef:
     name, _, type_part = text.partition(" ")
     type_part = type_part.strip()
 
+    if not type_part:
+        logger.warning(f"Column '{name}' parsed with no data_type -- check the raw DDL entry: '{entry.strip()}'")
+
     length = scale = None
     length_match = _LENGTH_RE.search(type_part)
     if length_match:
@@ -85,4 +92,6 @@ def parse_postgres_columns(ddl_text: str) -> list[dict]:
     or a department Kobo submission) into structured column dicts."""
 
     entries = _split_top_level(ddl_text)
-    return [asdict(parse_column(entry)) for entry in entries]
+    columns = [asdict(parse_column(entry)) for entry in entries]
+    logger.info(f"ddl_parser: parsed {len(columns)} column(s) from raw DDL text")
+    return columns

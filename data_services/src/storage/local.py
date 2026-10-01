@@ -2,6 +2,9 @@ import csv
 from pathlib import Path
 
 from src.storage.base import ObjectStorage
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class LocalObjectStorage(ObjectStorage):
@@ -13,6 +16,7 @@ class LocalObjectStorage(ObjectStorage):
 
     def __init__(self, root_dir: str | Path):
         self.root = Path(root_dir)
+        logger.info(f"LocalObjectStorage ready: root={self.root.resolve()}")
 
     def _full_path(self, path: str) -> Path:
         return self.root / path
