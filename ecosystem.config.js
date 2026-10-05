@@ -1,46 +1,52 @@
-// PM2 process config for cloud deployment: frontend + backend + OpenMetadata.
-// Target: a Linux host with Docker, Node 20+, Python 3.11+.
-//
-// One-time host setup (run on the server, NOT via PM2):
-//   1. npm install -g pm2 && pm2 install pm2-logrotate
-//   2. cd apps/api && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-//   3. VITE_API_BASE_URL=https://<your-backend-host>:8000 npm run build --workspace=web
-//      (Vite bakes the API URL into the bundle at BUILD time — rebuild if it changes.)
-//   4. Export required secrets (see env blocks below), then: npm run pm2:start
-//   5. Persist across reboots: pm2 startup  &&  pm2 save
-//
-// Operate: npm run pm2:logs | pm2:restart | pm2:stop  (see root package.json)
+// PM2 config: registry-web (3100), registry-api (4100), openmetadata (8585).
+// Start: pm2 start ecosystem.config.js && pm2 save   (reboot persistence: pm2 startup)
+const ROOT = "/home/bipp2/MetaData_Registry";
+const WEB_PORT = 3100, API_PORT = 4100;
 
-const API_PORT = Number(process.env.API_PORT || 8000);
-const WEB_PORT = Number(process.env.WEB_PORT || 4173);
-const API_WORKERS = Number(process.env.API_WORKERS || 2);
+const common = { autorestart: true, max_restarts: 50, restart_delay: 5000, min_uptime: "20s" };
 
 module.exports = {
   apps: [
     {
+      // Outbound 5432 is blocked upstream; tunnel Postgres to Neon over wss:443.
+      // registry-api's DATABASE_URL points at 127.0.0.1:5433 with sslmode=disable.
+      name: "neon-bridge",
+      cwd: `${ROOT}/infrastructure/neon-bridge`,
+      script: `${ROOT}/apps/api/.venv/bin/python`,
+      args: "bridge.py",
+      interpreter: "none",
+      env: { NEON_HOST: "ep-ancient-rice-b5kzj3vi-pooler.c-7.us-east-2.aws.neon.tech", BRIDGE_PORT: "5433" },
+      ...common,
+      min_uptime: "5s",
+      restart_delay: 2000,
+    },
+    {
+      // Static Vite build. Rebuild after changing the API URL:
+      //   VITE_API_BASE_URL=http://10.0.96.105:4100 npm run build --workspace=web
       name: "registry-web",
-      cwd: "/home/ubuntu/MetaData_Registry/apps/web",
+      cwd: `${ROOT}/apps/web`,
       script: "npm",
-      args: "run start -- -p 3100",       // Next.js style; adjust to your start script
-      env: { NODE_ENV: "production", PORT: 3100,
-             NEXT_PUBLIC_API_URL: "http://144.24.151.253:4100" },
-      autorestart: true, max_restarts: 10, restart_delay: 5000,
+      args: `run serve -- -l tcp://0.0.0.0:${WEB_PORT}`,
+      interpreter: "none",
+      ...common,
     },
     {
       name: "registry-api",
-      cwd: "/home/ubuntu/MetaData_Registry/apps/api",
-      script: "npm",
-      args: "run start",
-      env: { NODE_ENV: "production", PORT: 4100 },
-      autorestart: true, max_restarts: 10, restart_delay: 5000,
+      cwd: `${ROOT}/apps/api`,
+      script: `${ROOT}/apps/api/.venv/bin/uvicorn`,
+      args: `src.main:app --host 0.0.0.0 --port ${API_PORT} --workers 2`,
+      interpreter: "none",
+      ...common,
     },
     {
+      // OpenMetadata UI/API is published on 8585 by the compose file.
       name: "openmetadata",
-      cwd: "/home/ubuntu/MetaData_Registry/data_services",   // adjust
-      script: "npm",                                          // adjust
-      args: "run start",
-      env: { PORT: 8585 },
-      autorestart: true, max_restarts: 10, restart_delay: 5000,
+      cwd: ROOT,
+      script: "docker",
+      args: "compose -f infrastructure/openmetadata/docker-compose.yml up",
+      interpreter: "none",
+      ...common,
+      restart_delay: 15000,
     },
   ],
 };
