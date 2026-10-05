@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
-import { listDatasets, searchRegistry } from "../api/registry";
+import { listDatasets, listDepartments, searchRegistry } from "../api/registry";
 import { AccessBadge } from "../components/registry/AccessBadge";
 import { DatasetCard, RestrictedTeaser } from "../components/registry/DatasetCard";
 import { EmptyBlock, ErrorBlock, Skeleton } from "../components/registry/StateBlocks";
@@ -13,7 +13,7 @@ export function ExplorePage() {
   const department = params.get("department") ?? "";
   const visibility = params.get("visibility") ?? "";
   const [search, setSearch] = useState(q);
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
 
   useEffect(() => {
     setSearch(q);
@@ -35,6 +35,21 @@ export function ExplorePage() {
     enabled: !isSearch,
     retry: false,
   });
+
+  // Department header: reuse the cached department list (same key as
+  // DepartmentGrid) so the catalogue landing shows name, description
+  // and counts when ?department= is set. Search stays scoped via the
+  // department param already sent by listDatasets/searchRegistry.
+  const departmentsQuery = useQuery({
+    queryKey: ["registry-departments"],
+    queryFn: listDepartments,
+    enabled: Boolean(department),
+    retry: false,
+    staleTime: 5 * 60 * 1000,
+  });
+  const activeDepartment = department
+    ? (departmentsQuery.data?.items ?? []).find((d) => d.name === department) ?? null
+    : null;
 
   const onSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -92,11 +107,27 @@ export function ExplorePage() {
         )}
       </form>
 
-      {(department || visibility) && (
+      {department && (
+        <div className="mt-4 rounded-lg border border-slate-200 bg-white p-5">
+          <p className="text-xs font-medium tracking-wide text-slate-500 uppercase">Department catalogue</p>
+          <h2 className="mt-1 text-xl font-bold text-slate-900">{activeDepartment?.name ?? department}</h2>
+          {activeDepartment?.description && (
+            <p className="mt-1 text-sm text-slate-600">{activeDepartment.description}</p>
+          )}
+          <p className="mt-2 text-sm text-slate-600" role="status">
+            {activeDepartment
+              ? `${activeDepartment.dataset_count} ${activeDepartment.dataset_count === 1 ? "dataset" : "datasets"} · ${activeDepartment.table_count} ${activeDepartment.table_count === 1 ? "table" : "tables"}`
+              : "Loading catalogue info…"}
+          </p>
+          <p className="mt-1 text-xs text-slate-500">
+            Search and browsing are scoped to this department. Datasets you cannot open appear as restricted.
+          </p>
+        </div>
+      )}
+
+      {visibility && !department && (
         <p className="mt-3 text-sm text-slate-600">
-          Filtered by {department && <span className="font-medium">department: {department}</span>}
-          {department && visibility && " · "}
-          {visibility && <span className="font-medium">visibility: {visibility}</span>}
+          Filtered by <span className="font-medium">visibility: {visibility}</span>
         </p>
       )}
 
@@ -119,14 +150,24 @@ export function ExplorePage() {
         {!isPending && !error && isSearch && results.length === 0 && teasers.length === 0 && (
           <EmptyBlock
             title={`No results for "${trimmed}".`}
-            body="Try different keywords, or browse departments and public data instead."
+            body={
+              department
+                ? "Try different keywords, or clear the department filter. Matches inside restricted datasets are hidden by access policy."
+                : "Try different keywords, or browse departments and public data instead."
+            }
           />
         )}
 
         {!isPending && !error && !isSearch && visibleCards.length === 0 && teasers.length === 0 && (
           <EmptyBlock
             title="No datasets match these filters."
-            body="Try clearing the filters or browse public data."
+            body={
+              department && (activeDepartment?.table_count ?? 0) > 0
+                ? isAuthenticated && !user?.department
+                  ? "This department has published datasets, but your account has no department assigned, so they are hidden. Contact an admin to assign your department."
+                  : "This department has published datasets, but none are visible to your account. Restricted datasets are hidden — request access or contact an admin."
+                : "Try clearing the filters or browse public data."
+            }
             action={
               <button
                 onClick={clearFilters}

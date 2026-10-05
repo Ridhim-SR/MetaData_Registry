@@ -261,19 +261,20 @@ async def registry_search(
             result = await client.search_tables(query=q, limit=size, page=page)
             candidates = result.get("data", [])
             fallback = False
-            total = result.get("total", len(candidates))
         except Exception:
             page_data = await client.list_tables_paged(limit=1000)
             candidates = [t for t in page_data["data"] if _matches(t, q.lower())]
             fallback = True
-            total = None
     if department:
         wanted = vis.department_candidates(department) | {department}
         candidates = [t for t in candidates if (t.get("fullyQualifiedName") or "").split(".")[0] in wanted]
     vmap = await _visibility_map(session, [t.get("fullyQualifiedName") or "" for t in candidates])
     full, teasers = vis.visible_tables(candidates, vmap, ctx)
     annotated = [_annotate(t, vmap) for t in full]
-    total = total if total is not None else len(annotated)
+    # Recompute after department + visibility filtering: the OM search total
+    # counts unfiltered hits, which contradicts data/teasers once policy drops
+    # tables the caller may not see (e.g. department tables for outsiders).
+    total = len(annotated) + len(teasers)
     return {"data": annotated, "teasers": teasers, "total": total, "page": page, "fallback": fallback}
 
 
