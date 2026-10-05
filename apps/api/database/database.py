@@ -36,7 +36,15 @@ def _split_sslmode(url: str) -> tuple[str, dict]:
 _DATABASE_URL, _CONNECT_ARGS = _split_sslmode(DATABASE_URL)
 
 engine = create_async_engine(
-    _DATABASE_URL, connect_args=_CONNECT_ARGS, pool_size=5, max_overflow=10
+    _DATABASE_URL,
+    connect_args=_CONNECT_ARGS,
+    pool_size=5,
+    max_overflow=10,
+    # The Neon WebSocket bridge (127.0.0.1:5433 on blocked hosts) drops
+    # idle connections; without pre-ping the pool reuses dead handles and
+    # every pooled query intermittently fails with "connection is closed".
+    pool_pre_ping=True,
+    pool_recycle=300,
 )
 async_session = async_sessionmaker(engine, expire_on_commit=False)
 

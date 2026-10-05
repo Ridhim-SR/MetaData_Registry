@@ -79,7 +79,14 @@ async def om_status_handler(request: Request, exc: httpx.HTTPStatusError):
 
 @app.get("/")
 async def root(session: AsyncSession = Depends(db_get_session)):
-    result = await session.execute(text("SELECT version()"))
+    from sqlalchemy.exc import DBAPIError
+
+    try:
+        result = await session.execute(text("SELECT version()"))
+    except DBAPIError:
+        # Stale pooled handle via the WS bridge — retry once on a fresh checkout.
+        await session.rollback()
+        result = await session.execute(text("SELECT version()"))
     return {"message": "Hello from backend", "db": result.scalar()}
 
 
