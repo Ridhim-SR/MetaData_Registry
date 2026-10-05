@@ -190,6 +190,36 @@ Each curated column's `classification` is now applied as a tag on that column:
 
 ---
 
+### Upload processed data to Neon (ingest API, 2026-10-05)
+The curated snapshots no longer need to be mailed to the backend — `apps/api`
+takes them over HTTP and stores them in the app DB (Neon in production,
+`registry.*` schema):
+
+| Method | Path | Auth | Purpose |
+|--------|------|------|---------|
+| POST | `/registry/ingest` | logged-in user | upload a curated CSV snapshot (multipart `file`, optional `table_id`, `schema_name`) |
+| GET | `/registry/ingest/tables` | public | list every ingested table |
+| GET | `/registry/ingest/tables/{table_id}` | public | one table + its columns in snapshot order |
+
+```bash
+TOKEN=$(curl -s -X POST $API/auth/login -H 'Content-Type: application/json' \
+  -d '{"email":"...","password":"..."}' | jq -r .access_token)
+curl -X POST $API/registry/ingest -H "Authorization: Bearer $TOKEN" \
+  -F file=@storage/department/<dept>/<dataset>/<table>/curated/schemas/<ts>.csv
+```
+- Re-uploading the same table is idempotent (rows for that `table_id` are
+  replaced, not appended); the snapshot's own `table_id` is trusted and a
+  mismatched override is rejected, as is any file that isn't a curated
+  snapshot (e.g. a raw source CSV).
+- Tables: `registry.tables` / `registry.columns` (DDL in `apps/api/schema.sql`,
+  created automatically at startup via `CREATE SCHEMA IF NOT EXISTS registry`).
+- Endpoints and parsing covered by `apps/api/tests/test_registry_ingest.py`
+  (18 passed); also verified live against a throwaway Postgres: upload,
+  idempotent re-upload, 422 on wrong file, 401 without a token, 404 on an
+  unknown `table_id`.
+
+---
+
 ### Future Work
 - [ ] Add Field Dictionary (business metadata) for remaining tables
 - [ ] Add dataset governance fields (owner, retention_policy, lineage)

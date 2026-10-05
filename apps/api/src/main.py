@@ -24,6 +24,8 @@ from src.routers import app_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
+        await conn.execute(text("CREATE SCHEMA IF NOT EXISTS registry"))
+        await conn.execute(text("CREATE SCHEMA IF NOT EXISTS users"))
         await conn.run_sync(Base.metadata.create_all)
         # Lightweight dev migration for pre-existing databases
         await conn.execute(text("ALTER TABLE users.users ADD COLUMN IF NOT EXISTS department VARCHAR(100)"))

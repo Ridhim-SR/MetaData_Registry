@@ -10,4 +10,5 @@ python-dotenv>=1.0.0
 python-multipart>=0.0.9
 python-jose>=3.3.0
 passlib[bcrypt]>=1.7.4
+bcrypt>=1.4,<4.1 # passlib 1.7.4 raises ValueError on bcrypt>=4.1 during its own self-test
 openmetadata-ingestion==2.0.2.0

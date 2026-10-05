@@ -53,3 +53,44 @@ CREATE TABLE users.access_requests (
 
 CREATE INDEX idx_access_requests_fqn ON users.access_requests (fqn);
 CREATE INDEX idx_access_requests_user ON users.access_requests (user_id);
+
+-- Processed registry data ingested from data_services curated CSV snapshots
+-- (POST /registry/ingest). Kept separate from the users.* app tables: this is
+-- the pipeline's output, the backend reads it straight from Neon.
+CREATE SCHEMA IF NOT EXISTS registry;
+
+CREATE TABLE registry.tables (
+    id SERIAL PRIMARY KEY,
+    table_id VARCHAR(300) UNIQUE NOT NULL,
+    department VARCHAR(100) NOT NULL,
+    dataset VARCHAR(200) NOT NULL,
+    schema_name VARCHAR(200) NOT NULL DEFAULT 'public',
+    table_name VARCHAR(200) NOT NULL,
+    column_count INTEGER NOT NULL DEFAULT 0,
+    source_timestamp VARCHAR(40),
+    uploaded_by VARCHAR(255),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_registry_tables_dataset ON registry.tables (department, dataset);
+
+CREATE TABLE registry.columns (
+    id SERIAL PRIMARY KEY,
+    table_id VARCHAR(300) NOT NULL REFERENCES registry.tables(table_id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    name VARCHAR(200) NOT NULL,
+    data_type VARCHAR(50) NOT NULL,
+    length INTEGER,
+    scale INTEGER,
+    nullable BOOLEAN NOT NULL DEFAULT TRUE,
+    default_value VARCHAR(500),
+    business_description TEXT,
+    tag VARCHAR(200),
+    classification VARCHAR(50),
+    glossary_term VARCHAR(200),
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    validation_warning TEXT
+);
+
+CREATE INDEX idx_registry_columns_table ON registry.columns (table_id, position);

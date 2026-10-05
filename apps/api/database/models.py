@@ -1,7 +1,7 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, Index, Integer, String, func
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -108,3 +108,61 @@ class AccessRequest(Base):
     note: Mapped[str | None] = mapped_column(String(1000), nullable=True, default=None)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="pending")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class RegistryTable(Base):
+    """A dataset table's processed schema, ingested from data_services'
+    curated CSV snapshots (POST /registry/ingest).
+
+    One row per ``table_id`` ("department.dataset.table"); the snapshot's
+    column rows live in ``registry.columns``. OpenMetadata stays the
+    catalogue of record -- these tables are the shared, queryable copy of
+    our pipeline's output so the backend never needs the CSVs mailed over.
+    """
+
+    __tablename__ = "tables"
+    __table_args__ = (
+        Index("idx_registry_tables_dataset", "department", "dataset"),
+        {"schema": "registry"},
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    table_id: Mapped[str] = mapped_column(String(300), unique=True, nullable=False)
+    department: Mapped[str] = mapped_column(String(100), nullable=False)
+    dataset: Mapped[str] = mapped_column(String(200), nullable=False)
+    schema_name: Mapped[str] = mapped_column(String(200), nullable=False, default="public")
+    table_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    column_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # ingestion_timestamp copied from the snapshot itself (provenance)
+    source_timestamp: Mapped[str | None] = mapped_column(String(40), nullable=True, default=None)
+    uploaded_by: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class RegistryColumn(Base):
+    """One column of an ingested table -- a curated snapshot row."""
+
+    __tablename__ = "columns"
+    __table_args__ = (
+        Index("idx_registry_columns_table", "table_id", "position"),
+        {"schema": "registry"},
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    table_id: Mapped[str] = mapped_column(
+        String(300), ForeignKey("registry.tables.table_id", ondelete="CASCADE"), nullable=False
+    )
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    data_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    length: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
+    scale: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
+    nullable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    default_value: Mapped[str | None] = mapped_column(String(500), nullable=True, default=None)
+    business_description: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    tag: Mapped[str | None] = mapped_column(String(200), nullable=True, default=None)
+    classification: Mapped[str | None] = mapped_column(String(50), nullable=True, default=None)
+    glossary_term: Mapped[str | None] = mapped_column(String(200), nullable=True, default=None)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    validation_warning: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
