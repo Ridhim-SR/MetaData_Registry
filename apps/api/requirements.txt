@@ -9,5 +9,6 @@ pydantic-settings>=2.14.0
 python-dotenv>=1.0.0
 python-multipart>=0.0.9
 python-jose>=3.3.0
-passlib[bcrypt]>=1.7.4
+passlib[bcrypt]==1.7.4
+bcrypt==4.0.1
 openmetadata-ingestion==2.0.2.0
