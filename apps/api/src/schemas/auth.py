@@ -1,17 +1,19 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 
-from database.models import UserRole
+from database.models import AuthProvider, UserRole
 
 
 class RegisterRequest(BaseModel):
-    username: str
+    first_name: str = Field(min_length=1, max_length=100)
+    last_name: str = Field(min_length=1, max_length=100)
     email: EmailStr
-    password: str
-    role: UserRole = UserRole.user
+    password: str = Field(min_length=6)
+    department: str | None = None
 
 
 class LoginRequest(BaseModel):
-    username: str
+    # Email preferred; a legacy username still works.
+    email: str = Field(min_length=1)
     password: str
 
 
@@ -24,4 +26,17 @@ class MeResponse(BaseModel):
     id: int
     username: str
     email: str
+    first_name: str | None = None
+    last_name: str | None = None
     role: UserRole
+    department: str | None = None
+    auth_provider: AuthProvider = AuthProvider.local
+
+
+class OAuthCallbackRequest(BaseModel):
+    code: str
+    redirect_uri: str
+
+
+class OAuthURLResponse(BaseModel):
+    authorization_url: str

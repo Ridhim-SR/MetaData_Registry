@@ -1,6 +1,6 @@
 import pytest
 
-from src.schema_registry.csv_schema_parser import parse_csv_columns
+from src.schema_registry.parsers.csv_schema_parser import parse_csv_columns
 
 
 def _write(tmp_path, name, content):

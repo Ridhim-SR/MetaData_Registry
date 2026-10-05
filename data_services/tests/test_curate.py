@@ -64,3 +64,32 @@ def test_field_without_business_metadata_stays_blank():
     assert curated[0]["business_description"] == ""
     assert curated[0]["glossary_term"] == ""
     assert curated[0]["active"] is True
+
+
+def test_auto_classifies_pii_fields_as_pii():
+    curated = curate_schema(
+        [
+            _col("aadhaar_number", "character varying"),
+            _col("mobile_number", "character varying"),
+            _col("email", "character varying"),
+            _col("date_of_birth", "date"),
+        ]
+    )
+    assert all(row["classification"] == "PII" for row in curated)
+
+
+def test_non_pii_field_defaults_to_internal():
+    curated = curate_schema([_col("sno", "integer")])
+    assert curated[0]["classification"] == "Internal"
+
+
+def test_business_metadata_overrides_auto_classification():
+    business_metadata = {"mobile_number": {"classification": "Confidential"}}
+    curated = curate_schema([_col("mobile_number", "character varying")], business_metadata)
+    assert curated[0]["classification"] == "Confidential"
+
+
+def test_unknown_classification_override_falls_back_to_rules():
+    business_metadata = {"mobile_number": {"classification": "CAT-2"}}
+    curated = curate_schema([_col("mobile_number", "character varying")], business_metadata)
+    assert curated[0]["classification"] == "PII"

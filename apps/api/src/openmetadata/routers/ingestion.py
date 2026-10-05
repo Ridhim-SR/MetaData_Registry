@@ -2,8 +2,10 @@ import shutil
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, UploadFile
 
+from database.models import User
+from src.middleware.auth import get_current_user
 from src.openmetadata.client import OpenMetadataClient
 from src.openmetadata.ingestion.connectors import PostgresConnector, CsvConnector
 from src.openmetadata.schemas.ingestion import (
@@ -21,7 +23,7 @@ UPLOAD_DIR = Path(__file__).resolve().parents[3] / "uploads"
 
 
 @router.post("/csv/upload", response_model=CsvUploadResponse)
-async def upload_csv(file: UploadFile) -> CsvUploadResponse:
+async def upload_csv(file: UploadFile, _user: User = Depends(get_current_user)) -> CsvUploadResponse:
     if not file.filename or not file.filename.lower().endswith(".csv"):
         raise HTTPException(status_code=400, detail="Only .csv files are allowed")
 
@@ -40,7 +42,7 @@ async def upload_csv(file: UploadFile) -> CsvUploadResponse:
 
 
 @router.post("/postgres")
-async def ingest_postgres(config: PostgresIngestionConfig) -> PipelineTriggerResponse:
+async def ingest_postgres(config: PostgresIngestionConfig, _user: User = Depends(get_current_user)) -> PipelineTriggerResponse:
     async with OpenMetadataClient() as client:
         connector = PostgresConnector(config.model_dump())
         result = await connector.ingest(client)
@@ -52,7 +54,7 @@ async def ingest_postgres(config: PostgresIngestionConfig) -> PipelineTriggerRes
 
 
 @router.post("/csv")
-async def ingest_csv(config: CsvIngestionConfig) -> PipelineTriggerResponse:
+async def ingest_csv(config: CsvIngestionConfig, _user: User = Depends(get_current_user)) -> PipelineTriggerResponse:
     async with OpenMetadataClient() as client:
         connector = CsvConnector(config.model_dump())
         result = await connector.ingest(client)
@@ -64,7 +66,7 @@ async def ingest_csv(config: CsvIngestionConfig) -> PipelineTriggerResponse:
 
 
 @router.post("/pipelines/trigger")
-async def trigger_pipeline(req: PipelineTriggerRequest) -> PipelineTriggerResponse:
+async def trigger_pipeline(req: PipelineTriggerRequest, _user: User = Depends(get_current_user)) -> PipelineTriggerResponse:
     async with OpenMetadataClient() as client:
         result = await client.trigger_ingestion_pipeline(req.pipeline_id)
     return PipelineTriggerResponse(
@@ -75,13 +77,13 @@ async def trigger_pipeline(req: PipelineTriggerRequest) -> PipelineTriggerRespon
 
 
 @router.get("/pipelines")
-async def list_pipelines() -> list[dict]:
+async def list_pipelines(_user: User = Depends(get_current_user)) -> list[dict]:
     async with OpenMetadataClient() as client:
         return await client.list_ingestion_pipelines()
 
 
 @router.post("/pipelines")
-async def create_pipeline(pipeline: IngestionPipelineDef) -> dict:
+async def create_pipeline(pipeline: IngestionPipelineDef, _user: User = Depends(get_current_user)) -> dict:
     async with OpenMetadataClient() as client:
         return await client.create_ingestion_pipeline(pipeline.model_dump(exclude_none=True))
 

@@ -1,8 +1,10 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { displayName } from "../api/auth";
 import { useAuth } from "../contexts/AuthContext";
 
 const links = [
-  { to: "/", label: "Dashboard" },
+  { to: "/", label: "Home" },
+  { to: "/dashboard", label: "Dashboard" },
   { to: "/explore", label: "Explore" },
   { to: "/ingestion", label: "Ingestion" },
   { to: "/users", label: "Users" },
@@ -38,7 +40,7 @@ export function Layout() {
         </nav>
         <div className="border-t border-slate-200 p-4">
           <div className="mb-2 text-sm">
-            <div className="font-medium">{user?.username}</div>
+            <div className="font-medium">{displayName(user)}</div>
             <div className="text-xs text-slate-500">
               {user?.email} · {user?.role}
             </div>
@@ -51,8 +53,11 @@ export function Layout() {
           </button>
         </div>
       </aside>
-      <main className="flex-1 overflow-auto p-8">
-        <Outlet />
+      <main className="flex-1 overflow-auto p-4 sm:p-6 lg:p-8">
+        {/* Constrained container: keeps admin pages compact & centered on wide monitors */}
+        <div className="mx-auto w-full max-w-7xl">
+          <Outlet />
+        </div>
       </main>
     </div>
   );

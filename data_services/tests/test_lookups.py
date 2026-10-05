@@ -1,4 +1,4 @@
-from src.schema_registry import lookups
+from src.schema_registry.registry import lookups
 from src.storage.local import LocalObjectStorage
 
 
@@ -33,12 +33,12 @@ def test_upsert_dataset_links_to_department(tmp_path):
             "dataset_id": "pwd.vishwakarma",
             "department_id": "pwd",
             "dataset_name": "vishwakarma",
+            "category": "",
+            "api_available": "",
             "owner": "",
-            "fiduciary": "",
-            "processor": "",
-            "risk_classification": "",
-            "retention_policy": "",
-            "lineage": "",
+            "frequency": "",
+            "timeline": "",
+            "dataset_description": "",
         }
     ]
 
@@ -47,15 +47,43 @@ def test_upsert_dataset_governance_fields(tmp_path):
     storage = LocalObjectStorage(tmp_path)
     lookups.upsert_dataset(
         storage, "pwd.vishwakarma", "pwd", "vishwakarma",
-        fiduciary="Superintendent Engineer, I.D.S. Circle, Lucknow",
-        processor="not defined",
-        risk_classification="4/5",
+        category="CAT-2",
+        api_available="N",
+        frequency="Annual",
+        timeline="2024-25",
+        dataset_description="PWD's master works dataset.",
     )
     rows = storage.read_csv(lookups.DATASETS_PATH)
-    assert rows[0]["fiduciary"] == "Superintendent Engineer, I.D.S. Circle, Lucknow"
-    assert rows[0]["processor"] == "not defined"
-    assert rows[0]["risk_classification"] == "4/5"
+    assert rows[0]["category"] == "CAT-2"
+    assert rows[0]["api_available"] == "N"
+    assert rows[0]["frequency"] == "Annual"
+    assert rows[0]["timeline"] == "2024-25"
+    assert rows[0]["dataset_description"] == "PWD's master works dataset."
     assert rows[0]["owner"] == ""
+
+
+def test_upsert_dataset_carries_forward_unmentioned_fields(tmp_path):
+    """run() calls upsert_dataset() once per table -- a 2nd/3rd table in the
+    same dataset must not have to re-type the 1st table's already-confirmed
+    owner/category/etc., or they'd silently get wiped back to blank."""
+
+    storage = LocalObjectStorage(tmp_path)
+    lookups.upsert_dataset(storage, "pwd.vishwakarma", "pwd", "vishwakarma", category="CAT-2", owner="Someone")
+
+    lookups.upsert_dataset(storage, "pwd.vishwakarma", "pwd", "vishwakarma")
+
+    row = lookups.get_dataset(storage, "pwd.vishwakarma")
+    assert row["category"] == "CAT-2"
+    assert row["owner"] == "Someone"
+
+
+def test_upsert_dataset_new_value_overrides_carried_forward_one(tmp_path):
+    storage = LocalObjectStorage(tmp_path)
+    lookups.upsert_dataset(storage, "pwd.vishwakarma", "pwd", "vishwakarma", category="CAT-2")
+
+    lookups.upsert_dataset(storage, "pwd.vishwakarma", "pwd", "vishwakarma", category="CAT-3")
+
+    assert lookups.get_dataset(storage, "pwd.vishwakarma")["category"] == "CAT-3"
 
 
 def test_upsert_table_links_to_dataset(tmp_path):

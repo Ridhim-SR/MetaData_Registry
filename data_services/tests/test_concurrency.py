@@ -2,7 +2,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 
-from src.schema_registry import lookups
+from src.schema_registry.registry import lookups
 from src.schema_registry.pipeline import run
 from src.storage.local import LocalObjectStorage
 

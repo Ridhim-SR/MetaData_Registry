@@ -9,6 +9,24 @@
 
 ---
 
+### Merged origin/main (2026-10-05)
+- Merged `origin/main` (PR #11, 23 commits) into this branch; 5 conflicts resolved
+- **Classification decision**: field-level `classification` keeps this branch's
+  MDSF levels (`Public`/`Internal`/`Confidential`/`Restricted`/`PII`/`Financial`/`Health`,
+  default `Internal`), **not** main's `CAT-3`-or-blank `auto_classification()` —
+  main's PII patterns (aadhaar, voter id, driving licence, vehicle registration)
+  were folded into `AUTO_CLASSIFICATION_RULES` instead. Dataset-level `category`
+  (CAT-1/2/3) still publishes as `DataSensitivity.*`.
+- Adopted main's restructure: `lookups.py` → `registry/lookups.py`,
+  `openmetadata_publish.py` → `openmetadata/publish.py`, parsers moved under
+  `parsers/`. From our old module, `bytea` in `_TYPE_MAP` and the mutually
+  exclusive `MDSF` classification (all 7 level tags) were ported into
+  `openmetadata/publish.py`.
+- Main's own doc comments still say `openmetadata_publish.py` (README,
+  `storage/__init__.py`, `tests/test_pipeline.py`) — stale on main too.
+
+---
+
 ### Dataset 1: Distribution Record Dataset
 - **Dataset**: DISTRIBUTION RECORD DATASET (distribution_record_dataset)
 
@@ -87,7 +105,7 @@ python -m data_services.src.schema_registry.parsers.dept.Agriculture.preprocess_
 
 Register department:
 ```bash
-DEPARTMENT_ID=agriculture_department DEPARTMENT_NAME="Agriculture Department" python -m src.schema_registry.lookups
+DEPARTMENT_ID=agriculture_department DEPARTMENT_NAME="Agriculture Department" python -m src.schema_registry.registry.lookups
 ```
 
 Batch ingest (storage):
@@ -127,10 +145,10 @@ aadhar_no,"Unique Aadhaar number",PII,UIDAI_Aadhaar,true,PII
 Each curated column's `classification` is now applied as a tag on that column:
 
 - Tag classification `MDSF` (mutually exclusive) auto-created by
-  `openmetadata_publish._ensure_classification()` with all 7 level tags —
+  `openmetadata.publish._ensure_mdsf_levels()` with all 7 level tags —
   idempotent, runs once per publish
-- `openmetadata_publish._to_column()` attaches a `TagLabel`
-  (`source=Classification`, `labelType=Manual`, `state=Confirmed`) for the
+- `openmetadata.publish._to_column()` attaches a `TagLabel`
+  (`source=Classification`, `labelType=Automated`, `state=Confirmed`) for the
   row's `classification`
 - Verified: **288/288 columns tagged** across all 9 tables
   (`MDSF.Internal` 189, `MDSF.PII` 55, `MDSF.Financial` 41,
@@ -155,17 +173,20 @@ Each curated column's `classification` is now applied as a tag on that column:
   that no longer existed in MySQL), so the Explore UI showed 14 tables instead
   of 9. Deleted them from `table_search_index`; API and UI both report 9 now.
   → If MySQL is ever wiped again, clean ES too (or re-run the search indexer).
-- `bytea` type added to `_TYPE_MAP` (openmetadata_publish.py) and
+- `bytea` type added to `_TYPE_MAP` (openmetadata/publish.py) and
   `KNOWN_POSTGRES_TYPES` (curate.py)
 
 ---
 
 ### Tests
-- `python -m pytest tests/ -q` → **75 passed, 1 failed**
-- The 1 failure is pre-existing and unrelated:
-  `test_ddl_parser.py::test_real_vishwakarma_sample_parses_all_213_columns`
-  needs `samples/pwd_vishwakarma_full_raw_columns.txt`, which is gitignored
-  (raw production dumps). Not a regression.
+- `python -m pytest tests/ -q` → **112 passed, 2 failed**
+- Both failures are environmental (gitignored raw sample dumps, not in the
+  repo), unrelated to this branch's changes:
+  - `test_ddl_parser.py::test_real_vishwakarma_sample_parses_all_213_columns`
+    needs `samples/pwd_vishwakarma_full_raw_columns.txt`
+  - `test_field_dictionary_parser.py::test_real_sample_file_parses_into_seven_tables`
+    needs `samples/kanya_sumangla_field_dictionary.csv`
+- Requires main's new test dependency `moto[s3]` (in `requirements.txt`)
 
 ---
 

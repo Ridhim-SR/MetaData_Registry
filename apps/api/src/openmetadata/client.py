@@ -109,13 +109,42 @@ class OpenMetadataClient:
         database: str | None = None,
         schema: str | None = None,
         limit: int = 200,
+        after: str | None = None,
     ) -> list[dict]:
-        data = await self.get("tables", params={"fields": "columns,tags", "limit": limit})
+        """Backward-compatible: single OM page + in-memory filter, returns list."""
+        page = await self.list_tables_paged(
+            search=search, service=service, database=database,
+            schema=schema, limit=limit, after=after,
+        )
+        return page["data"]
+
+    async def list_tables_paged(
+        self,
+        search: str | None = None,
+        service: str | None = None,
+        database: str | None = None,
+        schema: str | None = None,
+        limit: int = 200,
+        after: str | None = None,
+        allowed_services: set[str] | None = None,
+    ) -> dict:
+        """One OM page with server-side paging cursor + in-memory FQN/text filter.
+
+        Returns {"data": [...], "paging": {"total": int, "after": str|None}}.
+        """
+        params: dict[str, Any] = {"fields": "columns,tags,owners", "limit": limit}
+        if after:
+            params["after"] = after
+        data = await self.get("tables", params=params)
         tables: list[dict] = data.get("data", [])
+        paging: dict = data.get("paging", {})
         needle = search.lower() if search else None
         result: list[dict] = []
         for t in tables:
             fqn = (t.get("fullyQualifiedName") or "").split(".")
+            svc = fqn[0] if fqn else ""
+            if allowed_services is not None and svc not in allowed_services:
+                continue
             if service and (len(fqn) < 1 or fqn[0] != service):
                 continue
             if database and (len(fqn) < 2 or fqn[1] != database):
@@ -125,23 +154,117 @@ class OpenMetadataClient:
             if needle and not self._table_matches(t, needle):
                 continue
             result.append(t)
-        return result
+        return {"data": result, "paging": {"total": paging.get("total"), "after": paging.get("after")}}
 
     async def get_table(self, table_id: str) -> dict:
-        return await self.get(f"tables/{table_id}", params={"fields": "columns,tags"})
+        return await self.get(f"tables/{table_id}", params={"fields": "columns,tags,owners"})
 
-    async def metadata_stats(self) -> dict:
+    async def get_table_by_fqn(self, fqn: str) -> dict:
+        return await self.get(f"tables/name/{fqn}", params={"fields": "columns,tags,owners"})
+
+    async def get_table_lineage(self, fqn: str) -> dict:
+        return await self.get(f"lineage/table/name/{fqn}")
+
+    async def list_services(self, limit: int = 100, after: str | None = None) -> dict:
+        params: dict[str, Any] = {"limit": limit}
+        if after:
+            params["after"] = after
+        return await self.get("services/databaseServices", params=params)
+
+    async def list_databases(
+        self, service: str | None = None, limit: int = 100, after: str | None = None
+    ) -> dict:
+        params: dict[str, Any] = {"limit": limit}
+        if after:
+            params["after"] = after
+        if service:
+            params["service"] = service
+        return await self.get("databases", params=params)
+
+    async def list_schemas(
+        self, database: str | None = None, limit: int = 100, after: str | None = None
+    ) -> dict:
+        params: dict[str, Any] = {"limit": limit}
+        if after:
+            params["after"] = after
+        if database:
+            params["database"] = database
+        return await self.get("databaseSchemas", params=params)
+
+    async def get_facets(self) -> dict:
+        """Lightweight filter values for Explore: service / database / schema names."""
         services = (await self.get("services/databaseServices", params={"limit": 100})).get("data", [])
-        databases = (await self.get("databases", params={"limit": 100})).get("data", [])
-        schemas = (await self.get("databaseSchemas", params={"limit": 100})).get("data", [])
-        tables = (await self.get("tables", params={"fields": "columns", "limit": 100})).get("data", [])
+        databases = (await self.get("databases", params={"limit": 1000})).get("data", [])
+        schemas = (await self.get("databaseSchemas", params={"limit": 1000})).get("data", [])
+        return {
+            "services": sorted({s.get("name") for s in services if s.get("name")}),
+            "databases": sorted({d.get("name") for d in databases if d.get("name")}),
+            "schemas": sorted({s.get("name") for s in schemas if s.get("name")}),
+        }
+
+    async def _fetch_all(self, path: str, params: dict | None = None, max_pages: int = 20) -> list[dict]:
+        """Follow OM paging cursors to get full counts. Bounded by max_pages."""
+        out: list[dict] = []
+        after: str | None = None
+        for _ in range(max_pages):
+            p = dict(params or {})
+            if after:
+                p["after"] = after
+            data = await self.get(path, params=p)
+            out.extend(data.get("data", []))
+            after = (data.get("paging") or {}).get("after")
+            if not after:
+                break
+        return out
+
+    async def metadata_stats(self, allowed_services: set[str] | None = None) -> dict:
+        services = await self._fetch_all("services/databaseServices", {"limit": 100})
+        databases = await self._fetch_all("databases", {"limit": 1000})
+        schemas = await self._fetch_all("databaseSchemas", {"limit": 1000})
+        tables = await self._fetch_all("tables", {"fields": "columns", "limit": 1000})
+        if allowed_services is not None:
+            tables = [t for t in tables if (t.get("fullyQualifiedName") or "").split(".")[0] in allowed_services]
+        by_service: dict[str, int] = {}
+        for t in tables:
+            svc = (t.get("fullyQualifiedName") or "").split(".")[0]
+            by_service[svc] = by_service.get(svc, 0) + 1
+        recent = [
+            {"id": t.get("id"), "name": t.get("name"), "fullyQualifiedName": t.get("fullyQualifiedName")}
+            for t in tables[:10]
+        ]
         return {
             "services": len(services),
             "databases": len(databases),
             "schemas": len(schemas),
             "tables": len(tables),
             "columns": sum(len(t.get("columns") or []) for t in tables),
+            "byService": [{"service": k, "tables": v} for k, v in sorted(by_service.items())],
+            "recent": recent,
         }
+
+    async def search_tables(
+        self,
+        query: str,
+        service: str | None = None,
+        limit: int = 20,
+        page: int = 1,
+        allowed_services: set[str] | None = None,
+    ) -> dict:
+        params: dict[str, Any] = {"q": query, "index": "table_search_index", "page": page, "size": limit}
+        data = await self.get("search/query", params=params)
+        hits = data.get("hits", {}).get("hits", []) if isinstance(data.get("hits"), dict) else data.get("hits", [])
+        out: list[dict] = []
+        for h in hits:
+            src = h.get("_source", h) if isinstance(h, dict) else {}
+            fqn = src.get("fullyQualifiedName", "")
+            svc = fqn.split(".")[0] if fqn else ""
+            if allowed_services is not None and svc not in allowed_services:
+                continue
+            if service and svc != service:
+                continue
+            out.append(src)
+        total = data.get("hits", {}).get("total", {}).get("value", len(out)) if isinstance(data.get("hits"), dict) else len(out)
+        return {"data": out, "total": total, "page": page}
 
     @staticmethod
     def _table_matches(table: dict, needle: str) -> bool:

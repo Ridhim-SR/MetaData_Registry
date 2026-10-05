@@ -29,8 +29,9 @@ CLASSIFICATION_HIERARCHY = {level: idx for idx, level in enumerate(CLASSIFICATIO
 # Auto-classification rules (field_name pattern -> classification level)
 # Based on MDSF: classify per field by risk of disclosure/re-identification/misuse
 AUTO_CLASSIFICATION_RULES: list[tuple[str, re.Pattern]] = [
-    # PII - Direct identifiers
-    ("PII", re.compile(r"(aadhar|pan|passport|voter_id|ssn|national_id)", re.IGNORECASE)),
+    # PII - Direct identifiers (MDSF PII-removal checklist: name, Aadhaar,
+    # PAN, voter id, passport, driving licence, mobile, email, address, DOB)
+    ("PII", re.compile(r"(aadha+r|pan|passport|voter_?id|ssn|national_id|driving_?licen[sc]e|vehicle_registration)", re.IGNORECASE)),
     ("PII", re.compile(r"(name|first_name|last_name|full_name|father_name|mother_name)", re.IGNORECASE)),
     ("PII", re.compile(r"(email|mobile|phone|contact)", re.IGNORECASE)),
     ("PII", re.compile(r"(address|pincode|zipcode)", re.IGNORECASE)),
@@ -87,7 +88,7 @@ def auto_tag(field_name: str) -> str | None:
 
 def auto_classify(field_name: str) -> str:
     """Auto-classify a field based on MDSF risk assessment.
-    
+
     Classification is per-field based on potential risk of disclosure,
     re-identification, or misuse. First matching rule wins.
     """
@@ -132,6 +133,12 @@ def curate_schema(
 
     Returns one row per field, each carrying its own `validation_warning`
     (empty string if clean) so the whole thing writes straight to CSV.
+
+    `classification` (Public / Internal / Confidential / Restricted / PII /
+    Financial / Health, per the Model Data Sharing Framework) works the same
+    way as `tag`: a business-metadata override wins, otherwise it falls back
+    to `auto_classify()` (rules above, defaulting to "Internal"), and an
+    override naming an unknown level is rejected and re-auto-classified.
     """
 
     business_metadata = business_metadata or {}

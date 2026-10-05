@@ -14,6 +14,12 @@ volumes:
   ingestion-volume-dags:
   ingestion-volume-tmp:
   es-data:
+  # Named volume for MySQL. Do NOT use a Windows bind-mount
+  # (./docker-volume/db-data) here: MySQL 8.0.32 on a case-insensitive
+  # filesystem hits InnoDB corruption (dict0dict.cc:3452, signal 6) and
+  # crash-loops, which makes execute-migrate-all fail with
+  # "Communications link failure / Connection refused" on every run.
+  mysql-data:
 services:
   mysql:
     container_name: openmetadata_mysql
@@ -27,14 +33,15 @@ services:
     ports:
       - "3306:3306"
     volumes:
-     - ./docker-volume/db-data:/var/lib/mysql
+      - mysql-data:/var/lib/mysql
     networks:
       - app_net
     healthcheck:
       test: mysql --user=root --password=$$MYSQL_ROOT_PASSWORD --silent --execute "use openmetadata_db"
       interval: 15s
       timeout: 10s
-      retries: 10
+      retries: 20
+      start_period: 60s
 
   elasticsearch:
     container_name: openmetadata_elasticsearch
@@ -59,6 +66,9 @@ services:
   execute-migrate-all:
     container_name: execute_migrate_all
     image: docker.getcollate.io/openmetadata/server:2.0.2
+    # One-shot migration: must not restart on failure, otherwise
+    # `up -d --wait` loops and masks the real MySQL health error.
+    restart: "no"
     command: "./bootstrap/openmetadata-ops.sh migrate"
     environment:
       OPENMETADATA_CLUSTER_NAME: ${OPENMETADATA_CLUSTER_NAME:-openmetadata}
@@ -537,7 +547,7 @@ services:
     expose:
       - 8080
     ports:
-      - "8080:8080"
+      - "8081:8080"
     networks:
       - app_net
     volumes:
