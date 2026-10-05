@@ -1,7 +1,7 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, Index, Integer, String, func
+from sqlalchemy import Boolean, DateTime, Enum, Index, Integer, String, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -93,7 +93,6 @@ class DatasetVisibility(Base):
 
 class AccessRequest(Base):
     """Minimal access-request record for restricted metadata (demo flow)."""
-
     __tablename__ = "access_requests"
     __table_args__ = (
         Index("idx_access_requests_fqn", "fqn"),
@@ -108,3 +107,28 @@ class AccessRequest(Base):
     note: Mapped[str | None] = mapped_column(String(1000), nullable=True, default=None)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="pending")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class TableInfo(Base):
+    """Dataset information tags per OpenMetadata table (sidecar).
+
+    Mirrors the OM Custom Properties panel: whether the dataset is exposed
+    via an API, who owns it (free text), refresh frequency and covered
+    timeline. Stored here (not in OM) so reads work without OM custom
+    property definitions and stay under our access policy. Tables without
+    a row render as "Not set".
+    """
+
+    __tablename__ = "table_info"
+    __table_args__ = (
+        Index("idx_table_info_fqn", "fqn", unique=True),
+        {"schema": "users"},
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    fqn: Mapped[str] = mapped_column(String(500), nullable=False)
+    api_available: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=None)
+    dataset_owner: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None)
+    frequency: Mapped[str | None] = mapped_column(String(100), nullable=True, default=None)
+    timeline: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
