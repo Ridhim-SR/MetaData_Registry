@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.database import get_session as db_get_session
-from database.models import AccessRequest, DatasetVisibility, User, Visibility
+from database.models import AccessRequest, DatasetVisibility, TableInfo, User, Visibility
 from src.middleware.auth import get_optional_user, user_context
 from src.openmetadata import visibility as vis
 from src.openmetadata.client import OpenMetadataClient
@@ -240,7 +240,12 @@ async def registry_table(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You do not have permission to view this metadata.",
         )
-    return _annotate(full[0], vmap)
+    annotated = _annotate(full[0], vmap)
+    info = (await table_info_map(session, [fqn])).get(fqn)
+    annotated["info"] = info or {
+        "api_available": None, "dataset_owner": None, "frequency": None, "timeline": None,
+    }
+    return annotated
 
 
 # ---- search ----
@@ -347,4 +352,54 @@ async def upsert_table_visibility(
     await session.commit()
 
 
-__all__ = ["router", "upsert_table_visibility"]
+async def upsert_table_info(
+    session: AsyncSession,
+    *,
+    fqn: str,
+    api_available: bool | None,
+    dataset_owner: str | None,
+    frequency: str | None,
+    timeline: str | None,
+) -> None:
+    """Record dataset information tags after a successful OM table write."""
+    existing = (
+        await session.execute(select(TableInfo).where(TableInfo.fqn == fqn))
+    ).scalar_one_or_none()
+    if existing:
+        existing.api_available = api_available
+        existing.dataset_owner = dataset_owner
+        existing.frequency = frequency
+        existing.timeline = timeline
+    else:
+        session.add(
+            TableInfo(
+                fqn=fqn,
+                api_available=api_available,
+                dataset_owner=dataset_owner,
+                frequency=frequency,
+                timeline=timeline,
+            )
+        )
+    await session.commit()
+
+
+async def table_info_map(session: AsyncSession, fqns: list[str] | None = None) -> dict[str, dict]:
+    """FQN -> {"api_available": bool|None, ...} from the sidecar table."""
+    stmt = select(TableInfo)
+    if fqns is not None:
+        if not fqns:
+            return {}
+        stmt = stmt.where(TableInfo.fqn.in_(fqns))
+    rows = (await session.execute(stmt)).scalars().all()
+    return {
+        r.fqn: {
+            "api_available": r.api_available,
+            "dataset_owner": r.dataset_owner,
+            "frequency": r.frequency,
+            "timeline": r.timeline,
+        }
+        for r in rows
+    }
+
+
+__all__ = ["router", "upsert_table_visibility", "upsert_table_info", "table_info_map"]

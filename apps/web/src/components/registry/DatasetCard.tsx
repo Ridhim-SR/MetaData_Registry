@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import type { DatasetCard as Card, RegistryTable } from "../../api/registry";
 import { requestAccess } from "../../api/registry";
+import { capitalizeFirst } from "../../utils/format";
 import { useAuth } from "../../contexts/AuthContext";
 import { AccessBadge } from "./AccessBadge";
 
@@ -13,10 +14,15 @@ export function DatasetCard({ card }: { card: Card }) {
   return (
     <article className="flex flex-col rounded-lg border border-slate-200 bg-white p-5">
       <div className="flex items-start justify-between gap-2">
-        <h3 className="text-base font-semibold text-slate-900">{card.name}</h3>
+        <h3 className="text-base font-semibold text-slate-900">{capitalizeFirst(card.name)}</h3>
         <AccessBadge level={card.access_level} />
       </div>
-      <p className="mt-1 text-sm text-slate-500">{card.department ?? card.service}</p>
+      <p className="mt-1 text-sm text-slate-500">
+        {[card.department ?? card.service, card.database]
+          .map((part) => capitalizeFirst(part))
+          .filter(Boolean)
+          .join(" · ")}
+      </p>
       <p className="mt-2 text-sm text-slate-600">{tableWord(card.table_count)}</p>
       <div className="mt-4 flex-1" />
       <Link
@@ -46,10 +52,10 @@ export function RestrictedTeaser({ table }: { table: RegistryTable }) {
   return (
     <article className="flex flex-col rounded-lg border border-amber-200 bg-amber-50 p-5">
       <div className="flex items-start justify-between gap-2">
-        <h3 className="text-base font-semibold text-slate-900">{table.name}</h3>
+        <h3 className="text-base font-semibold text-slate-900">{capitalizeFirst(table.name)}</h3>
         <AccessBadge level="restricted" />
       </div>
-      <p className="mt-1 text-sm text-slate-500">{table.department}</p>
+      <p className="mt-1 text-sm text-slate-500">{capitalizeFirst(table.department)}</p>
       <p className="mt-2 text-sm text-slate-600">Access requires authorization.</p>
       <div className="mt-4 flex-1" />
       {state === "sent" ? (

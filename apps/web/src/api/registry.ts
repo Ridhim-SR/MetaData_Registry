@@ -16,6 +16,26 @@ export interface Department {
   table_count: number;
 }
 
+export interface RegistryOwner {
+  id?: string;
+  name?: string;
+  displayName?: string;
+  fullyQualifiedName?: string;
+}
+
+export interface RegistryTag {
+  tagFQN?: string;
+  name?: string;
+  labelType?: string;
+}
+
+export interface TableInfo {
+  api_available?: boolean | null;
+  dataset_owner?: string | null;
+  frequency?: string | null;
+  timeline?: string | null;
+}
+
 export interface RegistryTable {
   id: string;
   name: string;
@@ -25,6 +45,9 @@ export interface RegistryTable {
   access_level?: AccessLevel;
   department?: string | null;
   restricted?: boolean;
+  owners?: RegistryOwner[];
+  tags?: RegistryTag[];
+  info?: TableInfo | null;
 }
 
 export interface DatasetCard {
@@ -79,6 +102,19 @@ export function getDataset(fqn: string) {
 
 export function getRegistryTable(tableId: string) {
   return apiGet<RegistryTable>(`/registry/tables/${encodeURIComponent(tableId)}`);
+}
+
+export interface TableLineage {
+  nodes?: Array<{ id?: string; name?: string; fullyQualifiedName?: string; type?: string }>;
+  edges?: Array<{
+    fromEntity?: { id?: string; name?: string; fullyQualifiedName?: string };
+    toEntity?: { id?: string; name?: string; fullyQualifiedName?: string };
+  }>;
+  detail?: string;
+}
+
+export function getTableLineage(tableId: string) {
+  return apiGet<TableLineage>(`/openmetadata/metadata/tables/${encodeURIComponent(tableId)}/lineage`);
 }
 
 export function searchRegistry(params: { q: string; department?: string; page?: number; size?: number }) {

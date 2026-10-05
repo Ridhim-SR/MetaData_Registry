@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
-import { getRegistryTable, requestAccess } from "../api/registry";
+import { getRegistryTable, getTableLineage, requestAccess } from "../api/registry";
 import { ApiError } from "../api/client";
 import { AccessBadge } from "../components/registry/AccessBadge";
 import { EmptyBlock, ErrorBlock, LoadingBlock } from "../components/registry/StateBlocks";
+import { capitalizeFirst } from "../utils/format";
 import { useAuth } from "../contexts/AuthContext";
 
 function crumbs(fqn: string) {
@@ -22,6 +23,46 @@ export function TableDetailPage() {
     enabled: Boolean(tableId),
     retry: false,
   });
+
+  // Lineage is best-effort: hidden when unavailable or forbidden so the
+  // page still renders the core metadata.
+  const lineageQuery = useQuery({
+    queryKey: ["registry-table-lineage", tableId],
+    queryFn: () => getTableLineage(tableId!),
+    enabled: Boolean(tableId) && Boolean(query.data),
+    retry: false,
+  });
+
+  const owners = query.data?.owners ?? [];
+  const tags = query.data?.tags ?? [];
+  const info = query.data?.info ?? null;
+  const selfFqn = query.data?.fullyQualifiedName ?? "";
+
+  // Split lineage edges into upstream (feeds this table) and downstream
+  // (fed by this table), matched on FQN with a name fallback.
+  const upstream: Array<{ name?: string; fullyQualifiedName?: string }> = [];
+  const downstream: Array<{ name?: string; fullyQualifiedName?: string }> = [];
+  for (const e of lineageQuery.data?.edges ?? []) {
+    const from = e.fromEntity;
+    const to = e.toEntity;
+    if (!from || !to) continue;
+    const fromIsSelf = from.fullyQualifiedName
+      ? from.fullyQualifiedName === selfFqn
+      : from.name === query.data?.name;
+    const toIsSelf = to.fullyQualifiedName
+      ? to.fullyQualifiedName === selfFqn
+      : to.name === query.data?.name;
+    if (toIsSelf && !fromIsSelf) upstream.push(from);
+    else if (fromIsSelf && !toIsSelf) downstream.push(to);
+  }
+  const dedupe = (list: typeof upstream) =>
+    list.filter(
+      (n, i) =>
+        list.findIndex((m) => (m.fullyQualifiedName ?? m.name) === (n.fullyQualifiedName ?? n.name)) === i,
+    );
+  const upstreamNodes = dedupe(upstream);
+  const downstreamNodes = dedupe(downstream);
+  const hasLineage = upstreamNodes.length > 0 || downstreamNodes.length > 0;
 
   const onRequest = async (fqn: string) => {
     setReqState("sending");
@@ -113,6 +154,122 @@ export function TableDetailPage() {
               </div>
             )}
           </div>
+
+          <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div className="rounded-lg border border-slate-200 bg-white">
+              <div className="border-b border-slate-200 px-4 py-3 text-sm font-semibold text-slate-900">
+                Owners
+              </div>
+              <div className="px-4 py-3">
+                {owners.length === 0 ? (
+                  <p className="text-sm text-slate-500">No owners</p>
+                ) : (
+                  <ul className="space-y-1">
+                    {owners.map((o, i) => (
+                      <li key={o.id ?? o.fullyQualifiedName ?? o.name ?? i} className="text-sm text-slate-900">
+                        {capitalizeFirst(o.displayName || o.name || "-")}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-white">
+              <div className="border-b border-slate-200 px-4 py-3 text-sm font-semibold text-slate-900">
+                Tags
+              </div>
+              <div className="px-4 py-3">
+                {tags.length === 0 ? (
+                  <p className="text-sm text-slate-500">No tags</p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {tags.map((t, i) => (
+                      <span
+                        key={t.tagFQN ?? t.name ?? i}
+                        className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700"
+                      >
+                        {t.tagFQN ?? t.name ?? "-"}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-6 rounded-lg border border-slate-200 bg-white">
+            <div className="border-b border-slate-200 px-4 py-3 text-sm font-semibold text-slate-900">
+              Dataset information
+            </div>
+            <dl className="divide-y divide-slate-100">
+              <div className="px-4 py-3">
+                <dt className="text-sm font-medium text-slate-900">API available</dt>
+                <dd className="text-xs text-slate-500">Whether this dataset is exposed via an API (Y/N).</dd>
+                <dd className="mt-1 text-sm text-slate-700">
+                  {info?.api_available == null ? "Not set" : info.api_available ? "Yes" : "No"}
+                </dd>
+              </div>
+              <div className="px-4 py-3">
+                <dt className="text-sm font-medium text-slate-900">Dataset owner</dt>
+                <dd className="text-xs text-slate-500">Who owns/is accountable for this dataset (free text).</dd>
+                <dd className="mt-1 text-sm text-slate-700">{info?.dataset_owner || "Not set"}</dd>
+              </div>
+              <div className="px-4 py-3">
+                <dt className="text-sm font-medium text-slate-900">Refresh frequency</dt>
+                <dd className="text-xs text-slate-500">How often this dataset is refreshed/submitted.</dd>
+                <dd className="mt-1 text-sm text-slate-700">{info?.frequency || "Not set"}</dd>
+              </div>
+              <div className="px-4 py-3">
+                <dt className="text-sm font-medium text-slate-900">Timeline</dt>
+                <dd className="text-xs text-slate-500">The period/date range this dataset covers.</dd>
+                <dd className="mt-1 text-sm text-slate-700">{info?.timeline || "Not set"}</dd>
+              </div>
+            </dl>
+          </div>
+
+          {hasLineage && (
+            <div className="mt-6 rounded-lg border border-slate-200 bg-white">
+              <div className="border-b border-slate-200 px-4 py-3 text-sm font-semibold text-slate-900">
+                Lineage
+              </div>
+              <div className="grid grid-cols-1 gap-4 px-4 py-3 md:grid-cols-2">
+                <div>
+                  <p className="text-xs font-medium tracking-wide text-slate-500 uppercase">Upstream</p>
+                  {upstreamNodes.length === 0 ? (
+                    <p className="mt-1 text-sm text-slate-500">—</p>
+                  ) : (
+                    <ul className="mt-1 space-y-1">
+                      {upstreamNodes.map((n, i) => (
+                        <li key={n.fullyQualifiedName ?? n.name ?? i} className="text-sm text-slate-900">
+                          {n.name ?? n.fullyQualifiedName}
+                          {n.fullyQualifiedName && n.name && (
+                            <span className="block text-xs text-slate-500">{n.fullyQualifiedName}</span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+                <div>
+                  <p className="text-xs font-medium tracking-wide text-slate-500 uppercase">Downstream</p>
+                  {downstreamNodes.length === 0 ? (
+                    <p className="mt-1 text-sm text-slate-500">—</p>
+                  ) : (
+                    <ul className="mt-1 space-y-1">
+                      {downstreamNodes.map((n, i) => (
+                        <li key={n.fullyQualifiedName ?? n.name ?? i} className="text-sm text-slate-900">
+                          {n.name ?? n.fullyQualifiedName}
+                          {n.fullyQualifiedName && n.name && (
+                            <span className="block text-xs text-slate-500">{n.fullyQualifiedName}</span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="mt-6 rounded-lg border border-slate-200 bg-white">
             <div className="border-b border-slate-200 px-4 py-3 text-sm font-semibold text-slate-900">
