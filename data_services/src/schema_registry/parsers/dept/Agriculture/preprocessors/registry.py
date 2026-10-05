@@ -16,6 +16,11 @@ PREPROCESSOR_CONFIG = {
         "input_file": "datasets/Farmer_Registration_Master_Dataset-12_9_15.csv",
         "output_dir": "data_services/source/farmer_registration",
         "tables": ["farmers"],
+        # Passed through to every row of the generated manifest, so batch.py
+        # hands it to pipeline.run() as business_metadata_file. Without it the
+        # field dictionary (descriptions / tags / MDSF classification) is
+        # silently dropped on the next ingest.
+        "business_metadata_file": "configs/field_dictionaries/farmer_registration_field_dictionary.csv",
     },
     "scheme_physical_financial_progress_dataset": {
         "preprocessor": "multi_table_csv",
@@ -26,6 +31,22 @@ PREPROCESSOR_CONFIG = {
             "financial_budget_allocation",
             "grant_wise_bill_generation",
         ],
+    },
+    "distribution_record_dataset": {
+        "preprocessor": "multi_table_csv",
+        "input_file": "datasets/Distribution_Records_Dataset-12_13_52.csv",
+        "output_dir": "data_services/source/distribution_records",
+        "tables": [
+            "crop_sales",
+            "current_booking",
+            "current_booking_farmer_details",
+            "online_booking",
+            "online_booking_details",
+        ],
+        # This dataset's manifest was named before the "<dataset>_manifest.csv"
+        # convention; keep the historical name so existing batch commands
+        # (MANIFEST_FILE=configs/distribution_records_manifest.csv) keep working.
+        "manifest_file": "data_services/configs/distribution_records_manifest.csv",
     },
 }
 
@@ -52,21 +73,39 @@ def get_dataset_config(dataset_name: str) -> dict[str, Any]:
 
 
 def generate_manifest(dataset_name: str, output_dir: Path, table_results: dict[str, str]) -> Path:
-    """Generate manifest CSV for the processed dataset."""
+    """Generate manifest CSV for the processed dataset.
+
+    The `business_metadata_file` / `manifest_file` keys in PREPROCESSOR_CONFIG
+    are carried through: the former becomes an extra manifest column (consumed
+    by batch.py as pipeline.run()'s business_metadata_file), the latter
+    overrides the default ``data_services/configs/<dataset>_manifest.csv``
+    path. The extra column is only written when a dataset actually configures
+    it, so manifests of datasets without a field dictionary stay byte-identical.
+    """
     config = get_dataset_config(dataset_name)
     department = "agriculture_department"
     dataset_slug = dataset_name
     schema_name = "public"
 
-    manifest_path = Path("data_services/configs") / f"{dataset_slug}_manifest.csv"
+    business_metadata_file = config.get("business_metadata_file", "")
+    manifest_path = Path(
+        config.get("manifest_file") or f"data_services/configs/{dataset_slug}_manifest.csv"
+    )
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
 
+    header = "department,dataset,table_name,source_file,source_format,schema_name"
+    if business_metadata_file:
+        header += ",business_metadata_file"
+
     with manifest_path.open("w", encoding="utf-8", newline="") as f:
-        f.write("department,dataset,table_name,source_file,source_format,schema_name\n")
+        f.write(header + "\n")
         for table_name, output_path in table_results.items():
             source_file = output_path.replace("data_services/", "").replace("\\", "/")
             if source_file.startswith("data_services/"):
                 source_file = source_file[len("data_services/"):]
-            f.write(f"{department},{dataset_slug},{table_name},{source_file},csv,{schema_name}\n")
+            row = f"{department},{dataset_slug},{table_name},{source_file},csv,{schema_name}"
+            if business_metadata_file:
+                row += f",{business_metadata_file}"
+            f.write(row + "\n")
 
     return manifest_path

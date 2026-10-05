@@ -76,9 +76,9 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python -m data_services.scripts.preprocess_dataset --dataset farmer_registration_master_dataset
-  python -m data_services.scripts.preprocess_dataset --dataset scheme_physical_financial_progress_dataset --dry-run
-  python -m data_services.scripts.preprocess_dataset --all
+  python -m data_services.src.schema_registry.parsers.dept.Agriculture.preprocess_dataset --dataset farmer_registration_master_dataset
+  python -m data_services.src.schema_registry.parsers.dept.Agriculture.preprocess_dataset --dataset scheme_physical_financial_progress_dataset --dry-run
+  python -m data_services.src.schema_registry.parsers.dept.Agriculture.preprocess_dataset --all
         """,
     )
 
