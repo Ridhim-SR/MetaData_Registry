@@ -20,7 +20,8 @@ raw file --parse--> raw columns --curate_schema()--> curated columns --publish_t
 - Pass an OpenMetadata client/token → all three stages run in one call.
 - Omit it → stops after writing the curated CSV. Publish later with `openmetadata_publish.py`, no re-ingest needed.
 - `batch.py` runs the same thing once per row of a manifest CSV, for many tables at once.
-- Every run diffs the new source against the table's previous curated snapshot: additions/updates go through automatically; a column that existed before but is missing now raises an error unless you pass `allow_column_removal=True` — this catches a partial/incremental submission before it silently deletes a column from OpenMetadata. Answers not resubmitted in `business_metadata_file` carry forward instead of being blanked.
+- A run that's rejected — unparseable file, unknown type, duplicate or empty column name, missing metadata file, or the column-removal guard below — writes nothing: no snapshot, and `_lookups/` is left exactly as it was. The registry is only updated after the new snapshots are stored.
+- Every run diffs the new source against the table's previous curated snapshot: additions/updates go through automatically; a column that existed before but is missing now raises an error unless you pass `allow_column_removal=True` — this catches a partial/incremental submission before it silently deletes a column from OpenMetadata. Answers in `business_metadata_file` merge field by field: a blank cell or a missing column keeps the previous answer, so a description-only file never resets a hand-set `classification`/`glossary_term`/`active`. To change an answer, send the new value — a blank never clears one.
 
 ## Concepts
 
@@ -64,10 +65,18 @@ python3 -m src.schema_registry.pipeline
 python3 -m pytest tests/
 ```
 
-**Config**: every CLI command above loads `.env` automatically (via
-`python-dotenv`) — copy `.env.example` to `.env` and fill in
-`OPENMETADATA_JWT_TOKEN` / Wasabi credentials there instead of exporting
-them each time. `.env` is gitignored; never commit it.
+**Config**: everything lives in one file, `.env` (copy `.env.example`; never commit `.env`). Both OpenMetadata servers sit side by side in it, and one line picks which to use:
+
+```
+OPENMETADATA_ENV=development     # local | development
+
+LOCAL_OPENMETADATA_HOST_PORT=http://localhost:8585/api
+LOCAL_OPENMETADATA_JWT_TOKEN=...
+DEV_OPENMETADATA_HOST_PORT=http://10.0.96.105:8585/api
+DEV_OPENMETADATA_JWT_TOKEN=...
+```
+
+To switch for a single run without editing the file: `OPENMETADATA_ENV=local python3 -m src.schema_registry.pipeline`.
 
 **`vishwakarma_T` is a provisional table name**, not a confirmed one — PWD's
 raw submission was only a column-list dump with no `CREATE TABLE <name>`,
@@ -134,7 +143,16 @@ are pushed the same way, one level up, onto the Database entity.
 **Re-running is safe** — the service and schema are reused; the database
 and table are always create-or-update, so a later-confirmed `category`/
 `dataset_description` actually lands, and removed columns are actually
-removed in OpenMetadata too.
+removed in OpenMetadata too. Each column's tags are then set to exactly
+this run's list (JSON-Patch), so a column downgraded from CAT-3 to CAT-2
+doesn't keep both labels.
+
+**Category check** — publishing refuses a dataset whose `category` is
+lower than its most sensitive column's `classification` (MDSF: the highest
+category applies), before anything is written to OpenMetadata. A blank
+category only logs a warning. Override with `allow_category_below_columns=True`
+(`ALLOW_CATEGORY_BELOW_COLUMNS=true` on the CLI) only when those columns are
+removed or anonymised before sharing.
 
 **Standalone republish** (no re-ingest):
 ```bash
@@ -163,7 +181,11 @@ It's built to fail loudly, never guess — the error names the exact bad value. 
 | `Unknown department` | Not registered | `lookups.register_department(...)`, rerun — no code change |
 | Parser can't make sense of the file at all | A genuinely new raw file *shape* | Write `parsers/<name>_parser.py` producing the same column-dict shape (`name`/`data_type`/`length`/`scale`/`nullable`/`default`), add a test against the real sample file, wire it in (see `field_dictionary_parser.py` for a template) |
 | `Unrecognized Format value`, `missing required field`, or similar, on a *known* format | One value the parser's rule table doesn't cover yet | Small targeted addition — one line in `FORMAT_TYPE_RULES`, the CSV alias map, or the DDL regex. Don't rewrite the parser |
-| `No OpenMetadata mapping for Postgres type` | A type never seen before | Add it to `KNOWN_POSTGRES_TYPES` (curate.py) and `_TYPE_MAP` (openmetadata_publish.py) |
+| `schema rejected, nothing was stored -- unrecognized data type(s)` | A type never seen before | If it's a real type, add it to `KNOWN_POSTGRES_TYPES` (curate.py) and `_TYPE_MAP` (openmetadata/publish.py); otherwise fix the source file |
+| `schema rejected ... duplicate column name(s)` / `have no name` | Broken source file | Fix the source file — the previous snapshot is untouched |
+| `full CREATE TABLE statement` / `table-level constraint` | Whole DDL pasted instead of the column list | Keep only the column definitions between the outer parentheses, drop `CONSTRAINT`/`PRIMARY KEY (...)` lines |
+| `business_metadata_file has N name(s) matching no column` (warning) | Typo in the metadata file | Fix the names — those rows were ignored; the run's result lists them under `unmatched_metadata_names` |
+| `dataset category is CAT-x but column(s) ... are CAT-y` | Category check | Set the dataset's `CATEGORY` to at least CAT-y. Only use `ALLOW_CATEGORY_BELOW_COLUMNS=true` if those columns are removed/anonymised before sharing |
 | `this run is missing N column(s)...` | Column-removal guard | Real full resubmission → `allow_column_removal=True`. Accidental partial file → fix the source file instead, the guard just did its job |
 | OpenMetadata/Wasabi error | Could be code or credentials/network | Verify independently (curl, AWS CLI) before touching code |
 
@@ -175,7 +197,8 @@ Then: add a test that reproduces it, confirm the full suite passes, and verify t
 - No mode is tracked explicitly (Initial Load/Append/Update/Full Refresh) — `run()` infers safety from a diff against the previous snapshot rather than the caller declaring which one this is, and nothing persists *which* decision was made for audit purposes.
 - `publish_table()` ignores the curated `active` flag — a column marked inactive still gets published like any other.
 - Renaming a column looks like a delete + an add to the diff — it requires `allow_column_removal=True`, and the old name's business metadata won't carry over (matching is by exact column name only).
-- OpenMetadata's PUT merges tags/extension rather than replacing them by default — `_ensure_database()` works around this with an explicit JSON-Patch replace so a cleared `category`/custom property actually clears; column-level tags on the Table entity don't have this fix yet, so clearing a stale column `tag`/`classification` still needs a manual JSON-Patch `remove`.
+- OpenMetadata's PUT merges tags/extension rather than replacing them by default — `_ensure_database()` and `_replace_column_tags()` work around this with explicit JSON-Patches so a cleared `category`, custom property or column tag actually clears.
+- Because a blank metadata cell means "keep the previous answer", clearing a column's `business_description`/`tag`/`glossary_term` back to empty still means editing the latest curated snapshot directly.
 
 ## Just run it
 
@@ -194,7 +217,9 @@ source code to discover:
 
 | Key | Required? | Notes |
 |---|---|---|
-| `OPENMETADATA_JWT_TOKEN` | yes | Settings → Bots → ingestion-bot in the OpenMetadata UI. An admin session token expires in ~1hr — refresh it if a run fails with 401 (see `.env`'s comment for the exact `curl`) |
+| `OPENMETADATA_ENV` | no | `local` (default) or `development` — picks which server's pair below is used |
+| `LOCAL_`/`DEV_OPENMETADATA_HOST_PORT` | yes, for the server you use | must end in `/api` |
+| `LOCAL_`/`DEV_OPENMETADATA_JWT_TOKEN` | yes, for the server you use | Settings → Bots → ingestion-bot in the OpenMetadata UI. An admin session token expires in ~1hr — refresh it if a run fails with 401 (see the comment in `.env` for the exact `curl`) |
 | `DEPARTMENT` | yes | must already be registered (see Quickstart) |
 | `DATASET` | yes | auto-creates on first use |
 | `TABLE_NAME` | yes | |

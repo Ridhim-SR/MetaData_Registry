@@ -6,7 +6,7 @@ from pathlib import Path
 import boto3
 from botocore.exceptions import ClientError
 
-from src.storage.base import ObjectStorage
+from src.storage.base import ObjectStorage, rows_to_csv
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -70,13 +70,10 @@ class S3ObjectStorage(ObjectStorage):
             logger.error(f"S3 {action} failed on '{path}' (bucket={self.bucket}): {code} -- {exc}")
 
     def write_csv(self, path: str, rows: list[dict]) -> None:
-        buf = io.StringIO()
-        if rows:
-            writer = csv.DictWriter(buf, fieldnames=list(rows[0].keys()))
-            writer.writeheader()
-            writer.writerows(rows)
+        # A single PUT is already atomic on S3 -- readers see the old object
+        # or the new one, never a partial write.
         try:
-            self.client.put_object(Bucket=self.bucket, Key=self._key(path), Body=buf.getvalue().encode("utf-8"))
+            self.client.put_object(Bucket=self.bucket, Key=self._key(path), Body=rows_to_csv(rows).encode("utf-8"))
         except ClientError as exc:
             self._log_client_error(exc, "write", path)
             raise

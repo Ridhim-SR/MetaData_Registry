@@ -1,4 +1,23 @@
+import csv
+import io
 from abc import ABC, abstractmethod
+
+
+def rows_to_csv(rows: list[dict]) -> str:
+    """Serialize rows as CSV text. The header is every key from every row,
+    in first-seen order -- not just the first row's keys -- so a lookup file
+    written before a field existed (e.g. datasets.csv before
+    `dataset_description`) can take a new row that has it, with older rows
+    left blank in that column instead of DictWriter raising."""
+
+    if not rows:
+        return ""
+    fieldnames = list(dict.fromkeys(key for row in rows for key in row))
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=fieldnames, restval="")
+    writer.writeheader()
+    writer.writerows(rows)
+    return buf.getvalue()
 
 
 class ObjectStorage(ABC):

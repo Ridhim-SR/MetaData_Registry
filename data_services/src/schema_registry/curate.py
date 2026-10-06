@@ -1,4 +1,5 @@
 import re
+from collections import Counter
 
 from src.utils.logger import get_logger
 
@@ -68,6 +69,41 @@ def validate_column(column: dict) -> list[str]:
         warnings.append(f"Unrecognized Postgres type '{column['data_type']}'")
 
     return warnings
+
+
+def validate_schema(table_id: str, columns: list[dict]) -> None:
+    """Refuse a parsed schema that can't be stored or published correctly:
+    empty column names, duplicate names (OpenMetadata rejects them, and the
+    by-name diff/metadata merge would silently collapse them), and data
+    types with no known mapping. These used to be warnings only -- the bad
+    snapshot still became the table's "latest" and every later publish
+    failed on it. Raises one error listing every problem, so the department
+    can fix the whole file in one go."""
+
+    problems: list[str] = []
+
+    empty_positions = [str(i) for i, col in enumerate(columns, start=1) if not col["name"]]
+    if empty_positions:
+        problems.append(f"column(s) at position {', '.join(empty_positions)} have no name")
+
+    name_counts = Counter(col["name"] for col in columns if col["name"])
+    duplicates = sorted(name for name, count in name_counts.items() if count > 1)
+    if duplicates:
+        problems.append(f"duplicate column name(s): {', '.join(duplicates)}")
+
+    unknown_types = [
+        f"{col['name'] or '?'} ({col['data_type'] or 'no type'})"
+        for col in columns
+        if col["data_type"].lower() not in KNOWN_POSTGRES_TYPES
+    ]
+    if unknown_types:
+        problems.append(
+            f"unrecognized data type(s): {', '.join(unknown_types)} -- if a type is valid, add it to "
+            f"KNOWN_POSTGRES_TYPES (curate.py) and _TYPE_MAP (openmetadata/publish.py)"
+        )
+
+    if problems:
+        raise ValueError(f"{table_id}: schema rejected, nothing was stored -- " + "; ".join(problems))
 
 
 def curate_schema(

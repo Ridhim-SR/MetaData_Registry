@@ -1,7 +1,8 @@
 import os
 import re
+from collections.abc import Callable
 
-from dotenv import load_dotenv
+from src.utils.config import load_env
 from filelock import FileLock
 
 from src.schema_registry.registry import paths
@@ -24,11 +25,23 @@ def slugify(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", value.strip().lower()).strip("_")
 
 
-def _upsert(storage: ObjectStorage, path: str, key: str, row: dict) -> None:
-    """Insert `row` into the lookup CSV at `path`, or replace the existing
-    row with the same key -- e.g. re-registering a dataset once its Owner/
-    Retention/Lineage are confirmed updates that row instead of being
+def _upsert(
+    storage: ObjectStorage,
+    path: str,
+    key: str,
+    key_value: str,
+    build_row: Callable[[dict | None], dict],
+) -> dict | None:
+    """Insert the row for `key_value` into the lookup CSV at `path`, or
+    replace the existing one -- e.g. re-registering a dataset once its
+    Owner/Retention/Lineage are confirmed updates that row instead of being
     silently ignored.
+
+    `build_row(existing)` makes the new row from the current one (None if
+    there isn't one), called while the lock is held -- so a row that
+    carries fields forward from the old one (upsert_dataset) can't be built
+    from a stale read and overwrite a concurrent run's changes. Returns the
+    existing row, or None if this inserted a new one.
 
     Locked per-path so concurrent callers (parallel ingestion runs writing
     to the same lookup file) can't race on the read-modify-write and lose
@@ -36,9 +49,11 @@ def _upsert(storage: ObjectStorage, path: str, key: str, row: dict) -> None:
 
     with FileLock(storage.lock_path(path)):
         rows = storage.read_csv(path) if storage.exists(path) else []
-        rows = [r for r in rows if r[key] != row[key]]
-        rows.append(row)
+        existing = next((r for r in rows if r[key] == key_value), None)
+        rows = [r for r in rows if r[key] != key_value]
+        rows.append(build_row(existing))
         storage.write_csv(path, rows)
+        return existing
 
 
 def register_department(storage: ObjectStorage, department_id: str, department_name: str) -> None:
@@ -51,14 +66,14 @@ def register_department(storage: ObjectStorage, department_id: str, department_n
     formatting, not synonyms/abbreviations of the same department).
     """
 
-    is_new = not department_exists(storage, department_id)
-    _upsert(
+    existing = _upsert(
         storage,
         DEPARTMENTS_PATH,
         "department_id",
-        {"department_id": department_id, "department_name": department_name},
+        department_id,
+        lambda _: {"department_id": department_id, "department_name": department_name},
     )
-    logger.info(f"Department {'registered' if is_new else 're-registered'}: {department_id} ({department_name})")
+    logger.info(f"Department {'re-registered' if existing else 'registered'}: {department_id} ({department_name})")
 
 
 def department_exists(storage: ObjectStorage, department_id: str) -> bool:
@@ -110,12 +125,9 @@ def upsert_dataset(
     would silently blank them back out. To deliberately clear a field,
     edit `_lookups/datasets.csv` directly."""
 
-    existing = get_dataset(storage, dataset_id) or {}
-    _upsert(
-        storage,
-        DATASETS_PATH,
-        "dataset_id",
-        {
+    def _merged(existing: dict | None) -> dict:
+        existing = existing or {}
+        return {
             "dataset_id": dataset_id,
             "department_id": department_id,
             "dataset_name": dataset_name,
@@ -125,9 +137,13 @@ def upsert_dataset(
             "frequency": frequency or existing.get("frequency", ""),
             "timeline": timeline or existing.get("timeline", ""),
             "dataset_description": dataset_description or existing.get("dataset_description", ""),
-        },
-    )
-    logger.info(f"Dataset {'created' if not existing else 'updated'}: {dataset_id}")
+        }
+
+    # The carry-forward merge runs inside _upsert's lock -- reading the
+    # existing row before taking the lock let two runs for tables in the
+    # same dataset each overwrite the other's owner/category.
+    existing = _upsert(storage, DATASETS_PATH, "dataset_id", dataset_id, _merged)
+    logger.info(f"Dataset {'updated' if existing else 'created'}: {dataset_id}")
 
 
 def latest_curated_snapshot_path(
@@ -146,18 +162,18 @@ def latest_curated_snapshot_path(
 
 
 def upsert_table(storage: ObjectStorage, table_id: str, dataset_id: str, table_name: str, schema_name: str) -> None:
-    is_new = get_table(storage, table_id) is None
-    _upsert(
+    existing = _upsert(
         storage,
         TABLES_PATH,
         "table_id",
-        {"table_id": table_id, "dataset_id": dataset_id, "table_name": table_name, "schema_name": schema_name},
+        table_id,
+        lambda _: {"table_id": table_id, "dataset_id": dataset_id, "table_name": table_name, "schema_name": schema_name},
     )
-    logger.info(f"Table {'registered' if is_new else 're-registered'}: {table_id}")
+    logger.info(f"Table {'re-registered' if existing else 'registered'}: {table_id}")
 
 
 if __name__ == "__main__":
-    load_dotenv()
+    load_env()
     register_department(
         storage_from_env(),
         slugify(os.environ["DEPARTMENT_ID"]),

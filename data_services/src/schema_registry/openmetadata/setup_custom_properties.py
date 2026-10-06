@@ -12,7 +12,7 @@ separate, run-once-per-OpenMetadata-instance step -- re-running it is safe
 import os
 
 import requests
-from dotenv import load_dotenv
+from src.utils.config import load_env
 
 from src.schema_registry.openmetadata.publish import _CUSTOM_PROPERTY_NAMES
 from src.utils.logger import get_logger
@@ -69,7 +69,7 @@ def setup(host_port: str, jwt_token: str) -> None:
 
 
 if __name__ == "__main__":
-    load_dotenv()
+    load_env()
     setup(
         host_port=os.environ.get("OPENMETADATA_HOST_PORT", "http://localhost:8585/api"),
         jwt_token=os.environ["OPENMETADATA_JWT_TOKEN"],

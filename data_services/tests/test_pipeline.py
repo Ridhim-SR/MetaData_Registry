@@ -42,6 +42,9 @@ def _fake_om_client():
         )
         entity.fullyQualifiedName = f"{parent}.{name}" if parent else str(name)
         entity.name = name
+        # the real server echoes a table's columns back -- _replace_column_tags()
+        # maps names to indexes against this list
+        entity.columns = getattr(request, "columns", None)
         return entity
 
     client.create_or_update.side_effect = _create_or_update
@@ -359,3 +362,187 @@ def test_rerun_with_no_metadata_file_still_carries_forward_previous_answers(tmp_
 
     assert result["columns"][0]["business_description"] == "Only column"
     assert result["columns"][0]["tag"] == "PII"
+
+
+def _write_metadata_csv(tmp_path, filename: str, text: str) -> str:
+    path = tmp_path / filename
+    path.write_text(text)
+    return str(path)
+
+
+def test_description_only_rerun_keeps_manual_classification_glossary_and_active(tmp_path):
+    """A later file that only answers business_description must not reset
+    a hand-set classification back to the auto one, wipe the glossary term,
+    or (by having no `active` column) mark the column inactive."""
+
+    ddl_file = tmp_path / "raw.txt"
+    ddl_file.write_text("phone character varying(10), amount numeric")
+    storage = _storage_with_department(tmp_path)
+    common = dict(department="pwd", dataset="vishwakarma", table_name="t1", source_file=str(ddl_file), storage=storage)
+
+    run(**common, business_metadata_file=_write_metadata_csv(
+        tmp_path, "first.csv",
+        "name,business_description,classification,glossary_term,active\nphone,Contact,CAT-2,Contact Number,false\n",
+    ))
+    result = run(**common, business_metadata_file=_write_metadata_csv(
+        tmp_path, "second.csv", "name,business_description\nphone,Contact number of the firm\n",
+    ))
+
+    phone = next(c for c in result["columns"] if c["name"] == "phone")
+    assert phone["business_description"] == "Contact number of the firm"  # new answer wins
+    assert phone["classification"] == "CAT-2"  # not reset to auto CAT-3
+    assert phone["glossary_term"] == "Contact Number"
+    assert phone["active"] is False  # kept, not flipped by the missing column
+
+
+def test_blank_cells_in_metadata_file_do_not_erase_previous_answers(tmp_path):
+    ddl_file = tmp_path / "raw.txt"
+    ddl_file.write_text("remarks text")
+    storage = _storage_with_department(tmp_path)
+    common = dict(department="pwd", dataset="vishwakarma", table_name="t1", source_file=str(ddl_file), storage=storage)
+
+    run(**common, business_metadata_file=_write_metadata_csv(
+        tmp_path, "first.csv", "name,business_description,tag,glossary_term\nremarks,Notes,Free Text,Field Note\n",
+    ))
+    result = run(**common, business_metadata_file=_write_metadata_csv(
+        tmp_path, "second.csv", "name,business_description,tag,glossary_term\nremarks,,,\n",
+    ))
+
+    remarks = result["columns"][0]
+    assert (remarks["business_description"], remarks["tag"], remarks["glossary_term"]) == (
+        "Notes", "Free Text", "Field Note",
+    )
+
+
+def test_metadata_file_without_active_column_keeps_columns_active(tmp_path):
+    ddl_file = tmp_path / "raw.txt"
+    ddl_file.write_text("remarks text")
+    storage = _storage_with_department(tmp_path)
+
+    result = run(
+        department="pwd", dataset="vishwakarma", table_name="t1", source_file=str(ddl_file), storage=storage,
+        business_metadata_file=_write_metadata_csv(tmp_path, "m.csv", "name,business_description\nremarks,Notes\n"),
+    )
+
+    assert result["columns"][0]["active"] is True
+
+
+def _snapshot_files(storage):
+    return storage.list("department/")
+
+
+def test_rejected_run_leaves_registry_unchanged(tmp_path):
+    """The column-removal guard used to fire after upsert_dataset/
+    upsert_table had already rewritten schema_name and owner."""
+
+    storage = _storage_with_department(tmp_path)
+    ddl_file = tmp_path / "raw.txt"
+    ddl_file.write_text("a integer, b integer")
+    common = dict(department="pwd", dataset="vishwakarma", table_name="t1", source_file=str(ddl_file), storage=storage)
+    run(**common, owner="PWD IT Cell")
+    tables_before = storage.read_csv(lookups.TABLES_PATH)
+    datasets_before = storage.read_csv(lookups.DATASETS_PATH)
+    files_before = _snapshot_files(storage)
+
+    ddl_file.write_text("a integer")
+    with pytest.raises(ValueError, match="missing 1 column"):
+        run(**common, schema_name="other", owner="Someone Else")
+
+    assert storage.read_csv(lookups.TABLES_PATH) == tables_before
+    assert storage.read_csv(lookups.DATASETS_PATH) == datasets_before
+    assert _snapshot_files(storage) == files_before
+
+
+def test_first_run_with_bad_schema_registers_nothing(tmp_path):
+    storage = _storage_with_department(tmp_path)
+    ddl_file = tmp_path / "raw.txt"
+    ddl_file.write_text("tags text[]")
+
+    with pytest.raises(ValueError, match="schema rejected"):
+        run(department="pwd", dataset="vishwakarma", table_name="t1", source_file=str(ddl_file), storage=storage)
+
+    assert lookups.get_table(storage, "pwd.vishwakarma.t1") is None
+    assert lookups.get_dataset(storage, "pwd.vishwakarma") is None
+    assert _snapshot_files(storage) == []
+
+
+@pytest.mark.parametrize(
+    "ddl, message",
+    [
+        ("phone character varying(10), tags text[]", r"unrecognized data type\(s\): tags \(text\[\]\)"),
+        ("amount numeric, amount integer", r"duplicate column name\(s\): amount"),
+    ],
+)
+def test_bad_schema_is_rejected_before_anything_is_stored(tmp_path, ddl, message):
+    storage = _storage_with_department(tmp_path)
+    ddl_file = tmp_path / "raw.txt"
+    ddl_file.write_text("phone character varying(10)")
+    common = dict(department="pwd", dataset="vishwakarma", table_name="t1", source_file=str(ddl_file), storage=storage)
+    run(**common)
+    files_before = _snapshot_files(storage)
+
+    ddl_file.write_text(ddl)
+    with pytest.raises(ValueError, match=message):
+        run(**common)
+
+    # the previous good snapshot is still the latest one
+    assert _snapshot_files(storage) == files_before
+
+
+def test_csv_column_with_empty_name_is_rejected(tmp_path):
+    storage = _storage_with_department(tmp_path)
+    csv_file = tmp_path / "cols.csv"
+    csv_file.write_text("name,data_type\nphone,text\n,integer\n")
+
+    with pytest.raises(ValueError, match=r"position 2 have no name"):
+        run(
+            department="pwd", dataset="vishwakarma", table_name="t1", source_file=str(csv_file),
+            storage=storage, source_format="csv",
+        )
+
+
+def test_schema_error_lists_every_problem_at_once(tmp_path):
+    storage = _storage_with_department(tmp_path)
+    ddl_file = tmp_path / "raw.txt"
+    ddl_file.write_text("a integer, a integer, b money")
+
+    with pytest.raises(ValueError) as excinfo:
+        run(department="pwd", dataset="vishwakarma", table_name="t1", source_file=str(ddl_file), storage=storage)
+
+    assert "duplicate column name(s): a" in str(excinfo.value)
+    assert "b (money)" in str(excinfo.value)
+
+
+def test_unmatched_metadata_names_are_reported(tmp_path, monkeypatch):
+    storage = _storage_with_department(tmp_path)
+    ddl_file = tmp_path / "raw.txt"
+    ddl_file.write_text("phone character varying(10)")
+    warnings = []
+    # src.utils.logger sets propagate=False, so caplog never sees these
+    monkeypatch.setattr("src.schema_registry.pipeline.logger.warning", warnings.append)
+
+    result = run(
+        department="pwd", dataset="vishwakarma", table_name="t1", source_file=str(ddl_file), storage=storage,
+        business_metadata_file=_write_metadata_csv(
+            tmp_path, "m.csv", "name,business_description\nphone,Contact\nphnoe,Typo\nfax,Not a column\n"
+        ),
+    )
+
+    assert result["unmatched_metadata_names"] == ["fax", "phnoe"]
+    assert any("fax, phnoe" in w for w in warnings)
+    assert result["columns"][0]["business_description"] == "Contact"
+
+
+def test_missing_metadata_file_fails_before_anything_is_stored(tmp_path):
+    storage = _storage_with_department(tmp_path)
+    ddl_file = tmp_path / "raw.txt"
+    ddl_file.write_text("phone character varying(10)")
+
+    with pytest.raises(FileNotFoundError):
+        run(
+            department="pwd", dataset="vishwakarma", table_name="t1", source_file=str(ddl_file), storage=storage,
+            business_metadata_file=str(tmp_path / "does_not_exist.csv"),
+        )
+
+    assert _snapshot_files(storage) == []
+    assert lookups.get_table(storage, "pwd.vishwakarma.t1") is None

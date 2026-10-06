@@ -12,7 +12,10 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 _COLUMN_FIELDS = ["name", "data_type", "length", "nullable", "default"]
-_METADATA_FIELDS = ["name", "business_description", "tag", "classification", "glossary_term", "active"]
+# Only what a Field Dictionary actually answers. Writing blank tag/
+# classification/glossary_term or a hard-coded active=true here would
+# overwrite answers set by hand on an earlier run every time it's re-ingested.
+_METADATA_FIELDS = ["name", "business_description"]
 
 
 def run_field_dictionary(
@@ -62,16 +65,7 @@ def run_field_dictionary(
                 writer = csv.DictWriter(f, fieldnames=_METADATA_FIELDS)
                 writer.writeheader()
                 for name, meta in table["business_metadata"].items():
-                    writer.writerow(
-                        {
-                            "name": name,
-                            "business_description": meta.get("business_description", ""),
-                            "tag": "",
-                            "classification": "",
-                            "glossary_term": "",
-                            "active": "true",
-                        }
-                    )
+                    writer.writerow({"name": name, "business_description": meta.get("business_description", "")})
 
             logger.info(f"Field dictionary: ingesting table '{table_name}' ({len(table['columns'])} column(s))")
             results[table_name] = run(
@@ -93,12 +87,12 @@ def run_field_dictionary(
 if __name__ == "__main__":
     import os
 
-    from dotenv import load_dotenv
+    from src.utils.config import load_env
 
     from src.schema_registry.openmetadata.publish import get_client
     from src.storage import storage_from_env
 
-    load_dotenv()
+    load_env()
     _storage = storage_from_env()
 
     _client = None

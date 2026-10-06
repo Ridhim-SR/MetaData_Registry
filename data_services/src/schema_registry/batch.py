@@ -1,7 +1,7 @@
 import csv
 import os
 
-from dotenv import load_dotenv
+from src.utils.config import load_env
 from metadata.ingestion.ometa.ometa_api import OpenMetadata
 
 from src.schema_registry.registry import lookups
@@ -74,7 +74,7 @@ def run_batch(manifest_file: str, storage: ObjectStorage, openmetadata_client: O
 
 
 if __name__ == "__main__":
-    load_dotenv()
+    load_env()
     _client = None
     if os.environ.get("OPENMETADATA_JWT_TOKEN"):
         _client = get_client(
