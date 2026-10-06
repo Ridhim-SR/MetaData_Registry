@@ -34,37 +34,39 @@ export function LoginPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-100">
-      <div className="w-full max-w-sm rounded-lg bg-white p-8 shadow">
-        <h1 className="mb-6 text-2xl font-semibold">Sign in</h1>
-        {error && <div className="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+    <div className="flex min-h-screen items-center justify-center" style={{ background: "var(--bg-alt)" }}>
+      <div className="w-full max-w-sm p-8" style={{ background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 6 }}>
+        <h1 className="mb-6 text-2xl font-semibold" style={{ color: "var(--navy-900)" }}>Sign in</h1>
+        {error && <div className="mb-4 rounded-md px-3 py-2 text-sm" style={{ background: "var(--confid-bg)", color: "var(--confid-fg)", border: "1px solid var(--confid-fg)" }}>{error}</div>}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">Email</label>
+            <label className="mb-1 block text-sm font-medium">Email</label>
             <input
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
               autoComplete="email"
-              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-slate-900 focus:outline-none"
+              className="w-full px-3 py-2 text-sm"
+              style={{ border: "1px solid var(--border)", borderRadius: 6 }}
             />
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">Password</label>
+            <label className="mb-1 block text-sm font-medium">Password</label>
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
               autoComplete="current-password"
-              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-slate-900 focus:outline-none"
+              className="w-full px-3 py-2 text-sm"
+              style={{ border: "1px solid var(--border)", borderRadius: 6 }}
             />
           </div>
           <button
             type="submit"
             disabled={mutation.isPending}
-            className="w-full rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+            className="btn-primary w-full disabled:opacity-50"
           >
             {mutation.isPending ? "Signing in…" : "Sign in"}
           </button>
@@ -75,9 +77,9 @@ export function LoginPage() {
           <div className="h-px flex-1 bg-slate-200" />
         </div>
         <SocialButtons />
-        <p className="mt-4 text-center text-sm text-slate-600">
+        <p className="mt-4 text-center text-sm" style={{ color: "var(--text-muted)" }}>
           No account?{" "}
-          <Link to="/register" className="font-medium text-slate-900 underline">
+          <Link to="/register" className="font-medium underline" style={{ color: "var(--blue-700)" }}>
             Register
           </Link>
         </p>

@@ -1,1 +1,209 @@
 @import "tailwindcss";
+
+:root {
+  --navy-900: #0b2e59; /* nav bar, footer, headings */
+  --blue-700: #1a4d9c; /* links, primary buttons */
+  --blue-50: #e8f0fb; /* hover, selected, tints */
+  --saffron: #e8730c; /* decorative only: top strip, active-tab underline, icons */
+  --saffron-text: #b85a00; /* saffron used as text */
+  --green: #138808; /* tiny accent only */
+  --bg: #ffffff;
+  --bg-alt: #f5f7fa;
+  --border: #d9dee7;
+  --text: #1b2430;
+  --text-muted: #5b6675;
+  --public-fg: #1b7f3b;
+  --public-bg: #e6f4ea;
+  --dept-fg: #1a4d9c;
+  --dept-bg: #e8f0fb;
+  --restricted-fg: #b25e00;
+  --restricted-bg: #fff3e0;
+  --confid-fg: #b3261e;
+  --confid-bg: #fdecea;
+  --focus: #ffb703;
+}
+
+html {
+  font-size: 16px;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Noto Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 1rem;
+  line-height: 1.6;
+  margin: 0;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  color: var(--navy-900);
+}
+
+a {
+  color: var(--blue-700);
+}
+
+/* Visible 2px focus ring everywhere, keyboard accessible */
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Skip link */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 100;
+  background: var(--navy-900);
+  color: #fff;
+  padding: 0.5rem 1rem;
+  border-radius: 0 0 6px 0;
+  font-size: 0.875rem;
+}
+.skip-link:focus {
+  left: 0;
+  color: #fff;
+}
+
+/* Buttons */
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--blue-700);
+  color: #fff;
+  border: 1px solid var(--blue-700);
+  border-radius: 6px;
+  padding: 0.625rem 1.25rem;
+  font-size: 1rem;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+.btn-primary:hover {
+  background: var(--navy-900);
+  border-color: var(--navy-900);
+  color: #fff;
+}
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  color: var(--blue-700);
+  border: 1px solid var(--blue-700);
+  border-radius: 6px;
+  padding: 0.625rem 1.25rem;
+  font-size: 1rem;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+.btn-secondary:hover {
+  background: var(--blue-50);
+  color: var(--navy-900);
+}
+
+/* Compact nav buttons on navy */
+.btn-nav-outline {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #fff;
+  color: #fff;
+  border-radius: 6px;
+  padding: 0.375rem 0.875rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-decoration: none;
+  background: transparent;
+  cursor: pointer;
+}
+.btn-nav-outline:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+}
+
+/* Access badges: pill + icon + text label, never color alone */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  padding: 0.15rem 0.65rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.badge-public {
+  background: var(--public-bg);
+  color: var(--public-fg);
+  border-color: var(--public-fg);
+}
+.badge-department {
+  background: var(--dept-bg);
+  color: var(--dept-fg);
+  border-color: var(--dept-fg);
+}
+.badge-restricted {
+  background: var(--restricted-bg);
+  color: var(--restricted-fg);
+  border-color: var(--restricted-fg);
+}
+.badge-confidential {
+  background: var(--confid-bg);
+  color: var(--confid-fg);
+  border-color: var(--confid-fg);
+}
+.badge-neutral {
+  background: var(--bg-alt);
+  color: var(--text-muted);
+  border-color: var(--border);
+}
+
+/* Popular-search pill chips */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--blue-700);
+  border-radius: 999px;
+  padding: 0.25rem 0.8rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  text-decoration: none;
+}
+.chip:hover {
+  background: var(--blue-50);
+  border-color: var(--blue-700);
+}
+
+/* Active tab underline (saffron, decorative) */
+.active-tab-underline {
+  border-bottom: 2px solid var(--saffron);
+  background: var(--bg);
+  color: var(--navy-900);
+}
+
+/* Muted "not provided" placeholder — never blank */
+.not-provided {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* Clamp dataset descriptions to 2 lines */
+.clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
