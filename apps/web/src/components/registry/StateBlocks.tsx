@@ -1,5 +1,11 @@
 export function Skeleton({ className = "" }: { className?: string }) {
-  return <div aria-hidden className={`animate-pulse rounded-md bg-slate-200 ${className}`} />;
+  return (
+    <div
+      aria-hidden
+      className={`animate-pulse rounded-md ${className}`}
+      style={{ background: "var(--border)" }}
+    />
+  );
 }
 
 export function LoadingBlock({ lines = 3 }: { lines?: number }) {
@@ -15,12 +21,22 @@ export function LoadingBlock({ lines = 3 }: { lines?: number }) {
 
 export function ErrorBlock({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
-    <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+    <div
+      role="alert"
+      className="rounded-md px-4 py-3 text-sm"
+      style={{
+        border: "1px solid var(--confid-fg)",
+        background: "var(--confid-bg)",
+        color: "var(--confid-fg)",
+        borderRadius: 6,
+      }}
+    >
       <p>{message}</p>
       {onRetry && (
         <button
           onClick={onRetry}
-          className="mt-2 rounded-md border border-red-300 bg-white px-3 py-1 text-sm font-medium text-red-700 hover:bg-red-100"
+          className="btn-secondary mt-2"
+          style={{ padding: "0.25rem 0.75rem", fontSize: "0.875rem" }}
         >
           Retry
         </button>
@@ -29,6 +45,10 @@ export function ErrorBlock({ message, onRetry }: { message: string; onRetry?: ()
   );
 }
 
+/**
+ * Short, friendly empty state: one or two lines of text plus a single action.
+ * No large dashed boxes (GIGW minimalist style).
+ */
 export function EmptyBlock({
   title,
   body,
@@ -39,10 +59,16 @@ export function EmptyBlock({
   action?: React.ReactNode;
 }) {
   return (
-    <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center">
-      <p className="text-sm font-semibold text-slate-900">{title}</p>
-      {body && <p className="mx-auto mt-1 max-w-md text-sm text-slate-600">{body}</p>}
-      {action && <div className="mt-4">{action}</div>}
+    <div className="py-2">
+      <p className="text-sm font-semibold" style={{ color: "var(--text)" }}>
+        {title}
+      </p>
+      {body && (
+        <p className="mt-1 max-w-xl text-sm" style={{ color: "var(--text-muted)" }}>
+          {body}
+        </p>
+      )}
+      {action && <div className="mt-3">{action}</div>}
     </div>
   );
 }

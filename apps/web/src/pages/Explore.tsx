@@ -1,84 +1,97 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link, useSearchParams } from "react-router-dom";
-import { listDatasets, listDepartments, searchRegistry } from "../api/registry";
-import { AccessBadge } from "../components/registry/AccessBadge";
-import { DatasetCard, RestrictedTeaser } from "../components/registry/DatasetCard";
+import { Link, Navigate, useSearchParams } from "react-router-dom";
+import { searchRegistry, type SearchScope } from "../api/registry";
+import { DatasetCard } from "../components/registry/DatasetCard";
+import { humanizeRaw } from "../utils/format";
 import { EmptyBlock, ErrorBlock, Skeleton } from "../components/registry/StateBlocks";
 import { useAuth } from "../contexts/AuthContext";
+
+const SCOPES: Array<{ value: "" | SearchScope; label: string }> = [
+  { value: "", label: "All" },
+  { value: "departments", label: "Departments" },
+  { value: "datasets", label: "Datasets" },
+  { value: "tables", label: "Tables" },
+  { value: "columns", label: "Columns" },
+];
 
 export function ExplorePage() {
   const [params, setParams] = useSearchParams();
   const q = params.get("q") ?? "";
   const department = params.get("department") ?? "";
-  const visibility = params.get("visibility") ?? "";
+  const scopeParam = params.get("scope") ?? "";
   const [search, setSearch] = useState(q);
-  const { isAuthenticated, user } = useAuth();
+  const [scope, setScope] = useState(scopeParam);
+  const { isAuthenticated } = useAuth();
 
   useEffect(() => {
     setSearch(q);
   }, [q]);
+  useEffect(() => {
+    setScope(scopeParam);
+  }, [scopeParam]);
+
+  // Department browsing moved to /departments/:slug; keep old links working.
+  const deptRedirect = department && !q.trim()
+    ? `/departments/${encodeURIComponent(department)}`
+    : null;
 
   const trimmed = q.trim();
   const isSearch = trimmed.length > 0;
 
   const searchQuery = useQuery({
-    queryKey: ["registry-search", trimmed, department],
-    queryFn: () => searchRegistry({ q: trimmed, department: department || undefined }),
-    enabled: isSearch,
+    queryKey: ["registry-search", trimmed, scope, department],
+    queryFn: () =>
+      searchRegistry({
+        q: trimmed,
+        scope: scope || undefined,
+        department: department || undefined,
+      }),
+    enabled: isSearch && !deptRedirect,
     retry: false,
   });
 
-  const catalogQuery = useQuery({
-    queryKey: ["registry-catalog", department],
-    queryFn: () => listDatasets({ department: department || undefined }),
-    enabled: !isSearch,
-    retry: false,
-  });
-
-  // Department header: reuse the cached department list (same key as
-  // DepartmentGrid) so the catalogue landing shows name, description
-  // and counts when ?department= is set. Search stays scoped via the
-  // department param already sent by listDatasets/searchRegistry.
-  const departmentsQuery = useQuery({
-    queryKey: ["registry-departments"],
-    queryFn: listDepartments,
-    enabled: Boolean(department),
-    retry: false,
-    staleTime: 5 * 60 * 1000,
-  });
-  const activeDepartment = department
-    ? (departmentsQuery.data?.items ?? []).find((d) => d.name === department) ?? null
-    : null;
+  if (deptRedirect) {
+    return <Navigate to={deptRedirect} replace />;
+  }
 
   const onSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const next = new URLSearchParams(params);
+    const next = new URLSearchParams();
     if (search.trim()) next.set("q", search.trim());
-    else next.delete("q");
+    if (scope) next.set("scope", scope);
+    if (department) next.set("department", department);
     setParams(next);
   };
 
-  const clearFilters = () => setParams(new URLSearchParams());
+  const onScopeChange = (value: string) => {
+    setScope(value);
+    const next = new URLSearchParams(params);
+    if (value) next.set("scope", value);
+    else next.delete("scope");
+    setParams(next);
+  };
 
-  const error: Error | null = searchQuery.error ?? catalogQuery.error;
-  const isPending = isSearch ? searchQuery.isPending : catalogQuery.isPending;
+  const clearFilters = () => {
+    setSearch("");
+    setScope("");
+    setParams(new URLSearchParams());
+  };
 
-  const cards = isSearch ? [] : (catalogQuery.data?.items ?? []);
-  const results = isSearch ? (searchQuery.data?.data ?? []) : [];
-  const teasers = isSearch ? (searchQuery.data?.teasers ?? []) : (catalogQuery.data?.teasers ?? []);
-  const visibleCards =
-    !isSearch && visibility === "public" ? cards.filter((c) => c.access_level === "public") : cards;
+  const groups = searchQuery.data;
+  const total = groups?.total ?? 0;
 
   return (
     <div className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-      <h1 className="text-2xl font-bold text-slate-900">Catalog</h1>
-      <p className="mt-1 text-sm text-slate-600">
-        Search across metadata. Access levels are applied automatically
-        {isAuthenticated ? " for your account" : " for public browsing"}.
+      <h1 className="font-bold" style={{ color: "var(--navy-900)", fontSize: "1.75rem" }}>
+        Catalog
+      </h1>
+      <p className="mt-1 text-sm" style={{ color: "var(--text-muted)", fontSize: "0.9375rem" }}>
+        Search across departments, datasets, tables and columns. Access levels are
+        applied automatically{isAuthenticated ? " for your account" : " for public browsing"}.
       </p>
 
-      <form onSubmit={onSubmit} role="search" className="mt-4 flex flex-col gap-2 sm:flex-row">
+      <form onSubmit={onSubmit} role="search" className="mt-4 flex w-full flex-col gap-2 sm:flex-row">
         <label htmlFor="catalog-search" className="sr-only">
           Search datasets, tables, keywords
         </label>
@@ -88,51 +101,68 @@ export function ExplorePage() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search datasets, tables, keywords..."
-          className="min-w-64 flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-slate-900 focus:outline-none"
+          className="min-w-64 flex-1"
+          style={{
+            border: "1px solid var(--border)",
+            borderRadius: 6,
+            padding: "0.625rem 0.75rem",
+            fontSize: "1rem",
+            color: "var(--text)",
+            background: "var(--bg)",
+            width: "100%",
+          }}
         />
-        <button
-          type="submit"
-          className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700"
+        <label htmlFor="catalog-scope" className="sr-only">
+          Search scope
+        </label>
+        <select
+          id="catalog-scope"
+          value={scope}
+          onChange={(e) => onScopeChange(e.target.value)}
+          style={{
+            border: "1px solid var(--border)",
+            borderRadius: 6,
+            padding: "0.625rem 0.75rem",
+            fontSize: "1rem",
+            color: "var(--text)",
+            background: "var(--bg-alt)",
+          }}
         >
+          {SCOPES.map((s) => (
+            <option key={s.label} value={s.value}>
+              {s.label}
+            </option>
+          ))}
+        </select>
+        <button type="submit" className="btn-primary" style={{ fontSize: "0.9375rem" }}>
           Search
         </button>
-        {(q || department || visibility) && (
+        {(q || scope || department) && (
           <button
             type="button"
             onClick={clearFilters}
-            className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+            className="btn-secondary"
+            style={{ fontSize: "0.9375rem" }}
           >
             Clear
           </button>
         )}
       </form>
 
-      {department && (
-        <div className="mt-4 rounded-lg border border-slate-200 bg-white p-5">
-          <p className="text-xs font-medium tracking-wide text-slate-500 uppercase">Department catalogue</p>
-          <h2 className="mt-1 text-xl font-bold text-slate-900">{activeDepartment?.name ?? department}</h2>
-          {activeDepartment?.description && (
-            <p className="mt-1 text-sm text-slate-600">{activeDepartment.description}</p>
-          )}
-          <p className="mt-2 text-sm text-slate-600" role="status">
-            {activeDepartment
-              ? `${activeDepartment.dataset_count} ${activeDepartment.dataset_count === 1 ? "dataset" : "datasets"} · ${activeDepartment.table_count} ${activeDepartment.table_count === 1 ? "table" : "tables"}`
-              : "Loading catalogue info…"}
-          </p>
-          <p className="mt-1 text-xs text-slate-500">
-            Search and browsing are scoped to this department. Datasets you cannot open appear as restricted.
-          </p>
-        </div>
-      )}
-
-      {visibility && !department && (
-        <p className="mt-3 text-sm text-slate-600">
-          Filtered by <span className="font-medium">visibility: {visibility}</span>
-        </p>
-      )}
-
       <div className="mt-6">
-        {isPending && (
+        {!isSearch && (
+          <EmptyBlock
+            title="Search the catalog."
+            body="Enter keywords above, or browse by department."
+            action={
+              <Link to="/departments" className="btn-secondary" style={{ fontSize: "0.875rem" }}>
+                Browse Departments
+              </Link>
+            }
+          />
+        )}
+
+        {isSearch && searchQuery.isPending && (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2" role="status" aria-label="Loading results">
             {[0, 1, 2, 3].map((i) => (
               <Skeleton key={i} className="h-36" />
@@ -140,104 +170,166 @@ export function ExplorePage() {
           </div>
         )}
 
-        {error && (
+        {isSearch && searchQuery.error && (
           <ErrorBlock
             message="Unable to load catalog information. Please try again."
-            onRetry={() => (isSearch ? searchQuery.refetch() : catalogQuery.refetch())}
+            onRetry={() => searchQuery.refetch()}
           />
         )}
 
-        {!isPending && !error && isSearch && results.length === 0 && teasers.length === 0 && (
-          <EmptyBlock
-            title={`No results for "${trimmed}".`}
-            body={
-              department
-                ? "Try different keywords, or clear the department filter. Matches inside restricted datasets are hidden by access policy."
-                : "Try different keywords, or browse departments and public data instead."
-            }
-          />
-        )}
-
-        {!isPending && !error && !isSearch && visibleCards.length === 0 && teasers.length === 0 && (
-          <EmptyBlock
-            title="No datasets match these filters."
-            body={
-              department && (activeDepartment?.table_count ?? 0) > 0
-                ? isAuthenticated && !user?.department
-                  ? "This department has published datasets, but your account has no department assigned, so they are hidden. Contact an admin to assign your department."
-                  : "This department has published datasets, but none are visible to your account. Restricted datasets are hidden — request access or contact an admin."
-                : "Try clearing the filters or browse public data."
-            }
-            action={
-              <button
-                onClick={clearFilters}
-                className="inline-flex rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700"
-              >
-                Clear filters
-              </button>
-            }
-          />
-        )}
-
-        {!isPending && !error && isSearch && (
+        {isSearch && !searchQuery.isPending && !searchQuery.error && total === 0 && (
           <div>
-            <p className="mb-3 text-sm text-slate-600" role="status">
-              {searchQuery.data?.total ?? 0} result{(searchQuery.data?.total ?? 0) === 1 ? "" : "s"} for “{trimmed}”
-            </p>
-            <ul className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              {results.map((t) => (
-                <li
-                  key={t.id}
-                  className="rounded-lg border border-slate-200 bg-white p-4 transition-shadow hover:shadow-md"
+            <h2 className="font-semibold" style={{ color: "var(--navy-900)", fontSize: "1.25rem" }}>
+              No results for “{trimmed}”.
+            </h2>
+            <ul className="mt-3 list-disc space-y-2 pl-5 text-sm" style={{ color: "var(--text)", fontSize: "0.9375rem" }}>
+              <li>
+                Try a broader word, e.g.{" "}
+                <button
+                  type="button"
+                  className="font-medium underline"
+                  style={{ color: "var(--blue-700)" }}
+                  onClick={() => {
+                    const broader = trimmed.split(/\s+/)[0];
+                    setSearch(broader);
+                    const next = new URLSearchParams(params);
+                    next.set("q", broader);
+                    setParams(next);
+                  }}
                 >
-                  <div className="flex items-start justify-between gap-2">
-                    <Link to={`/explore/${t.id}`} className="text-base font-semibold text-slate-900 hover:underline">
-                      {t.name}
-                    </Link>
-                    <AccessBadge level={t.access_level} />
-                  </div>
-                  <p className="mt-1 text-xs text-slate-500">{t.fullyQualifiedName}</p>
-                  <p className="mt-1 line-clamp-2 text-sm text-slate-600">{t.description || "No description"}</p>
-                  <p className="mt-2 text-xs text-slate-500">{t.columns?.length ?? 0} columns</p>
+                  “{trimmed.split(/\s+/)[0]}”
+                </button>
+                .
+              </li>
+              <li>
+                <Link to="/departments" style={{ color: "var(--blue-700)" }} className="font-medium underline">
+                  Browse departments
+                </Link>{" "}
+                to discover datasets by owner.
+              </li>
+              {!isAuthenticated && (
+                <li>
+                  <Link to="/login" style={{ color: "var(--blue-700)" }} className="font-medium underline">
+                    Sign in
+                  </Link>{" "}
+                  to see metadata available to your department.
                 </li>
-              ))}
-              {teasers.map((t) => (
-                <li key={t.id}>
-                  <RestrictedTeaser table={t} />
-                </li>
-              ))}
+              )}
             </ul>
           </div>
         )}
 
-        {!isPending && !error && !isSearch && (
+        {isSearch && !searchQuery.isPending && !searchQuery.error && total > 0 && groups && (
           <div>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {visibleCards.map((card) => (
-                <DatasetCard key={card.dataset} card={card} />
-              ))}
-            </div>
-            {teasers.length > 0 && (
-              <div className="mt-8">
-                <h2 className="text-lg font-semibold text-slate-900">Restricted</h2>
-                <p className="mt-1 text-sm text-slate-600">These require authorization to view.</p>
+            <p className="mb-4 text-sm" style={{ color: "var(--text-muted)" }} role="status">
+              {total} result{total === 1 ? "" : "s"} for “{trimmed}”
+            </p>
+
+            {groups.departments.total > 0 && (
+              <section aria-label="Departments" className="mt-6">
+                <h2 className="font-semibold" style={{ color: "var(--navy-900)", fontSize: "1.125rem" }}>
+                  Departments ({groups.departments.total})
+                </h2>
+                <ul className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  {groups.departments.items.map((d) => (
+                    <li key={d.slug}>
+                      <Link
+                        to={`/departments/${encodeURIComponent(d.slug)}`}
+                        className="block p-4"
+                        style={{ border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", textDecoration: "none" }}
+                      >
+                        <div className="font-semibold" style={{ color: "var(--blue-700)", fontSize: "1rem" }}>
+                          {humanizeRaw(d.display_name)}
+                        </div>
+                        <div className="mt-1 text-sm" style={{ color: "var(--text-muted)", fontSize: "0.875rem" }}>
+                          {d.dataset_count} {d.dataset_count === 1 ? "dataset" : "datasets"}
+                        </div>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+
+            {groups.datasets.total > 0 && (
+              <section aria-label="Datasets" className="mt-8">
+                <h2 className="font-semibold" style={{ color: "var(--navy-900)", fontSize: "1.125rem" }}>
+                  Datasets ({groups.datasets.total})
+                </h2>
                 <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {teasers.map((t) => (
-                    <RestrictedTeaser key={t.id} table={t} />
+                  {groups.datasets.items.map((card) => (
+                    <DatasetCard key={card.dataset} card={card} />
                   ))}
                 </div>
-              </div>
+              </section>
             )}
-            {!isAuthenticated && (
-              <p className="mt-4 text-sm text-slate-600">
-                Some results may be hidden.{" "}
-                <Link to="/login" className="font-medium underline">
-                  Sign in
-                </Link>{" "}
-                to see metadata available to your department.
-              </p>
+
+            {groups.tables.total > 0 && (
+              <section aria-label="Tables" className="mt-8">
+                <h2 className="font-semibold" style={{ color: "var(--navy-900)", fontSize: "1.125rem" }}>
+                  Tables ({groups.tables.total})
+                </h2>
+                <ul className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+                  {groups.tables.items.map((t) => (
+                    <li
+                      key={t.fullyQualifiedName ?? t.id}
+                      className="p-4"
+                      style={{ border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)" }}
+                    >
+                      <div className="font-semibold" style={{ color: "var(--navy-900)", fontSize: "1rem" }}>
+                        {humanizeRaw(t.name)}
+                      </div>
+                      <p className="mt-1" style={{ color: "var(--text-muted)", fontSize: "0.8125rem" }}>
+                        {humanizeRaw(t.department_display ?? t.department ?? null)}
+                        {t.dataset ? ` · ${t.dataset}` : ""}
+                      </p>
+                      {t.description ? (
+                        <p className="clamp-2 mt-1 text-sm" style={{ color: "var(--text)", fontSize: "0.9375rem" }}>
+                          {t.description}
+                        </p>
+                      ) : (
+                        <p className="not-provided mt-1 text-sm" style={{ fontSize: "0.9375rem" }}>
+                          Not provided
+                        </p>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+
+            {groups.columns.total > 0 && (
+              <section aria-label="Columns" className="mt-8">
+                <h2 className="font-semibold" style={{ color: "var(--navy-900)", fontSize: "1.125rem" }}>
+                  Columns ({groups.columns.total})
+                </h2>
+                <ul className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {groups.columns.items.map((c, i) => (
+                    <li
+                      key={`${c.dataset}-${c.table}-${c.name}-${i}`}
+                      className="px-3 py-2"
+                      style={{ border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", fontSize: "0.9375rem" }}
+                    >
+                      <span className="font-medium" style={{ color: "var(--text)" }}>{c.name}</span>
+                      <span style={{ color: "var(--text-muted)", fontSize: "0.8125rem" }}>
+                        {" "}· {c.table} · {c.dataset}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
             )}
           </div>
+        )}
+
+        {isSearch && !searchQuery.isPending && !searchQuery.error && !isAuthenticated && total > 0 && (
+          <p className="mt-6 text-sm" style={{ color: "var(--text-muted)" }}>
+            Some results may be hidden.{" "}
+            <Link to="/login" className="font-medium" style={{ color: "var(--blue-700)" }}>
+              Sign in
+            </Link>{" "}
+            to see metadata available to your department.
+          </p>
         )}
       </div>
     </div>

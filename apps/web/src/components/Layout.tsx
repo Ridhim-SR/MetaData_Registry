@@ -21,33 +21,35 @@ export function Layout() {
 
   return (
     <div className="flex min-h-screen">
-      <aside className="flex w-56 flex-col border-r border-slate-200 bg-slate-50">
-        <div className="border-b border-slate-200 px-4 py-4 text-lg font-semibold">Metadata Hub</div>
+      <aside className="flex w-56 flex-col" style={{ borderRight: "1px solid var(--border)", background: "var(--bg-alt)" }}>
+        <div className="px-4 py-4 text-lg font-semibold" style={{ borderBottom: "1px solid var(--border)", color: "var(--navy-900)" }}>Metadata Hub</div>
         <nav className="flex flex-1 flex-col gap-1 p-2">
           {links.map((link) => (
             <NavLink
               key={link.to}
               to={link.to}
-              className={({ isActive }) =>
-                `rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-                  isActive ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-200"
-                }`
+              className="rounded-md px-3 py-2 text-sm font-medium"
+              style={({ isActive }) =>
+                isActive
+                  ? { background: "var(--navy-900)", color: "#fff" }
+                  : { color: "var(--text)" }
               }
             >
               {link.label}
             </NavLink>
           ))}
         </nav>
-        <div className="border-t border-slate-200 p-4">
+        <div className="p-4" style={{ borderTop: "1px solid var(--border)" }}>
           <div className="mb-2 text-sm">
             <div className="font-medium">{displayName(user)}</div>
-            <div className="text-xs text-slate-500">
+            <div className="text-xs" style={{ color: "var(--text-muted)" }}>
               {user?.email} · {user?.role}
             </div>
           </div>
           <button
             onClick={handleLogout}
-            className="w-full rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700"
+            className="btn-primary w-full"
+            style={{ fontSize: "0.875rem" }}
           >
             Log out
           </button>

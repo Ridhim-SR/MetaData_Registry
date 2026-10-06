@@ -18,13 +18,16 @@ class Visibility(str, enum.Enum):
     """Dataset/table access level for the metadata registry.
 
     public: anyone, no login. department: authenticated users of the owning
-    department (or admins). restricted: discoverable as a teaser, details
-    require authorization / access request.
+    department (or admins); guests see a teaser. restricted: discoverable as
+    a teaser, details require authorization / access request. confidential:
+    invisible to everyone except admins (absent from lists, search, counts
+    and stats; direct access is 404).
     """
 
     public = "public"
     department = "department"
     restricted = "restricted"
+    confidential = "confidential"
 
 
 class AuthProvider(str, enum.Enum):

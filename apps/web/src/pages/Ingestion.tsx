@@ -124,7 +124,7 @@ export function IngestionPage() {
 
   const tabCls = (tab: string) =>
     `rounded-t-md px-4 py-2 text-sm font-medium ${
-      activeTab === tab ? "border-b-2 border-slate-900 bg-white" : "text-slate-500 hover:text-slate-800"
+      activeTab === tab ? "active-tab-underline" : "text-slate-500 hover:text-slate-800"
     }`;
 
   return (
@@ -195,7 +195,7 @@ export function IngestionPage() {
           <button
             type="submit"
             disabled={pgMutation.isPending}
-            className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+            className="btn-primary disabled:opacity-50"
           >
             {pgMutation.isPending ? "Ingesting…" : "Run PostgreSQL ingestion"}
           </button>
@@ -212,7 +212,7 @@ export function IngestionPage() {
               type="file"
               accept=".csv,text/csv"
               onChange={(e) => setCsvFile(e.target.files?.[0] ?? null)}
-              className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 file:mr-3 file:rounded file:border-0 file:bg-slate-900 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-white hover:file:bg-slate-700"
+              className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 file:mr-3 file:rounded file:border-0 file:bg-[var(--blue-700)] file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-white hover:file:bg-slate-700"
             />
           </div>
           <div className="grid grid-cols-2 gap-4">
@@ -246,7 +246,7 @@ export function IngestionPage() {
           <button
             type="submit"
             disabled={csvUploadMutation.isPending || csvMutation.isPending}
-            className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+            className="btn-primary disabled:opacity-50"
           >
             {csvUploadMutation.isPending || csvMutation.isPending ? "Ingesting…" : "Upload & run CSV ingestion"}
           </button>
@@ -261,7 +261,7 @@ export function IngestionPage() {
             <button
               onClick={() => createMutation.mutate()}
               disabled={createMutation.isPending}
-              className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+              className="btn-primary disabled:opacity-50"
             >
               Create demo pipeline
             </button>

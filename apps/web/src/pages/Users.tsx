@@ -9,13 +9,13 @@ export function UsersPage() {
 
   return (
     <div>
-      <h1 className="mb-6 text-2xl font-semibold">Users</h1>
-      {isPending && <p className="text-slate-500">Loading…</p>}
-      {isError && <p className="text-red-600">Failed to load users: {String(error)}</p>}
+      <h1 className="mb-6 text-2xl font-semibold" style={{ color: "var(--navy-900)" }}>Users</h1>
+      {isPending && <p style={{ color: "var(--text-muted)" }}>Loading…</p>}
+      {isError && <p style={{ color: "var(--confid-fg)" }}>Failed to load users: {String(error)}</p>}
       {users && (
-        <div className="overflow-hidden rounded-lg border border-slate-200">
+        <div className="overflow-hidden" style={{ border: "1px solid var(--border)", borderRadius: 6 }}>
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-left text-slate-500">
+            <thead className="text-left" style={{ background: "var(--bg-alt)", color: "var(--text-muted)" }}>
                 <tr>
                   <th className="px-4 py-2 font-medium">ID</th>
                   <th className="px-4 py-2 font-medium">Name</th>

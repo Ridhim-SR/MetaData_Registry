@@ -2,32 +2,65 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import type { DatasetCard as Card, RegistryTable } from "../../api/registry";
 import { requestAccess } from "../../api/registry";
-import { capitalizeFirst } from "../../utils/format";
+import { completenessPct, humanizeRaw, orNotProvided } from "../../utils/format";
 import { useAuth } from "../../contexts/AuthContext";
 import { AccessBadge } from "./AccessBadge";
 
-function tableWord(n: number) {
-  return `${n} ${n === 1 ? "Table" : "Tables"}`;
-}
-
 export function DatasetCard({ card }: { card: Card }) {
+  const dept = card.department_display ?? card.department ?? "Not provided";
+  const description = (card.tables ?? []).map((t) => t.description?.trim()).find(Boolean)
+    ?? card.description?.trim()
+    ?? "";
+  const completeness = completenessPct(card.tables ?? []);
+
   return (
-    <article className="flex flex-col rounded-lg border border-slate-200 bg-white p-5">
+    <article
+      className="flex flex-col p-5"
+      style={{ border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)" }}
+    >
       <div className="flex items-start justify-between gap-2">
-        <h3 className="text-base font-semibold text-slate-900">{capitalizeFirst(card.name)}</h3>
-        <AccessBadge level={card.access_level} />
+        <h3
+          className="min-w-0 flex-1 text-base font-semibold"
+          style={{ fontSize: "1rem", overflowWrap: "anywhere" }}
+        >
+          <Link
+            to={`/datasets/${encodeURIComponent(card.dataset)}`}
+            style={{ color: "var(--blue-700)" }}
+          >
+            {humanizeRaw(card.name)}
+          </Link>
+        </h3>
+        <span style={{ flexShrink: 0 }}>
+          <AccessBadge level={card.access_level} />
+        </span>
       </div>
-      <p className="mt-1 text-sm text-slate-500">
-        {[card.department ?? card.service, card.database]
-          .map((part) => capitalizeFirst(part))
-          .filter(Boolean)
-          .join(" · ")}
+      <p className="mt-1 text-sm" style={{ color: "var(--text-muted)", fontSize: "0.875rem" }}>
+        {humanizeRaw(dept === "Not provided" ? null : dept)}
       </p>
-      <p className="mt-2 text-sm text-slate-600">{tableWord(card.table_count)}</p>
-      <div className="mt-4 flex-1" />
+      {description ? (
+        <p className="clamp-2 mt-2 text-sm" style={{ color: "var(--text)", fontSize: "0.9375rem" }}>
+          {description}
+        </p>
+      ) : (
+        <p className="not-provided mt-2 text-sm" style={{ fontSize: "0.9375rem" }}>
+          Not provided
+        </p>
+      )}
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <span className="badge badge-neutral">Metadata {completeness}%</span>
+        <span className="text-sm" style={{ color: "var(--text-muted)", fontSize: "0.8125rem" }}>
+          {card.table_count} {card.table_count === 1 ? "table" : "tables"}
+        </span>
+      </div>
+      <div className="mt-2 flex-1" />
+      <p className="mt-2 text-sm" style={{ color: "var(--text-muted)", fontSize: "0.8125rem" }}>
+        Last updated:{" "}
+        <span className="not-provided">{orNotProvided(undefined)}</span>
+      </p>
       <Link
         to={`/datasets/${encodeURIComponent(card.dataset)}`}
-        className="inline-flex w-fit rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 focus:ring-2 focus:ring-slate-900 focus:ring-offset-2 focus:outline-none"
+        className="btn-secondary mt-3 w-fit"
+        style={{ padding: "0.4rem 1rem", fontSize: "0.875rem" }}
       >
         View Dataset
       </Link>
@@ -49,37 +82,50 @@ export function RestrictedTeaser({ table }: { table: RegistryTable }) {
     }
   };
 
+  const dept = table.department_display ?? table.department ?? "Not provided";
+
   return (
-    <article className="flex flex-col rounded-lg border border-amber-200 bg-amber-50 p-5">
+    <article
+      className="flex flex-col p-5"
+      style={{ border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)" }}
+    >
       <div className="flex items-start justify-between gap-2">
-        <h3 className="text-base font-semibold text-slate-900">{capitalizeFirst(table.name)}</h3>
+        <h3 className="text-base font-semibold" style={{ fontSize: "1rem", color: "var(--navy-900)" }}>
+          {table.name || "Not provided"}
+        </h3>
         <AccessBadge level="restricted" />
       </div>
-      <p className="mt-1 text-sm text-slate-500">{capitalizeFirst(table.department)}</p>
-      <p className="mt-2 text-sm text-slate-600">Access requires authorization.</p>
+      <p className="mt-1 text-sm" style={{ color: "var(--text-muted)", fontSize: "0.875rem" }}>
+        {dept}
+      </p>
+      <p className="mt-2 text-sm" style={{ color: "var(--text)", fontSize: "0.9375rem" }}>
+        Access requires authorization.
+      </p>
       <div className="mt-4 flex-1" />
       {state === "sent" ? (
-        <p className="text-sm font-medium text-green-700" role="status">
+        <p className="text-sm font-medium" role="status" style={{ color: "var(--public-fg)" }}>
           Access requested. The owning department will review your request.
         </p>
       ) : isAuthenticated ? (
         <button
           onClick={onRequest}
           disabled={state === "sending"}
-          className="inline-flex w-fit rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-60"
+          className="btn-primary w-fit"
+          style={{ padding: "0.4rem 1rem", fontSize: "0.875rem" }}
         >
           {state === "sending" ? "Requesting…" : "Request Access"}
         </button>
       ) : (
         <Link
           to="/login"
-          className="inline-flex w-fit rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700"
+          className="btn-primary w-fit"
+          style={{ padding: "0.4rem 1rem", fontSize: "0.875rem" }}
         >
           Sign in to request access
         </Link>
       )}
       {state === "error" && (
-        <p className="mt-2 text-sm text-red-700" role="alert">
+        <p className="mt-2 text-sm" role="alert" style={{ color: "var(--confid-fg)" }}>
           Could not send the request. Please try again.
         </p>
       )}

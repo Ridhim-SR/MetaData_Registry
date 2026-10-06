@@ -3,7 +3,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
-Visibility = Literal["public", "department", "restricted"]
+Visibility = Literal["public", "department", "restricted", "confidential"]
 
 
 class DatasetColumn(BaseModel):

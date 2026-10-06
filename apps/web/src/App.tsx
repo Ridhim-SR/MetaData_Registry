@@ -2,8 +2,11 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { RegistryLayout } from "./components/RegistryLayout";
+import { AboutPage } from "./pages/About";
+import { ContactPage } from "./pages/Contact";
 import { DashboardPage } from "./pages/Dashboard";
 import { DatasetDetailPage } from "./pages/DatasetDetail";
+import { DepartmentDetailPage } from "./pages/DepartmentDetail";
 import { DepartmentsPage } from "./pages/Departments";
 import { IngestionPage } from "./pages/Ingestion";
 import { LoginPage } from "./pages/Login";
@@ -29,6 +32,9 @@ export default function App() {
           <Route path="explore/:tableId" element={<TableDetailPage />} />
           <Route path="datasets/:datasetFqn" element={<DatasetDetailPage />} />
           <Route path="departments" element={<DepartmentsPage />} />
+          <Route path="departments/:slug" element={<DepartmentDetailPage />} />
+          <Route path="about" element={<AboutPage />} />
+          <Route path="contact" element={<ContactPage />} />
           <Route path="privacy" element={<PrivacyPolicyPage />} />
           <Route path="copyrights" element={<CopyrightsPolicyPage />} />
         </Route>
