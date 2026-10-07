@@ -44,6 +44,12 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
     } catch {
       /* non-JSON error body */
     }
+    if (resp.status === 401 && getToken()) {
+      // Session is dead (e.g. expired JWT): drop it so the whole UI
+      // immediately renders exactly like the signed-out state.
+      setToken(null);
+      window.dispatchEvent(new Event("sda:unauthorized"));
+    }
     throw new ApiError(resp.status, detail);
   }
 
@@ -53,6 +59,33 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
 
 export const apiGet = <T>(path: string, options?: RequestOptions) =>
   api<T>(path, { method: "GET", ...options });
+
+/** Raw-text GET (for CSV downloads); still throws ApiError on !ok. */
+export async function apiGetText(path: string, options?: RequestOptions): Promise<string> {
+  const headers: Record<string, string> = { ...(options?.headers as Record<string, string>) };
+  if (!options?.skipAuth) {
+    const token = getToken();
+    if (token) headers.Authorization = `Bearer ${token}`;
+  }
+  const resp = await fetch(`${BASE_URL}${path}`, { ...options, headers });
+  if (!resp.ok) {
+    let detail = resp.statusText;
+    try {
+      const body = await resp.json();
+      detail = typeof body.detail === "string" ? body.detail : JSON.stringify(body);
+    } catch {
+      /* non-JSON error body */
+    }
+    if (resp.status === 401 && getToken()) {
+      // Session is dead (e.g. expired JWT): drop it so the whole UI
+      // immediately renders exactly like the signed-out state.
+      setToken(null);
+      window.dispatchEvent(new Event("sda:unauthorized"));
+    }
+    throw new ApiError(resp.status, detail);
+  }
+  return resp.text();
+}
 export const apiPost = <T>(path: string, body?: unknown, options?: RequestOptions) =>
   api<T>(path, { method: "POST", ...(body !== undefined ? { body: JSON.stringify(body) } : {}), ...options });
 
@@ -73,6 +106,12 @@ export async function apiUpload<T>(path: string, file: File): Promise<T> {
       detail = typeof body.detail === "string" ? body.detail : JSON.stringify(body);
     } catch {
       /* non-JSON error body */
+    }
+    if (resp.status === 401 && getToken()) {
+      // Session is dead (e.g. expired JWT): drop it so the whole UI
+      // immediately renders exactly like the signed-out state.
+      setToken(null);
+      window.dispatchEvent(new Event("sda:unauthorized"));
     }
     throw new ApiError(resp.status, detail);
   }

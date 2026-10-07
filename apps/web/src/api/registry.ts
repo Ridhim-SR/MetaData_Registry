@@ -1,4 +1,4 @@
-import { apiGet, apiPost } from "./client";
+import { apiGet, apiGetText, apiPost } from "./client";
 
 export type AccessLevel = "public" | "department" | "restricted" | "confidential";
 
@@ -55,14 +55,26 @@ export interface RegistryTable {
   name: string;
   fullyQualifiedName: string;
   description?: string | null;
-  columns?: Array<{ name: string; dataType?: string; dataTypeDisplay?: string; description?: string | null }>;
+  columns?: Array<{ name: string; dataType?: string; dataTypeDisplay?: string; description?: string | null; tags?: RegistryTag[] }>;
   access_level?: AccessLevel;
   department?: string | null;
   department_display?: string | null;
   restricted?: boolean;
+  locked?: boolean;
+  column_count?: number;
   owners?: RegistryOwner[];
   tags?: RegistryTag[];
   info?: TableInfo | null;
+  facts?: TableFacts | null;
+}
+
+export interface TableFacts {
+  owner?: string | null;
+  steward?: string | null;
+  department_contact?: string | null;
+  updated_at?: number | null;
+  frequency?: string | null;
+  source?: string | null;
 }
 
 export interface DatasetCard {
@@ -79,6 +91,10 @@ export interface DatasetCard {
   /** Teaser cards carry locked:true and no tables. Full cards carry tables. */
   locked: boolean;
   tables?: RegistryTable[];
+  /** Distinct tagFQNs across visible member tables (empty for teasers). */
+  tags?: string[];
+  /** Max member-table updatedAt (epoch ms), null when unknown/hidden. */
+  updated_at?: number | null;
 }
 
 export interface DatasetList {
@@ -105,6 +121,10 @@ export interface TableHit {
   department?: string | null;
   department_display?: string | null;
   dataset?: string;
+  matched_in?: string[];
+  matched_columns?: string[];
+  tags?: string[];
+  updated_at?: number | null;
 }
 
 export interface ColumnHit {
@@ -159,6 +179,10 @@ export function getDataset(fqn: string) {
 
 export function getRegistryTable(tableId: string) {
   return apiGet<RegistryTable>(`/registry/tables/${encodeURIComponent(tableId)}`);
+}
+
+export function downloadTableDictionary(tableId: string) {
+  return apiGetText(`/registry/tables/${encodeURIComponent(tableId)}/dictionary`);
 }
 
 export interface TableLineage {

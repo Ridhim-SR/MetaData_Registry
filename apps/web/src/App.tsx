@@ -18,6 +18,7 @@ import { RegistryHomePage } from "./pages/RegistryHome";
 import { UsersPage } from "./pages/Users";
 import { ExplorePage } from "./pages/Explore";
 import { TableDetailPage } from "./pages/TableDetail";
+import { TablePage } from "./pages/TablePage";
 
 export default function App() {
   return (
@@ -31,6 +32,7 @@ export default function App() {
           <Route path="explore" element={<ExplorePage />} />
           <Route path="explore/:tableId" element={<TableDetailPage />} />
           <Route path="datasets/:datasetFqn" element={<DatasetDetailPage />} />
+          <Route path="datasets/:datasetFqn/tables/:tableName" element={<TablePage />} />
           <Route path="departments" element={<DepartmentsPage />} />
           <Route path="departments/:slug" element={<DepartmentDetailPage />} />
           <Route path="about" element={<AboutPage />} />

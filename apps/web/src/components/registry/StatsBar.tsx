@@ -4,6 +4,8 @@ import { ErrorBlock, Skeleton } from "./StateBlocks";
 
 export function StatsBar() {
   const query = useQuery({ queryKey: ["registry-stats"], queryFn: getRegistryStats });
+  // Show the loader on every fetch so stale counts never flash as current.
+  const loading = query.isPending || query.isFetching;
 
   return (
     <section
@@ -11,20 +13,20 @@ export function StatsBar() {
       style={{ background: "var(--bg-alt)", borderTop: "1px solid var(--border)", borderBottom: "1px solid var(--border)" }}
     >
       <div className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-        {query.isPending && (
+        {loading && (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3" role="status" aria-label="Loading statistics">
             {[0, 1, 2].map((i) => (
               <Skeleton key={i} className="h-20" />
             ))}
           </div>
         )}
-        {query.error && (
+        {!loading && query.error && (
           <ErrorBlock
             message="Unable to load catalog information. Please try again."
             onRetry={() => query.refetch()}
           />
         )}
-        {query.data && (
+        {!loading && query.data && (
           <dl className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             {[
               { label: "Departments", value: query.data.departments },

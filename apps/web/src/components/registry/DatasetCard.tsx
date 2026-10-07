@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import type { DatasetCard as Card, RegistryTable } from "../../api/registry";
 import { requestAccess } from "../../api/registry";
-import { completenessPct, humanizeRaw, orNotProvided } from "../../utils/format";
+import { humanizeRaw, orNotProvided } from "../../utils/format";
 import { useAuth } from "../../contexts/AuthContext";
 import { AccessBadge } from "./AccessBadge";
 
@@ -11,7 +11,6 @@ export function DatasetCard({ card }: { card: Card }) {
   const description = (card.tables ?? []).map((t) => t.description?.trim()).find(Boolean)
     ?? card.description?.trim()
     ?? "";
-  const completeness = completenessPct(card.tables ?? []);
 
   return (
     <article
@@ -43,11 +42,10 @@ export function DatasetCard({ card }: { card: Card }) {
         </p>
       ) : (
         <p className="not-provided mt-2 text-sm" style={{ fontSize: "0.9375rem" }}>
-          Not provided
+          No description
         </p>
       )}
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <span className="badge badge-neutral">Metadata {completeness}%</span>
         <span className="text-sm" style={{ color: "var(--text-muted)", fontSize: "0.8125rem" }}>
           {card.table_count} {card.table_count === 1 ? "table" : "tables"}
         </span>
@@ -93,7 +91,7 @@ export function RestrictedTeaser({ table }: { table: RegistryTable }) {
         <h3 className="text-base font-semibold" style={{ fontSize: "1rem", color: "var(--navy-900)" }}>
           {table.name || "Not provided"}
         </h3>
-        <AccessBadge level="restricted" />
+        <AccessBadge level={table.access_level ?? "restricted"} />
       </div>
       <p className="mt-1 text-sm" style={{ color: "var(--text-muted)", fontSize: "0.875rem" }}>
         {dept}

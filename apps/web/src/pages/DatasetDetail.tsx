@@ -75,6 +75,9 @@ export function DatasetDetailPage() {
     retry: false,
   });
 
+  // Loader on every fetch so a previous dataset never flashes as current.
+  const loading = query.isPending || query.isFetching;
+
   return (
     <div className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
       <Link
@@ -85,9 +88,9 @@ export function DatasetDetailPage() {
         ← Back to catalog
       </Link>
 
-      {query.isPending && <LoadingBlock lines={5} />}
+      {loading && <LoadingBlock lines={5} />}
 
-      {query.error && query.error instanceof ApiError && query.error.status === 404 && (
+      {!loading && query.error && query.error instanceof ApiError && query.error.status === 404 && (
         <EmptyBlock
           title="Dataset not found."
           body="It may have been removed, or you may not have permission to view it."
@@ -99,7 +102,7 @@ export function DatasetDetailPage() {
         />
       )}
 
-      {query.error && query.error instanceof ApiError && query.error.status === 403 && (
+      {!loading && query.error && query.error instanceof ApiError && query.error.status === 403 && (
         <EmptyBlock
           title="You do not have permission to view this metadata."
           body="If you need it for your work, you can request access from the owning department."
@@ -111,11 +114,11 @@ export function DatasetDetailPage() {
         />
       )}
 
-      {query.error && !(query.error instanceof ApiError && (query.error.status === 403 || query.error.status === 404)) && (
+      {!loading && query.error && !(query.error instanceof ApiError && (query.error.status === 403 || query.error.status === 404)) && (
         <ErrorBlock message="Unable to load this dataset. Please try again." onRetry={() => query.refetch()} />
       )}
 
-      {query.data && (
+      {!loading && query.data && (
         <div>
           <div
             className="p-6"
@@ -129,9 +132,6 @@ export function DatasetDetailPage() {
                 <h1 className="mt-1 font-bold" style={{ color: "var(--navy-900)", fontSize: "1.5rem" }}>
                   {humanizeRaw(query.data.name)}
                 </h1>
-                <p className="mt-1 text-sm" style={{ color: "var(--text-muted)", fontSize: "0.875rem" }}>
-                  {query.data.dataset}
-                </p>
               </div>
               <div className="flex items-center gap-2">
                 <AccessBadge level={query.data.access_level} />
@@ -146,7 +146,7 @@ export function DatasetDetailPage() {
               </p>
             ) : (
               <p className="not-provided mt-4 text-sm" style={{ fontSize: "0.9375rem" }}>
-                Not provided
+                No description
               </p>
             )}
           </div>
@@ -160,37 +160,77 @@ export function DatasetDetailPage() {
               </h2>
               <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2">
                 {query.data.tables.map((t) => (
-                  <div
+                  <TableCard
                     key={t.id}
-                    className="p-4"
-                    style={{
-                      border: "1px solid var(--border)",
-                      borderRadius: 6,
-                      background: "var(--bg)",
-                    }}
-                  >
-                    <div className="font-semibold" style={{ color: "var(--navy-900)", fontSize: "1rem" }}>
-                      {t.name || "Not provided"}
-                    </div>
-                    {t.description ? (
-                      <div className="clamp-2 mt-1 text-sm" style={{ color: "var(--text)", fontSize: "0.9375rem" }}>
-                        {t.description}
-                      </div>
-                    ) : (
-                      <div className="not-provided mt-1 text-sm" style={{ fontSize: "0.9375rem" }}>
-                        Not provided
-                      </div>
-                    )}
-                    <div className="mt-3" style={{ color: "var(--text-muted)", fontSize: "0.8125rem" }}>
-                      {t.columns?.length ?? 0} columns
-                    </div>
-                  </div>
+                    dataset={query.data.dataset}
+                    name={t.name}
+                    description={t.description}
+                    columnCount={t.columns?.length ?? 0}
+                  />
                 ))}
               </div>
             </div>
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function TableCard({
+  dataset,
+  name,
+  description,
+  columnCount,
+}: {
+  dataset: string;
+  name: string;
+  description?: string | null;
+  columnCount: number;
+}) {
+  const navigate = useNavigate();
+  const url = `/datasets/${encodeURIComponent(dataset)}/tables/${encodeURIComponent(name)}`;
+  return (
+    <div
+      role="link"
+      tabIndex={0}
+      aria-label={`Open table ${name}`}
+      className="p-4"
+      style={{
+        border: "1px solid var(--border)",
+        borderRadius: 6,
+        background: "var(--bg)",
+        cursor: "pointer",
+      }}
+      onClick={() => navigate(url)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          navigate(url);
+        }
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = "var(--bg-alt)";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = "var(--bg)";
+      }}
+    >
+      <div className="font-semibold" style={{ color: "var(--navy-900)", fontSize: "1rem" }}>
+        {humanizeRaw(name) || "Not provided"}
+      </div>
+      {description ? (
+        <div className="clamp-2 mt-1 text-sm" style={{ color: "var(--text)", fontSize: "0.9375rem" }}>
+          {description}
+        </div>
+      ) : (
+        <div className="not-provided mt-1 text-sm" style={{ fontSize: "0.9375rem" }}>
+          No description
+        </div>
+      )}
+      <div className="mt-3" style={{ color: "var(--text-muted)", fontSize: "0.8125rem" }}>
+        {columnCount} columns
+      </div>
     </div>
   );
 }

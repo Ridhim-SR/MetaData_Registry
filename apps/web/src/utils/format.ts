@@ -34,6 +34,27 @@ export function orNotProvided(value: string | null | undefined): string {
 }
 
 /**
+ * Readable tag label from OM tag objects (tagFQN / displayName / name).
+ * "MDSF.Internal" -> "Internal", "FieldTag.Date/Timestamp" -> "Date/Timestamp".
+ * Proper display names pass through untouched.
+ */
+export function readableTag(tag: { tagFQN?: string; displayName?: string; name?: string } | null | undefined): string {
+  if (!tag) return "Not provided";
+  const raw = tag.displayName || tag.tagFQN || tag.name || "";
+  if (!raw) return "Not provided";
+  const afterDot = raw.includes(".") ? raw.slice(raw.lastIndexOf(".") + 1) : raw;
+  return afterDot || raw;
+}
+
+const SENSITIVE_TAG_PATTERN = /(pii|personal|sensitive|confidential|restricted|secret)/i;
+
+/** True when a tag marks personal/sensitive data (drives the sensitivity summary). */
+export function isSensitiveTag(tag: { tagFQN?: string; displayName?: string; name?: string } | null | undefined): boolean {
+  if (!tag) return false;
+  return SENSITIVE_TAG_PATTERN.test(`${tag.tagFQN ?? ""} ${tag.displayName ?? ""} ${tag.name ?? ""}`);
+}
+
+/**
  * Metadata-completeness estimate (0-100) for a dataset card, derived only from
  * already-fetched fields: tables having a description and at least one column.
  * No backend change required.

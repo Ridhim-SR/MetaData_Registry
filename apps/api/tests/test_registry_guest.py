@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 
 from database.database import get_session as db_get_session
 from src.main import app
+from src.middleware.auth import get_optional_user
 from src.openmetadata import routers
 from src.openmetadata.client import OpenMetadataClient
 from src.openmetadata.routers import registry as registry_router
@@ -38,6 +39,13 @@ def _table(service, db, schema, name, description=None, columns=None, tags=None)
     }
 
 
+def _crop_table(name, description, columns):
+    return _table(
+        "agriculture_department", "distribution_record_dataset", "public",
+        name, description, [_col(c) for c in columns],
+    )
+
+
 TABLES = [
     _table("pub", "db", "s", "pub_table", "Public stats table",
            [_col("id"), _col("name")], [{"tagFQN": "theme.economy"}]),
@@ -46,6 +54,11 @@ TABLES = [
     _table("res", "db", "s", "res_table", "Restricted table", [_col("secret_col")]),
     _table("con", "db", "s", "con_table", "Confidential table", [_col("top_secret")]),
     _table("unc", "db", "s", "unc_table", None, [_col("misc")]),
+    _crop_table("crop_sales", "Crop sale records", ["crop_id", "id"]),
+    _crop_table("online_booking_details", "Booking records",
+                ["crop_noncrop_name_id", "total_non_crop_distributed", "id"]),
+    _crop_table("current_booking", "Booking records",
+                ["crop_noncrop_name_id", "id"]),
 ]
 
 DATABASES = [
@@ -56,6 +69,9 @@ DATABASES = [
     {"name": "db", "displayName": "Db", "description": None, "fullyQualifiedName": "res.db"},
     {"name": "db", "displayName": "Db", "description": None, "fullyQualifiedName": "con.db"},
     {"name": "db", "displayName": "Db", "description": None, "fullyQualifiedName": "unc.db"},
+    {"name": "distribution_record_dataset", "displayName": "Distribution Record Dataset",
+     "description": None,
+     "fullyQualifiedName": "agriculture_department.distribution_record_dataset"},
 ]
 
 VMAP = {
@@ -65,6 +81,9 @@ VMAP = {
     "res.db.s.res_table": {"visibility": "restricted", "department": "res"},
     "con.db.s.con_table": {"visibility": "confidential", "department": "con"},
     # unc.db.s.unc_table has no row -> unclassified -> department.
+    # The agriculture_department tables deliberately have no rows either:
+    # production users.dataset_visibility is empty, so every table is
+    # unclassified (department-by-default, owned by its FQN service).
 }
 
 PROFILES = None  # OM-only: departments come from OM services, not a local table.
@@ -116,6 +135,8 @@ class _FakeSession:
                 for fqn, meta in self._vmap.items()
             ]
             return _Result(rows)
+        if "table_info" in text:
+            return _Result([])
         raise AssertionError(f"unexpected query in guest test: {text}")
 
 
@@ -158,9 +179,15 @@ def client(monkeypatch):
     async def _fake_login(self):
         self._token = "test-token"
 
+    async def _fake_get_table(self, table_id):
+        if table_id not in _TABLES_BY_ID:
+            raise Exception("404 Table not found")
+        return dict(_TABLES_BY_ID[table_id])
+
     monkeypatch.setattr(OpenMetadataClient, "_login", _fake_login)
     monkeypatch.setattr(OpenMetadataClient, "_fetch_all", _fake_fetch_all)
     monkeypatch.setattr(OpenMetadataClient, "search_tables", _fake_search_tables)
+    monkeypatch.setattr(OpenMetadataClient, "get_table", _fake_get_table)
     registry_router._catalog_cache.clear()
 
     async def _fake_session():
@@ -187,6 +214,8 @@ def test_guest_public_dataset_everywhere_full_detail(client):
     catalog = _get(client, "/registry/datasets")
     pub = [c for c in catalog["items"] if c["dataset"] == "pub.db"]
     assert len(pub) == 1 and pub[0]["locked"] is False
+    assert pub[0]["tags"] == ["theme.economy"]
+    assert "updated_at" in pub[0]
     assert [c["name"] for c in pub[0]["tables"]] == ["pub_table"]
     assert [c["name"] for c in pub[0]["tables"][0]["columns"]] == ["id", "name"]
 
@@ -215,7 +244,9 @@ def test_guest_department_restricted_teaser_locked_no_columns(client):
     assert set(card) <= {
         "dataset", "service", "database", "name", "description",
         "department", "department_display", "table_count", "access_level", "locked",
+        "tags", "updated_at",
     }
+    assert card["tags"] == [] and card["updated_at"] is None
 
     res = [c for c in catalog["items"] if c["dataset"] == "res.db"]
     assert len(res) == 1 and res[0]["locked"] is True
@@ -296,3 +327,207 @@ def test_guest_scope_filters_groups(client):
     assert resp["datasets"] == {"items": [], "total": 0}
     assert resp["tables"] == {"items": [], "total": 0}
     assert resp["columns"] == {"items": [], "total": 0}
+
+
+def _viewer(role, department):
+    import types as _t
+
+    return _t.SimpleNamespace(role=_t.SimpleNamespace(value=role), department=department)
+
+
+def _detail_table(table_id, fqn, name, columns):
+    return {
+        "id": table_id,
+        "name": name,
+        "fullyQualifiedName": fqn,
+        "description": f"{name} description",
+        "columns": [
+            {
+                "name": c,
+                "dataType": "VARCHAR",
+                "dataTypeDisplay": "varchar",
+                "description": f"{c} description",
+                "tags": [{"tagFQN": "MDSF.Internal", "name": "Internal"}],
+            }
+            for c in columns
+        ],
+        "owners": [{"displayName": "Data Owner"}],
+        "tags": [{"tagFQN": "MDSF.Public", "name": "Public"}],
+        "updatedAt": 1791199916652,
+    }
+
+
+_TABLES_BY_ID = {
+    "t-pub": _detail_table("t-pub", "pub.db.s.pub_table", "pub_table", ["id", "name"]),
+    "t-dep": _detail_table("t-dep", "pwd.vishwakarma.public.dep_table", "dep_table", ["road_safety"]),
+    "t-con": _detail_table("t-con", "con.db.s.con_table", "con_table", ["top_secret"]),
+}
+
+
+def test_admin_search_crop_full_tables_with_matched_in(client):
+    async def _admin():
+        return _viewer("admin", None)
+
+    app.dependency_overrides[get_optional_user] = _admin
+    try:
+        resp = _get(client, "/registry/search", q="crop")
+    finally:
+        app.dependency_overrides.pop(get_optional_user, None)
+    assert resp["datasets"]["total"] == 1
+    assert resp["datasets"]["items"][0]["dataset"] == "agriculture_department.distribution_record_dataset"
+    assert resp["tables"]["total"] == 3
+    assert {t["name"] for t in resp["tables"]["items"]} == {
+        "crop_sales", "online_booking_details", "current_booking"}
+    assert resp["columns"]["total"] == 4
+    assert resp["total"] == 8
+    by_name = {t["name"]: t for t in resp["tables"]["items"]}
+    assert "name" in by_name["crop_sales"]["matched_in"]
+    assert by_name["online_booking_details"]["matched_in"] == ["column"]
+    assert "crop_noncrop_name_id" in by_name["online_booking_details"]["matched_columns"]
+    assert "total_non_crop_distributed" in by_name["online_booking_details"]["matched_columns"]
+    assert by_name["current_booking"]["matched_columns"] == ["crop_noncrop_name_id"]
+
+
+def test_user_without_access_crop_strict_tables_no_columns(client):
+    async def _user():
+        return _viewer("user", "other")
+
+    app.dependency_overrides[get_optional_user] = _user
+    try:
+        resp = _get(client, "/registry/search", q="crop")
+        body = client.get("/registry/search", params={"q": "crop"}).text
+    finally:
+        app.dependency_overrides.pop(get_optional_user, None)
+    assert resp["datasets"]["total"] == 1
+    assert resp["datasets"]["items"][0].get("locked") is True
+    assert resp["tables"]["total"] == 1
+    assert resp["tables"]["items"][0]["name"] == "crop_sales"
+    assert resp["columns"] == {"items": [], "total": 0}
+    assert "crop_noncrop_name_id" not in body
+    assert "total_non_crop_distributed" not in body
+    assert "crop_id" not in body
+
+
+def test_guest_crop_dataset_query_teaser_only(client):
+    resp = _get(client, "/registry/search", q="distribution")
+    assert resp["datasets"]["total"] == 1
+    assert resp["datasets"]["items"][0].get("locked") is True
+    assert resp["tables"] == {"items": [], "total": 0}
+    assert resp["columns"] == {"items": [], "total": 0}
+    body = client.get("/registry/search", params={"q": "distribution"}).text
+    assert "crop_noncrop_name_id" not in body
+    assert "crop_sales" not in body
+    assert "total_non_crop_distributed" not in body
+
+
+def test_user_other_department_gets_teaser_with_table_names_no_columns(client):
+    async def _user():
+        return _viewer("user", "other")
+
+    app.dependency_overrides[get_optional_user] = _user
+    try:
+        catalog = _get(client, "/registry/datasets")
+    finally:
+        app.dependency_overrides.pop(get_optional_user, None)
+    agri = [c for c in catalog["items"]
+            if c["dataset"] == "agriculture_department.distribution_record_dataset"]
+    assert len(agri) == 1 and agri[0]["locked"] is True
+    teasers = [t for t in catalog.get("teasers", [])
+               if (t["fullyQualifiedName"] or "").startswith("agriculture_department.")]
+    assert len(teasers) == 3
+    assert {t["name"] for t in teasers} == {
+        "crop_sales", "online_booking_details", "current_booking"}
+    assert all(t["columns"] == [] for t in teasers)
+    assert all(t["access_level"] == "department" for t in teasers)
+
+
+def test_guest_never_receives_non_public_table_names(client):
+    forbidden = [
+        "dep_table", "res_table", "con_table", "unc_table",
+        "crop_sales", "online_booking_details", "current_booking",
+        "road_safety", "secret_col", "top_secret", "misc", "division",
+        "crop_id", "crop_noncrop_name_id", "total_non_crop_distributed",
+    ]
+    bodies = [
+        client.get("/registry/datasets").text,
+        client.get("/registry/datasets/public").text,
+        client.get("/registry/search", params={"q": "distribution"}).text,
+        client.get("/registry/search", params={"q": "roads"}).text,
+        client.get("/registry/datasets/by-fqn",
+                   params={"fqn": "pwd.vishwakarma"}).text,
+        client.get("/registry/datasets/by-fqn",
+                   params={"fqn": "agriculture_department.distribution_record_dataset"}).text,
+    ]
+    for body in bodies:
+        for name in forbidden:
+            assert name not in body, f"{name!r} leaked to guest"
+
+
+def _as_viewer(client, role, department):
+    async def _user():
+        return _viewer(role, department)
+
+    app.dependency_overrides[get_optional_user] = _user
+    return get_optional_user
+
+
+def test_user_without_access_table_locked_no_column_detail(client):
+    _as_viewer(client, "user", "other")
+    try:
+        resp = client.get("/registry/tables/t-dep")
+        assert resp.status_code == 200, resp.text[:300]
+        body = resp.json()
+        assert body["locked"] is True
+        assert body["columns"] == []
+        assert body["column_count"] == 1
+        assert "tags" not in body and "owners" not in body and "facts" not in body
+        text = resp.text
+        assert "road_safety" not in text
+        assert "varchar" not in text
+        assert "Internal" not in text
+    finally:
+        app.dependency_overrides.pop(get_optional_user, None)
+
+
+def test_guest_table_locked_200_never_401_403(client):
+    resp = client.get("/registry/tables/t-dep")
+    assert resp.status_code == 200, resp.text[:300]
+    assert resp.json()["locked"] is True
+
+
+def test_table_confidential_and_missing_404(client):
+    assert client.get("/registry/tables/t-con").status_code == 404
+    assert client.get("/registry/tables/nope").status_code == 404
+
+
+def test_admin_table_full_with_facts(client):
+    _as_viewer(client, "admin", None)
+    try:
+        resp = client.get("/registry/tables/t-dep")
+        assert resp.status_code == 200, resp.text[:300]
+        body = resp.json()
+        assert body.get("locked", False) is False
+        assert [c["name"] for c in body["columns"]] == ["road_safety"]
+        assert body["facts"]["owner"] == "Data Owner"
+        assert body["facts"]["updated_at"] == 1791199916652
+    finally:
+        app.dependency_overrides.pop(get_optional_user, None)
+
+
+def test_csv_refused_without_full_access(client):
+    _as_viewer(client, "user", "other")
+    try:
+        assert client.get("/registry/tables/t-dep/dictionary").status_code == 403
+        assert client.get("/registry/tables/t-con/dictionary").status_code == 404
+    finally:
+        app.dependency_overrides.pop(get_optional_user, None)
+    assert client.get("/registry/tables/t-dep/dictionary").status_code == 403
+
+
+def test_csv_download_full_access(client):
+    resp = client.get("/registry/tables/t-pub/dictionary")
+    assert resp.status_code == 200, resp.text[:200]
+    assert resp.headers["content-type"].startswith("text/csv")
+    lines = resp.text.strip().split("\n")
+    assert lines[0] == "column_name,data_type,description,tags"
+    assert any(l.startswith("id,varchar,") for l in lines[1:])

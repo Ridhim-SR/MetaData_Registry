@@ -6,6 +6,9 @@ import { useAuth } from "../../contexts/AuthContext";
 
 export function AccessCTA() {
   const { isAuthenticated, user } = useAuth();
+  const isAdmin = user?.role === "admin";
+  // Admin CTA hidden for now; the block below is kept for later re-use.
+  if (isAdmin) return null;
   const departmentsQuery = useQuery({
     queryKey: ["registry-departments"],
     queryFn: listDepartments,
@@ -17,6 +20,9 @@ export function AccessCTA() {
     (departmentsQuery.data?.items ?? []).find((d) => d.slug === user?.department)?.display_name
     ?? (user?.department ? humanizeRaw(user.department) : undefined);
 
+  const userDept = user?.department ?? null;
+  const hasDepartment = Boolean(userDept);
+
   return (
     <section
       aria-label="Get access"
@@ -26,19 +32,19 @@ export function AccessCTA() {
         {isAuthenticated ? (
           <>
             <h2 className="font-semibold" style={{ color: "var(--navy-900)", fontSize: "1.375rem" }}>
-              Explore your department&apos;s metadata
+              {hasDepartment ? "Explore your department's metadata" : "Browse the catalog"}
             </h2>
             <p className="mt-2 text-sm" style={{ color: "var(--text-muted)", fontSize: "0.9375rem" }}>
-              {user?.department
-                ? `Signed in${user.role === "admin" ? " as an administrator" : ` with the ${deptDisplay} department`}. Browse the catalog with your access applied.`
-                : "Signed in. Browse the catalog with your access applied."}
+              {hasDepartment
+                ? `Signed in with the ${deptDisplay} department. Browse the catalog with your access applied.`
+                : "Your account has no department assigned, so department datasets stay hidden. Ask your administrator to assign your department, or browse public datasets below."}
             </p>
             <div className="mt-5">
               <Link
-                to={user?.department ? `/departments/${encodeURIComponent(user.department)}` : "/explore"}
+                to={userDept ? `/departments/${encodeURIComponent(userDept)}` : "/explore"}
                 className="btn-primary"
               >
-                Go to My Department
+                {userDept ? "Go to My Department" : "Browse Catalog"}
               </Link>
             </div>
           </>
