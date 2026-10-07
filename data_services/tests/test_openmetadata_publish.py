@@ -283,6 +283,60 @@ def test_ensure_classification_is_idempotent(tmp_path):
     assert first_count > 1  # first run did create them
 
 
+def test_all_cat_levels_have_a_published_description():
+    """Item 14: every category the pipeline accepts must carry its MDSF
+    meaning into OpenMetadata -- CAT-4 was the missing one, and an
+    undocumented level is indistinguishable from a typo'd one in the UI."""
+
+    from src.schema_registry.curate import CATEGORY_LEVELS
+    from src.schema_registry.openmetadata.publish import _CAT_DESCRIPTIONS
+
+    assert set(_CAT_DESCRIPTIONS) == set(CATEGORY_LEVELS)
+    assert "No Sharing" in _CAT_DESCRIPTIONS["CAT-4"]
+
+
+def test_publish_rejects_an_unknown_category_written_before_validation(tmp_path):
+    """publish_table() can run on its own (republish), against a datasets.csv
+    row that predates the validation in run()."""
+
+    storage = _ingested_storage(tmp_path)
+    rows = storage.read_csv(lookups.DATASETS_PATH)
+    for row in rows:
+        row["category"] = "cat3"
+    storage.write_csv(lookups.DATASETS_PATH, rows)
+
+    with pytest.raises(ValueError, match="Unknown category 'cat3'"):
+        publish_table(_fake_client(), storage, "pwd.vishwakarma.tbd_confirm_with_pwd")
+
+
+def test_publish_rejects_an_unknown_tag_in_a_tampered_snapshot(tmp_path):
+    """curate_schema() already rejects unknown tags -- this is the same
+    check on the publish side, for snapshots curated before it existed."""
+
+    storage = _ingested_storage(tmp_path)
+    curated_path = storage.list("department/pwd/vishwakarma/tbd_confirm_with_pwd/curated/schemas/")[-1]
+    rows = storage.read_csv(curated_path)
+    rows[0]["tag"] = "MadeUpTag"
+    storage.write_csv(curated_path, rows)
+
+    with pytest.raises(ValueError, match="Unknown tag 'MadeUpTag'"):
+        publish_table(_fake_client(), storage, "pwd.vishwakarma.tbd_confirm_with_pwd")
+
+
+def test_publish_rejects_a_glossary_term_containing_a_dot(tmp_path):
+    """A '.' in a glossary term would silently produce an FQN OpenMetadata
+    splits into a different term than the one we just created."""
+
+    storage = _ingested_storage(tmp_path)
+    curated_path = storage.list("department/pwd/vishwakarma/tbd_confirm_with_pwd/curated/schemas/")[-1]
+    rows = storage.read_csv(curated_path)
+    rows[0]["glossary_term"] = "Parent.Child"
+    storage.write_csv(curated_path, rows)
+
+    with pytest.raises(ValueError, match="contains '\\.'"):
+        publish_table(_fake_client(), storage, "pwd.vishwakarma.tbd_confirm_with_pwd")
+
+
 def test_publish_table_unknown_table_id_raises(tmp_path):
     storage = LocalObjectStorage(tmp_path / "storage")
     client = _fake_client()

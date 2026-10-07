@@ -27,11 +27,18 @@ services:
     command: "--sort_buffer_size=10M"
     restart: always
     environment:
-      MYSQL_ROOT_PASSWORD: password
+      # No default: a compose file that ships root/password/`password`
+      # credentials and publishes them on 0.0.0.0 is the first thing anyone
+      # scans for. Set it in infrastructure/openmetadata/.env (copy
+      # .env.example) before `docker compose up`.
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in infrastructure/openmetadata/.env}
     expose:
       - 3306
     ports:
-      - "3306:3306"
+      # localhost only: the metadata database must not be reachable from
+      # other machines on the network -- nothing else should ever talk to
+      # MySQL directly (the server does, inside the compose network).
+      - "127.0.0.1:3306:3306"
     volumes:
       - mysql-data:/var/lib/mysql
     networks:
@@ -53,8 +60,10 @@ services:
     networks:
       - app_net
     ports:
-      - "9200:9200"
-      - "9300:9300"
+      # localhost only (see mysql above): Elasticsearch holds a copy of the
+      # same catalog data and must not be reachable from the network either.
+      - "127.0.0.1:9200:9200"
+      - "127.0.0.1:9300:9300"
     healthcheck:
       test: "curl -s http://localhost:9200/_cluster/health?pretty | grep status | grep -qE 'green|yellow' || exit 1"
       interval: 15s
@@ -98,7 +107,7 @@ services:
       AUTHENTICATION_CALLBACK_URL: ${AUTHENTICATION_CALLBACK_URL:-""}
       AUTHENTICATION_JWT_PRINCIPAL_CLAIMS: ${AUTHENTICATION_JWT_PRINCIPAL_CLAIMS:-[email,preferred_username,sub]}
       AUTHENTICATION_JWT_PRINCIPAL_CLAIMS_MAPPING: ${AUTHENTICATION_JWT_PRINCIPAL_CLAIMS_MAPPING:-[]}
-      AUTHENTICATION_ENABLE_SELF_SIGNUP: ${AUTHENTICATION_ENABLE_SELF_SIGNUP:-true}
+      AUTHENTICATION_ENABLE_SELF_SIGNUP: ${AUTHENTICATION_ENABLE_SELF_SIGNUP:-false}
       AUTHENTICATION_CLIENT_TYPE: ${AUTHENTICATION_CLIENT_TYPE:-public}
       #For OIDC Authentication, when client is confidential
       OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-""}
@@ -319,7 +328,7 @@ services:
       AUTHENTICATION_CALLBACK_URL: ${AUTHENTICATION_CALLBACK_URL:-""}
       AUTHENTICATION_JWT_PRINCIPAL_CLAIMS: ${AUTHENTICATION_JWT_PRINCIPAL_CLAIMS:-[email,preferred_username,sub]}
       AUTHENTICATION_JWT_PRINCIPAL_CLAIMS_MAPPING: ${AUTHENTICATION_JWT_PRINCIPAL_CLAIMS_MAPPING:-[]}
-      AUTHENTICATION_ENABLE_SELF_SIGNUP: ${AUTHENTICATION_ENABLE_SELF_SIGNUP:-true}
+      AUTHENTICATION_ENABLE_SELF_SIGNUP: ${AUTHENTICATION_ENABLE_SELF_SIGNUP:-false}
       AUTHENTICATION_CLIENT_TYPE: ${AUTHENTICATION_CLIENT_TYPE:-public}
       #For OIDC Authentication, when client is confidential
       OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-""}

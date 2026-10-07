@@ -183,6 +183,9 @@ infrastructure/openmetadata/docker-volume/db-data/
 # Raw department schema dumps (contain real production column names/data)
 data_services/samples/*.txt
 
+# Raw dataset drop folder at the repo root (CSVs already caught by *.csv)
+/Datasets/
+
 # Working/scratch notes kept for context while developing, not for commit
 data_services/NOTES_MDSF.md
 

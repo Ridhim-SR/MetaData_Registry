@@ -78,6 +78,19 @@ AUTO_TAG_RULES: list[tuple[str, re.Pattern]] = [
     ("Date/Timestamp", re.compile(r"(_date|_at)$", re.IGNORECASE)),
 ]
 
+# The controlled vocabulary for a column's `tag`: everything AUTO_TAG_RULES
+# can assign, plus the values real Field Dictionaries already use (PII).
+# Anything outside it is a typo or an invented value, and publishing it would
+# silently create a brand-new tag under the FieldTag Classification in
+# OpenMetadata -- which is how "cat3" ended up as a tag next to CAT-3.
+KNOWN_TAGS = sorted({tag for tag, _ in AUTO_TAG_RULES} | {"PII"})
+
+# MDSF dataset-level categories (the axis curate_schema()'s per-column
+# `classification` is NOT part of -- this one is per dataset, see
+# pipeline.run's `category` argument and openmetadata.publish's
+# _ensure_sensitivity_tag).
+CATEGORY_LEVELS = ["CAT-1", "CAT-2", "CAT-3", "CAT-4"]
+
 
 def auto_tag(field_name: str) -> str | None:
     for tag, pattern in AUTO_TAG_RULES:
@@ -101,6 +114,32 @@ def auto_classify(field_name: str) -> str:
 def validate_classification(classification: str) -> bool:
     """Validate that classification is a known level."""
     return classification in CLASSIFICATION_LEVELS
+
+
+def validate_category(category: str) -> bool:
+    """Validate a dataset-level `category` (MDSF CAT-1..CAT-4).
+
+    Exact match only: "cat3"/"Cat 3"/"CAT-5" used to be accepted and then
+    published as a brand-new DataSensitivity tag in OpenMetadata, sitting
+    next to the real CAT-3."""
+
+    return category in CATEGORY_LEVELS
+
+
+def validate_tag(tag: str) -> bool:
+    """A column's `tag` must be one of the known vocabulary values, or it
+    would silently become a new tag under OpenMetadata's FieldTag
+    Classification on publish (a typo'd tag is a taxonomy leak, not a tag)."""
+
+    return tag in KNOWN_TAGS
+
+
+def validate_glossary_term(term: str) -> bool:
+    """OpenMetadata glossary-term FQNs are dot-separated (`BusinessGlossary.
+    Some_Term`), so a "." inside the term itself makes the FQN unresolvable
+    -- the term appears to exist but every lookup after it fails."""
+
+    return "." not in term
 
 
 def validate_column(column: dict) -> list[str]:
@@ -161,12 +200,33 @@ def curate_schema(
             logger.warning(f"{name}: Invalid classification '{classification}', using auto-classification")
             classification = auto_classify(name)
 
+        # tag/glossary_term come from a department's Field Dictionary (or a
+        # carried-forward snapshot) and are rejected outright if they're not
+        # in the controlled vocabulary -- unlike `classification` above,
+        # which falls back to auto-classification, these would otherwise be
+        # created as-is in OpenMetadata (a made-up tag, or a glossary term
+        # whose "." breaks its own FQN).
+        tag = meta.get("tag") or auto_tag(name) or ""
+        if tag and not validate_tag(tag):
+            raise ValueError(
+                f"{name}: unknown tag {tag!r} -- allowed tags are "
+                f"{', '.join(KNOWN_TAGS)}. If this is a real new tag, add it to "
+                f"KNOWN_TAGS/AUTO_TAG_RULES in curate.py first."
+            )
+
+        glossary_term = meta.get("glossary_term", "")
+        if glossary_term and not validate_glossary_term(glossary_term):
+            raise ValueError(
+                f"{name}: glossary term {glossary_term!r} contains '.', which breaks "
+                f"OpenMetadata's dot-separated FQN -- rename the term (e.g. use '_')."
+            )
+
         curated_columns.append(
             {
                 **column,
                 "business_description": meta.get("business_description", ""),
-                "tag": meta.get("tag") or auto_tag(name) or "",
-                "glossary_term": meta.get("glossary_term", ""),
+                "tag": tag,
+                "glossary_term": glossary_term,
                 "active": meta.get("active", True),
                 "classification": classification,
                 "validation_warning": "; ".join(warnings),

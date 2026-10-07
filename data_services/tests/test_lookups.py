@@ -91,7 +91,13 @@ def test_upsert_table_links_to_dataset(tmp_path):
     lookups.upsert_table(storage, "pwd.vishwakarma.roads", "pwd.vishwakarma", "roads", "public")
     rows = storage.read_csv(lookups.TABLES_PATH)
     assert rows == [
-        {"table_id": "pwd.vishwakarma.roads", "dataset_id": "pwd.vishwakarma", "table_name": "roads", "schema_name": "public"}
+        {
+            "table_id": "pwd.vishwakarma.roads",
+            "dataset_id": "pwd.vishwakarma",
+            "table_name": "roads",
+            "schema_name": "public",
+            "deleted": "",
+        }
     ]
 
 

@@ -22,6 +22,18 @@ class ObjectStorage(ABC):
         ...
 
     @abstractmethod
+    def write_bytes(self, path: str, data: bytes) -> None:
+        """Store opaque bytes verbatim (the department's original submission,
+        a SHA-256 sidecar, ...). CSV-only storage can't hold these: the point
+        of keeping the original file is that it survives a parser bug, so it
+        must be written exactly as it arrived, never re-serialized."""
+        ...
+
+    @abstractmethod
+    def read_bytes(self, path: str) -> bytes:
+        ...
+
+    @abstractmethod
     def exists(self, path: str) -> bool:
         ...
 

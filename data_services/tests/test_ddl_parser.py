@@ -1,4 +1,13 @@
+from pathlib import Path
+
+import pytest
+
 from src.schema_registry.parsers.ddl_parser import parse_postgres_columns
+
+# The real PWD column dump is gitignored (root .gitignore: samples/), so it
+# only exists on machines where someone dropped it locally -- the suite has
+# to be green with and without it.
+SAMPLE = Path("samples/pwd_vishwakarma_full_raw_columns.txt")
 
 
 def test_not_null_with_no_default():
@@ -66,8 +75,9 @@ def test_multiple_columns_and_bare_type_no_length():
     assert cols[0]["length"] is None
 
 
+@pytest.mark.skipif(not SAMPLE.exists(), reason=f"{SAMPLE} is gitignored and not present")
 def test_real_vishwakarma_sample_parses_all_213_columns():
-    ddl_text = open("samples/pwd_vishwakarma_full_raw_columns.txt").read()
+    ddl_text = SAMPLE.read_text()
     cols = parse_postgres_columns(ddl_text)
     assert len(cols) == 213
     names = {c["name"] for c in cols}

@@ -173,6 +173,31 @@ Each curated column's `classification` is now applied as a tag on that column:
   that no longer existed in MySQL), so the Explore UI showed 14 tables instead
   of 9. Deleted them from `table_search_index`; API and UI both report 9 now.
   → If MySQL is ever wiped again, clean ES too (or re-run the search indexer).
+- 2026-10-05: **second corruption** (340 restarts, `row_purge_step` InnoDB
+  crash) → full local wipe + rebuild. Scope verified local-only before wiping
+  (Docker Desktop npipe, compose project `openmetadata`, every OM URL in the
+  repo is `http://localhost:8585`; no global/remote instance touched):
+  1. `docker compose down` → deleted the corrupted bind mount
+     `docker-volume/db-data` (the running container predated the compose file's
+     switch to the `mysql-data` named volume, so `up -d` created a fresh
+     named volume) → deleted `openmetadata_es-data` too, so **no orphan docs
+     this time** (ES `table_search_index` = 9 right after republish)
+  2. `execute_migrate_all` exit 0; server healthy; login OK
+  3. Re-ran `setup_custom_properties` (the wipe also erased the 4 Database
+     custom properties — `apiAvailable`/`datasetOwner`/`frequency`/`timeline`;
+     any future wipe needs this before publishing)
+  4. Re-published all 9 tables: 5/5 + 1/1 + 3/3; verified 288/288 columns
+     MDSF-tagged with the documented distribution (Internal 189, PII 55,
+     Financial 41, Public 2, Restricted 1)
+  - **Gotcha hit during re-publish:** local
+    `storage/_lookups/datasets.csv` still had the *pre-merge* header
+    (`fiduciary,processor,risk_classification,retention_policy,lineage`) while
+    merged code writes `category,api_available,owner,frequency,timeline,
+    dataset_description` — `write_csv` derives fieldnames from `rows[0]`, so
+    every row failed with `dict contains fields not in fieldnames`. Migrated
+    the header in place (old values were all blank). Also: don't fix it with
+    PowerShell `Export-Csv` — its UTF-8 **BOM** then breaks `csv.DictReader`
+    (`'dataset_id'` KeyError); write with `UTF8Encoding($false)`.
 - `bytea` type added to `_TYPE_MAP` (openmetadata/publish.py) and
   `KNOWN_POSTGRES_TYPES` (curate.py)
 
@@ -217,6 +242,145 @@ curl -X POST $API/registry/ingest -H "Authorization: Bearer $TOKEN" \
   (18 passed); also verified live against a throwaway Postgres: upload,
   idempotent re-upload, 422 on wrong file, 401 without a token, 404 on an
   unknown `table_id`.
+
+---
+
+### Global push (2026-10-05)
+All 3 Agriculture manifests also published to the **global** OpenMetadata at
+`http://10.0.96.105:8585` (distinct instance — it already had `pwd.vishwakarma_T`
+under service `pwd`; same `admin@open-metadata.org`/`admin` credentials,
+version 2.0.2 identical to local):
+
+```powershell
+$env:OPENMETADATA_HOST_PORT = 'http://10.0.96.105:8585/api'
+$env:OPENMETADATA_JWT_TOKEN = <global login accessToken>
+# then the same 3 MANIFEST_FILE=... python -m src.schema_registry.batch runs
+```
+- Result: **9/9 tables** (5+1+3) → global now has 10 tables total
+  (10 = 9 agriculture + the pre-existing pwd one); 288/288 MDSF-tagged
+  columns, distribution identical to local; ES `table_search_index`=10
+- Global already had the 4 Database custom properties
+  (`apiAvailable`/`datasetOwner`/`frequency`/`timeline`), so
+  `setup_custom_properties` wasn't needed there; MDSF classification was
+  auto-created by `_ensure_mdsf_levels()` on first publish
+- `OPENMETADATA_HOST_PORT` defaults to localhost — always set it explicitly
+  when pushing global, and never wipe global (the local wipe procedure above
+  applies only to the local Docker stack)
+
+---
+
+### Global server (8585) crash investigation (2026-10-05, ended mid-diagnosis)
+Reported crashed shortly after the global push. Findings so far (all read-only):
+
+- **Timeline (IST)**: push finished 17:02–17:05 → ~17:06 first probe:
+  8585/8586 **dead**, but ES 9200, MySQL 3306, Airflow 8081, pm2 apps
+  3100/4100, SSH 22 all alive → host was fine, only the `openmetadata_server`
+  container was down → back up by 17:11; 4/4 `/system/version` samples OK
+  over 75 s (17:16–17:17) = recovered, not flapping
+- **Not a host reboot / not MySQL or ES**: MySQL uptime 7.4 h (started
+  ~09:50), ES JVM same pid + 7.4 h uptime — neither restarted during the
+  window; only the OM server (Java) died and came back
+- DB forensics: server's boot side-effects (`change_event` bot-user updates
+  by usage/governance/profiler-bot) stamped **17:10:03** = boot completing in
+  the recovery window; `background_jobs` shows only 2 unrelated `CSV_EXPORT`
+  jobs (admin, `pwd` service) completed 16:22 — nothing failing, no errors in
+  `background_job_logs`
+- **Root cause NOT confirmed**: needs `docker logs openmetadata_server` /
+  `dmesg | grep -i oom` on the host. Leading hypothesis = **JVM OOM-kill**
+  (server heap `-Xmx1G` + ES 1G) under the indexing load of the 9-table /
+  501-column push; Docker `restart: always` brought it back in ~5 min.
+  Correlation with the push is timing-only, not proven.
+- **Blockers**: SSH to `bipp2@10.0.96.105` refused (`publickey,password` —
+  no key on this machine); global's MySQL `root`/`password` from the compose
+  file is **rejected** (different creds on global); use
+  `openmetadata_user`/`openmetadata_password` (works). Port scans done with
+  `Test-NetConnection`; MySQL probed via `pymysql`.
+- Note: ES `_nodes/_local/jvm` in this image has **no `uptime_in_millis`** —
+  use `start_time_in_millis` (or `pid`) instead.
+- State at stop: global healthy again, 10 tables, data intact (205 tables in
+  `openmetadata_db`); local stack also healthy (9 tables).
+
+---
+
+### Schema-registry loophole pass: subtasks 11–18 (2026-10-06)
+Scope was P2 subtasks 11–16 + P3 subtasks 17–18 only (the P0/P1
+personal-data classification items 1–10 were explicitly out of scope).
+
+- **11 raw storage**: original submission copied verbatim to
+  `<table>/raw/source/<ts>.<ext>` + `<ts>.sha256`, before parsing; new
+  `write_bytes`/`read_bytes` on `ObjectStorage` (local + s3); result carries
+  `source_path`/`source_hash_path`/`source_hash`.
+- **12 run log + diff**: `_lookups/runs.csv` (run_id, table_id, ts, mode,
+  source_hash, operator from `$OPERATOR`, added/removed/changed,
+  publish_status, error) written in `finally` — **every** run gets a row,
+  including failures; per-run `<table>/diffs/<ts>.csv` and an inferred mode
+  (initial_load/append/update/full_refresh) computed *before* the removal
+  guard so a rejected run still says what was missing.
+- **13 storage/OM sync**: `publish_status` ∈ not_attempted/unpublished/
+  published/failed; new `python -m src.schema_registry.republish` iterates
+  `unpublished_runs()` (skips soft-deleted, continues past failures, updates
+  run rows in place, exit 1 if any still fail); field-dictionary ingest is
+  per-table isolated and reports status per table (non-zero exit).
+- **14 restricted vocab**: `validate_category/tag/glossary_term` in curate.py
+  (CAT-1..CAT-4, KNOWN_TAGS = AUTO_TAG_RULES ∪ {PII}, no "." in glossary
+  terms), enforced in `run()` *and* in `publish_table()` (`_ensure_sensitivity_tag`,
+  `_ensure_tags_and_terms`); CAT-4 description added; invalid values raise.
+- **15 empty slugs + orphans**: `slugify()` raises on a name with no ASCII
+  (no more `pwd..t1`); `deleted` column on `tables.csv` +
+  `soft_delete_table()` + `python -m src.schema_registry.openmetadata.delete_table`
+  (OM entity first, then registry mark); `publish_table()` refuses a
+  soft-deleted row, `upsert_table()` clears the mark on re-ingest.
+- **16 owners**: `_resolve_owner()` (User→Team, FQN or email local-part) →
+  `owners` on `CreateDatabaseRequest` **and** in the JSON-Patch replace (always
+  a list, `[]` when nothing resolves, so `/exists` for `replace`).
+- **17 credentials**: compose no longer ships `MYSQL_ROOT_PASSWORD: password`
+  (now `${MYSQL_ROOT_PASSWORD:?...}` → fails without `.env`,
+  `.env.example` added, `.env` gitignored); 3306/9200/9300 bound to
+  `127.0.0.1`; `AUTHENTICATION_ENABLE_SELF_SIGNUP` defaults to `false` in
+  both places; infra README gained a hardening checklist + "change the
+  bootstrap admin password" note; ingestion-bot JWT documented everywhere
+  (admin session tokens explicitly called out as wrong).
+- **18 smaller**: `batch.py` and field-dictionary ingest exit non-zero on
+  failure (print FAILED rows); dataset-level fields now accepted in a
+  manifest; `setup_custom_properties.py` requests have `(10,60)` timeouts +
+  `raise_for_status()`; sample-dependent tests `skipif` their gitignored
+  file; `latest_curated_snapshot_path()` only accepts `<ts>.csv` (stray
+  README/backup can't become "the latest snapshot"); all CSV reads/writes
+  now explicit UTF-8 (`utf-8-sig` reads) — Devanagari names/descriptions
+  broke on Windows' locale encoding before.
+- **Tests**: `python -m pytest tests/ -q` → **155 passed, 2 skipped** (the 2
+  skips = gitignored `samples/` dumps). New: `test_run_log.py`,
+  `test_republish.py`, `test_soft_delete.py`, `test_ownership.py`,
+  `test_infrastructure.py` (+ additions to batch/field-dictionary/publish).
+- **Live verification (local stack)**: 3 agriculture manifests → **9/9
+  published**; runs.csv showed 9 `published` + 1 `not_attempted` (the
+  rejected dictionary tag below) with modes/counts; `raw/source`+sha256+diffs
+  present; `setup_custom_properties` idempotent (exit 0); `republish` 0/0;
+  `category=CAT-2` + `owner=admin` published to the Database
+  (`tags: DataSensitivity.CAT-2`, `owners: user:admin`), then cleared back to
+  blank and re-published → `tags: [] owners: []` (JSON-Patch replace
+  verified against a real server). Governance fields left blank as before.
+- **Data fix found by item 14**: `configs/field_dictionaries/
+  farmer_registration_field_dictionary.csv` had `tag=Internal` on 4 rows
+  (`tag` was a copy of `classification` on all 18 rows; PII/Financial were
+  valid FieldTags, Internal isn't) → `tag` blanked on those 4, `farmers`
+  then ingested 9/9. OM still shows the stale `FieldTag.Internal` on those
+  columns: **OpenMetadata merges `columns[].tags` on PUT** — the documented
+  Known-limitation, now confirmed live. Fix agreed as follow-up (JSON-Patch
+  replace on the table's columns/tags, same approach as the Database) but
+  **not done** — session stopped there.
+- **Pending DoD**: CMSVY + Vishwakarma re-ingest. Real CMSVY source is now
+  at `Datasets/Kanya Sumangla Portal.xlsx` (Excel — still needs converting
+  to the field-dictionary CSV shape before `field_dictionary_ingest` can
+  run); `samples/kanya_sumangla_field_dictionary.csv` and
+  `samples/pwd_vishwakarma_full_raw_columns.txt` remain absent from this
+  machine, so neither was ingested. The 9-table agriculture re-ingest above
+  was used as the live verification instead.
+- **Local stack state at stop**: MySQL root password **rotated** off the old
+  hardcoded `password` to a generated value stored in
+  `infrastructure/openmetadata/.env` (gitignored; healthcheck healthy after
+  `ALTER USER`), stack `docker compose down` (volumes kept) at end of
+  session, Docker Desktop shut down.
 
 ---
 

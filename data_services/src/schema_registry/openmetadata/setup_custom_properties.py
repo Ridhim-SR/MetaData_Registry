@@ -26,18 +26,29 @@ _DESCRIPTIONS = {
     "timeline": "The period/date range this dataset covers.",
 }
 
+# Every call here is a raw requests call, so the timeout is ours to set --
+# without one, an unreachable/hung OpenMetadata server hangs this one-shot
+# setup command forever instead of failing with a clear error.
+_TIMEOUT = (10, 60)
+
+
+def _get(url: str, auth: dict, **kwargs) -> requests.Response:
+    resp = requests.get(url, headers=auth, timeout=_TIMEOUT, **kwargs)
+    resp.raise_for_status()
+    return resp
+
 
 def setup(host_port: str, jwt_token: str) -> None:
     auth = {"Authorization": f"Bearer {jwt_token}"}
-    type_id = requests.get(f"{host_port}/v1/metadata/types/name/database", headers=auth).json()["id"]
+    type_id = _get(f"{host_port}/v1/metadata/types/name/database", auth).json()["id"]
     string_type_id = next(
         t["id"]
-        for t in requests.get(f"{host_port}/v1/metadata/types?category=field&limit=50", headers=auth).json()["data"]
+        for t in _get(f"{host_port}/v1/metadata/types?category=field&limit=50", auth).json()["data"]
         if t["name"] == "string"
     )
     existing = {
         p["name"]
-        for p in requests.get(f"{host_port}/v1/metadata/types/{type_id}?fields=customProperties", headers=auth)
+        for p in _get(f"{host_port}/v1/metadata/types/{type_id}?fields=customProperties", auth)
         .json()
         .get("customProperties", [])
     }
@@ -61,6 +72,7 @@ def setup(host_port: str, jwt_token: str) -> None:
             f"{host_port}/v1/metadata/types/{type_id}",
             headers={**auth, "Content-Type": "application/json-patch+json"},
             json=patch,
+            timeout=_TIMEOUT,
         )
         if not resp.ok:
             logger.error(f"Failed to add '{property_name}': {resp.status_code} {resp.text}")

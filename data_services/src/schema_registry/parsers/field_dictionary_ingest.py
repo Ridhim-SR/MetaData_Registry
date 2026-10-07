@@ -32,9 +32,16 @@ def run_field_dictionary(
     safety guard, locking, retry, auto-tag/auto-classification) applies
     unchanged, since run() itself isn't touched.
 
-    Returns {table_name: run()'s own result dict}, one entry per table found
-    in the file. `department` must already be registered, same precondition
-    as run() itself.
+    One bad table doesn't stop the rest: each run() call is isolated, its
+    exception is captured, and the result dict records status/error for it
+    (`{"status": "failed", "error": ...}` instead of run()'s own keys).
+    Tables ingested before the failure already exist in storage/OpenMetadata,
+    so a partial file gets as far as it can rather than throwing away the
+    tables that were fine.
+
+    Returns {table_name: run()'s own result dict (+ "status": "ok")}, one
+    entry per table found in the file. `department` must already be
+    registered, same precondition as run() itself.
     """
 
     tables = parse_field_dictionary(source_file)
@@ -43,7 +50,7 @@ def run_field_dictionary(
     with tempfile.TemporaryDirectory() as tmp_dir:
         for table_name, table in tables.items():
             columns_path = Path(tmp_dir) / f"{table_name}_columns.csv"
-            with columns_path.open("w", newline="") as f:
+            with columns_path.open("w", newline="", encoding="utf-8") as f:
                 writer = csv.DictWriter(f, fieldnames=_COLUMN_FIELDS)
                 writer.writeheader()
                 for c in table["columns"]:
@@ -58,7 +65,7 @@ def run_field_dictionary(
                     )
 
             metadata_path = Path(tmp_dir) / f"{table_name}_metadata.csv"
-            with metadata_path.open("w", newline="") as f:
+            with metadata_path.open("w", newline="", encoding="utf-8") as f:
                 writer = csv.DictWriter(f, fieldnames=_METADATA_FIELDS)
                 writer.writeheader()
                 for name, meta in table["business_metadata"].items():
@@ -74,24 +81,34 @@ def run_field_dictionary(
                     )
 
             logger.info(f"Field dictionary: ingesting table '{table_name}' ({len(table['columns'])} column(s))")
-            results[table_name] = run(
-                department=department,
-                dataset=dataset,
-                table_name=table_name,
-                source_file=str(columns_path),
-                storage=storage,
-                source_format="csv",
-                schema_name=schema_name,
-                business_metadata_file=str(metadata_path),
-                openmetadata_client=openmetadata_client,
-                allow_column_removal=allow_column_removal,
-            )
+            try:
+                results[table_name] = {
+                    "status": "ok",
+                    **run(
+                        department=department,
+                        dataset=dataset,
+                        table_name=table_name,
+                        source_file=str(columns_path),
+                        storage=storage,
+                        source_format="csv",
+                        schema_name=schema_name,
+                        business_metadata_file=str(metadata_path),
+                        openmetadata_client=openmetadata_client,
+                        allow_column_removal=allow_column_removal,
+                    ),
+                }
+            except Exception as exc:  # noqa: BLE001 -- keep going, report this table as failed
+                logger.error(f"Field dictionary: table '{table_name}' failed: {exc}")
+                results[table_name] = {"status": "failed", "error": f"{type(exc).__name__}: {exc}"}
 
+    ok = sum(1 for r in results.values() if r["status"] == "ok")
+    logger.info(f"Field dictionary: {ok}/{len(results)} table(s) ingested")
     return results
 
 
 if __name__ == "__main__":
     import os
+    import sys
 
     from dotenv import load_dotenv
 
@@ -117,4 +134,10 @@ if __name__ == "__main__":
         openmetadata_client=_client,
     )
     for _table_name, _result in _results.items():
-        print(f"{_table_name}: {_result['column_count']} column(s), {_result['warning_count']} warning(s)")
+        if _result["status"] == "ok":
+            print(f"{_table_name}: {_result['column_count']} column(s), {_result['warning_count']} warning(s)")
+        else:
+            print(f"{_table_name}: FAILED -- {_result['error']}")
+    # Non-zero when any table failed: a caller that only checks the exit
+    # code would otherwise treat "5 of 7 tables ingested" as success.
+    sys.exit(1 if any(r["status"] == "failed" for r in _results.values()) else 0)

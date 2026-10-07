@@ -5,3 +5,5 @@ docker-volume/db-data/
 docker-volume/db-data*/
 *.sql
 *.err
+# Local secrets (copy .env.example -> .env and fill it in)
+.env

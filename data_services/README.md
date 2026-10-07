@@ -18,9 +18,10 @@ raw file --parse--> raw columns --curate_schema()--> curated columns --publish_t
 ```
 
 - Pass an OpenMetadata client/token → all three stages run in one call.
-- Omit it → stops after writing the curated CSV. Publish later with `openmetadata_publish.py`, no re-ingest needed.
+- Omit it → stops after writing the curated CSV. Publish later with `python3 -m src.schema_registry.republish` (or a single table with `openmetadata.publish`), no re-ingest needed.
 - `batch.py` runs the same thing once per row of a manifest CSV, for many tables at once.
 - Every run diffs the new source against the table's previous curated snapshot: additions/updates go through automatically; a column that existed before but is missing now raises an error unless you pass `allow_column_removal=True` — this catches a partial/incremental submission before it silently deletes a column from OpenMetadata. Answers not resubmitted in `business_metadata_file` carry forward instead of being blanked.
+- **Every run leaves an audit trail**: the submitted file is copied verbatim to `raw/source/<ts>.<ext>` (with its SHA-256 next to it), the diff goes to `<table>/diffs/<ts>.csv`, and a row lands in `_lookups/runs.csv` — including runs that failed, with the error and how far they got (`publish_status`: `not_attempted` / `unpublished` / `published` / `failed`).
 
 ## Concepts
 
@@ -51,8 +52,12 @@ DEPARTMENT_ID=pwd DEPARTMENT_NAME="Public Works Department" python3 -m src.schem
 
 # 3. Get a JWT token (skip if not publishing yet)
 #    OpenMetadata running? see infrastructure/openmetadata/README.md
-#    Log into http://localhost:8585 -- email admin@open-metadata.org / password admin
+#    (its .env needs MYSQL_ROOT_PASSWORD first -- see that README's Start section)
+#    Log into http://localhost:8585 with the bootstrap admin account, change
+#    that password on first login, then:
 #    Settings -> Bots -> ingestion-bot -> generate a token
+#    Use the bot token, never an admin session token (it expires in ~1hr and
+#    carries full admin rights).
 
 # 4. Run the full pipeline: ingest -> curate -> publish
 OPENMETADATA_JWT_TOKEN=<token> \
@@ -86,6 +91,9 @@ confirms the actual name.
 | Set a dataset's fields (see [Concepts](#concepts)) | add any of `CATEGORY`/`API_AVAILABLE`/`OWNER`/`FREQUENCY`/`TIMELINE`/`DATASET_DESCRIPTION` to the ingest command |
 | Batch many tables from a manifest CSV | `MANIFEST_FILE=manifest.csv python3 -m src.schema_registry.batch` (+ `OPENMETADATA_JWT_TOKEN` to publish each) |
 | (Re-)publish without re-ingesting | `OPENMETADATA_JWT_TOKEN=<token> TABLE_ID=<id> python3 -m src.schema_registry.openmetadata.publish` |
+| Republish everything that never reached OpenMetadata | `OPENMETADATA_JWT_TOKEN=<token> python3 -m src.schema_registry.republish` (reads `_lookups/runs.csv`; exit 1 if any still fail) |
+| Remove a (renamed/orphaned) table from OpenMetadata + the registry | `OPENMETADATA_JWT_TOKEN=<token> TABLE_ID=<id> python3 -m src.schema_registry.openmetadata.delete_table` (re-ingesting the id later brings it back) |
+| See who ran what, and whether it published | `storage/_lookups/runs.csv` (one row per run, including failed ones) |
 | Run all tests | `python3 -m pytest tests/` |
 | Run one test | `python3 -m pytest tests/test_pipeline.py -v` |
 | Start OpenMetadata | `cd ../infrastructure/openmetadata && docker compose up -d` |
@@ -98,10 +106,12 @@ to publish, or omitting it to skip.
 
 ```
 storage/
-├── _lookups/{departments,datasets,tables}.csv   # registry + dataset-level fields
+├── _lookups/{departments,datasets,tables,runs}.csv   # registry + dataset-level fields + run log
 └── department/<dept>/<dataset>/<table>/
+    ├── raw/source/<ts>.<ext>      # the submission exactly as received (+ <ts>.sha256)
     ├── raw/schemas/<ts>.csv       # parsed structure only
-    └── curated/schemas/<ts>.csv   # + business_description, tag, classification, glossary_term, active, validation_warning
+    ├── curated/schemas/<ts>.csv   # + business_description, tag, classification, glossary_term, active, validation_warning
+    └── diffs/<ts>.csv             # what this run added/removed/changed vs the previous snapshot
 ```
 
 Every run adds a new timestamped snapshot (version history); re-running
@@ -126,10 +136,15 @@ table_id)`, does the Service → Database → Schema → Table create-or-update.
 schema, `table_name` → table. Columns come from the curated CSV's
 `data_type` (unrecognized types fail loudly, never guessed). Each column's
 `tag`/`classification`/`glossary_term` are pushed as TagLabels — `tag`
-under a `FieldTag` Classification, `classification` (MDSF CAT-1/2/3) under
-`DataSensitivity`, `glossary_term` under a `BusinessGlossary` — created on
-first use, reused after. The dataset's own `category`/`dataset_description`
-are pushed the same way, one level up, onto the Database entity.
+under a `FieldTag` Classification, the column's MDSF `classification`
+level under `MDSF`, `glossary_term` under a `BusinessGlossary` — created on
+first use, reused after. The dataset's own `category` (CAT-1..CAT-4,
+validated against the MDSF vocabulary — an unknown one is rejected rather
+than published as a new tag) and `dataset_description` are pushed the same
+way, one level up, onto the Database entity. A resolved `owner` (an
+OpenMetadata user or team, matched by name or email) also lands in the
+Database's built-in **Owners** field, so ownership-based access rules and
+"my assets" filters apply; an unresolvable one is a warning, not a failure.
 
 **Re-running is safe** — the service and schema are reused; the database
 and table are always create-or-update, so a later-confirmed `category`/
@@ -172,10 +187,10 @@ Then: add a test that reproduces it, confirm the full suite passes, and verify t
 ## Known limitations
 
 - `source_format="csv"` won't guess semantically-inverted columns (e.g. `Required` vs `Nullable`) — add a mapping in `parsers/csv_schema_parser.py` if needed.
-- No mode is tracked explicitly (Initial Load/Append/Update/Full Refresh) — `run()` infers safety from a diff against the previous snapshot rather than the caller declaring which one this is, and nothing persists *which* decision was made for audit purposes.
 - `publish_table()` ignores the curated `active` flag — a column marked inactive still gets published like any other.
 - Renaming a column looks like a delete + an add to the diff — it requires `allow_column_removal=True`, and the old name's business metadata won't carry over (matching is by exact column name only).
 - OpenMetadata's PUT merges tags/extension rather than replacing them by default — `_ensure_database()` works around this with an explicit JSON-Patch replace so a cleared `category`/custom property actually clears; column-level tags on the Table entity don't have this fix yet, so clearing a stale column `tag`/`classification` still needs a manual JSON-Patch `remove`.
+- The run log (`_lookups/runs.csv`) is a flat CSV, not a queryable store — one row per run is enough for "what happened and is it in OpenMetadata?", but cross-run analytics would want a real table (and `_lookups/*.csv`'s file locking only covers single-machine runs).
 
 ## Just run it
 
@@ -194,7 +209,7 @@ source code to discover:
 
 | Key | Required? | Notes |
 |---|---|---|
-| `OPENMETADATA_JWT_TOKEN` | yes | Settings → Bots → ingestion-bot in the OpenMetadata UI. An admin session token expires in ~1hr — refresh it if a run fails with 401 (see `.env`'s comment for the exact `curl`) |
+| `OPENMETADATA_JWT_TOKEN` | only when publishing | Settings → Bots → ingestion-bot → generate a token (never an admin session token: those expire in ~1hr and carry full admin rights) |
 | `DEPARTMENT` | yes | must already be registered (see Quickstart) |
 | `DATASET` | yes | auto-creates on first use |
 | `TABLE_NAME` | yes | |

@@ -72,7 +72,10 @@ class S3ObjectStorage(ObjectStorage):
     def write_csv(self, path: str, rows: list[dict]) -> None:
         buf = io.StringIO()
         if rows:
-            writer = csv.DictWriter(buf, fieldnames=list(rows[0].keys()))
+            # Union of every row's keys, in first-seen order (rows may mix
+            # fields added across versions -- see LocalObjectStorage).
+            fieldnames = list(dict.fromkeys(key for row in rows for key in row))
+            writer = csv.DictWriter(buf, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(rows)
         try:
@@ -89,6 +92,21 @@ class S3ObjectStorage(ObjectStorage):
             raise
         text = obj["Body"].read().decode("utf-8")
         return list(csv.DictReader(io.StringIO(text)))
+
+    def write_bytes(self, path: str, data: bytes) -> None:
+        try:
+            self.client.put_object(Bucket=self.bucket, Key=self._key(path), Body=data)
+        except ClientError as exc:
+            self._log_client_error(exc, "write", path)
+            raise
+
+    def read_bytes(self, path: str) -> bytes:
+        try:
+            obj = self.client.get_object(Bucket=self.bucket, Key=self._key(path))
+        except ClientError as exc:
+            self._log_client_error(exc, "read", path)
+            raise
+        return obj["Body"].read()
 
     def exists(self, path: str) -> bool:
         try:

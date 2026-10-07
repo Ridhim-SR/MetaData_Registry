@@ -1,6 +1,13 @@
+from pathlib import Path
+
 import pytest
 
 from src.schema_registry.parsers.field_dictionary_parser import parse_field_dictionary, parse_format
+
+# Real CMSVY dictionary, gitignored like the other sample dumps (root
+# .gitignore: samples/) -- skipped where it isn't present so the suite stays
+# green in a clean checkout.
+SAMPLE = Path("samples/kanya_sumangla_field_dictionary.csv")
 
 
 def test_parse_format_numeric():
@@ -80,8 +87,9 @@ def test_data_description_becomes_business_metadata(tmp_path):
     assert business_metadata["col_a"]["business_description"] == "What this field means"
 
 
+@pytest.mark.skipif(not SAMPLE.exists(), reason=f"{SAMPLE} is gitignored and not present")
 def test_real_sample_file_parses_into_seven_tables():
-    tables = parse_field_dictionary("samples/kanya_sumangla_field_dictionary.csv")
+    tables = parse_field_dictionary(str(SAMPLE))
 
     assert set(tables.keys()) == {
         "cmsvy_application",

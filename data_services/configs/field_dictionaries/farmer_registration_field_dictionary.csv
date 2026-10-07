@@ -13,7 +13,7 @@ gender,"Gender of the farmer",PII,Demographic_Information,true,PII
 image,"Photograph of the farmer",PII,Biometric_Data,true,PII
 verified_from_aadhar,"Whether Aadhaar verification is complete",PII,Verification_Status,true,PII
 rashan_card_no,"Ration card number for PDS benefits",PII,Government_ID,true,PII
-application_no,"Application number for farmer registration",Internal,Application_Reference,true,Internal
-registration_no,"Registration number assigned after approval",Internal,Registration_Reference,true,Internal
-district_id,"District identifier for geographic classification",Internal,Geographic_Reference,true,Internal
-block_id,"Block identifier for geographic classification",Internal,Geographic_Reference,true,Internal
+application_no,"Application number for farmer registration",,Application_Reference,true,Internal
+registration_no,"Registration number assigned after approval",,Registration_Reference,true,Internal
+district_id,"District identifier for geographic classification",,Geographic_Reference,true,Internal
+block_id,"Block identifier for geographic classification",,Geographic_Reference,true,Internal

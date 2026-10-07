@@ -1,5 +1,6 @@
 import os
 import re
+from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 from filelock import FileLock
@@ -14,14 +15,50 @@ logger = get_logger(__name__)
 DEPARTMENTS_PATH = "_lookups/departments.csv"
 DATASETS_PATH = "_lookups/datasets.csv"
 TABLES_PATH = "_lookups/tables.csv"
+RUNS_PATH = "_lookups/runs.csv"
+
+# One row per pipeline run (see pipeline.run): the audit trail for "what was
+# submitted, what changed, who ran it, and whether it reached OpenMetadata".
+RUN_FIELDS = [
+    "run_id",
+    "table_id",
+    "ts",
+    "mode",
+    "source_hash",
+    "operator",
+    "added",
+    "removed",
+    "changed",
+    "publish_status",
+    "error",
+]
+
+# Filenames count as timestamped snapshots only if they match what
+# pipeline._timestamp() writes -- anything else in the folder (a stray
+# README, an editor backup, a manually dropped CSV) must never be picked
+# as "the latest snapshot" to diff against or publish.
+_SNAPSHOT_NAME = re.compile(r"^\d{8}T\d+Z\.csv$")
 
 
 def slugify(value: str) -> str:
     """Canonicalize a department/dataset/table name so "Amplify Data" and
     "amplify_data" resolve to the same id and folder instead of silently
-    becoming two unrelated registry entries."""
+    becoming two unrelated registry entries.
 
-    return re.sub(r"[^a-z0-9]+", "_", value.strip().lower()).strip("_")
+    Raises ValueError when the result would be empty: a name made entirely
+    of non-ASCII characters (a Hindi name typed in Devanagari, say) slugifies
+    to "", which used to silently build ids like "pwd..t1" and folders named
+    after nothing. Such a name needs an explicit ASCII id instead.
+    """
+
+    slug = re.sub(r"[^a-z0-9]+", "_", value.strip().lower()).strip("_")
+    if not slug:
+        raise ValueError(
+            f"Cannot build an id from {value!r}: it contains no ASCII letters or digits. "
+            f"Names like this must be given an explicit ASCII id by the caller "
+            f"(e.g. pass 'dept_1' for a department whose name is written only in Devanagari)."
+        )
+    return slug
 
 
 def _upsert(storage: ObjectStorage, path: str, key: str, row: dict) -> None:
@@ -136,10 +173,16 @@ def latest_curated_snapshot_path(
     """Path of the most recently written curated schema snapshot for one
     table. Filenames are fixed-width UTC timestamps, so lexical order ==
     chronological order -- shared by openmetadata/publish.py (publish the
-    latest) and pipeline.py (diff a new run against the latest)."""
+    latest) and pipeline.py (diff a new run against the latest).
+
+    Only files named like pipeline._timestamp()'s output count: a stray
+    non-snapshot file dropped in the folder (a README, a ~backup, a CSV
+    with a different name) must never be mistaken for the latest snapshot."""
 
     prefix = paths.curated_schemas_prefix(department_id, dataset_slug, table_slug)
-    files = storage.list(prefix)
+    # Local storage on Windows returns backslash-separated paths, S3 returns
+    # forward slashes -- normalize before taking the filename.
+    files = [f for f in storage.list(prefix) if _SNAPSHOT_NAME.match(f.replace("\\", "/").rsplit("/", 1)[-1])]
     if not files:
         raise FileNotFoundError(f"No curated schema under {prefix} -- run the pipeline for this table first.")
     return files[-1]
@@ -151,9 +194,78 @@ def upsert_table(storage: ObjectStorage, table_id: str, dataset_id: str, table_n
         storage,
         TABLES_PATH,
         "table_id",
-        {"table_id": table_id, "dataset_id": dataset_id, "table_name": table_name, "schema_name": schema_name},
+        # `deleted` reset to "": re-ingesting a table that was previously
+        # soft-deleted is an explicit "this table is back" action, so the
+        # mark must not survive a fresh run().
+        {"table_id": table_id, "dataset_id": dataset_id, "table_name": table_name, "schema_name": schema_name, "deleted": ""},
     )
     logger.info(f"Table {'registered' if is_new else 're-registered'}: {table_id}")
+
+
+def soft_delete_table(storage: ObjectStorage, table_id: str) -> dict:
+    """Mark a table as deleted in the registry without dropping its row --
+    the snapshot history and the run log stay readable, but publish_table()
+    refuses to push a soft-deleted table to OpenMetadata anymore.
+
+    This is the registry half of "renaming a table leaves the old one
+    orphaned in OpenMetadata": soft-delete here, then delete the OpenMetadata
+    entity (see openmetadata.publish.delete_table)."""
+
+    with FileLock(storage.lock_path(TABLES_PATH)):
+        rows = storage.read_csv(TABLES_PATH) if storage.exists(TABLES_PATH) else []
+        row = next((r for r in rows if r["table_id"] == table_id), None)
+        if row is None:
+            raise ValueError(f"Unknown table_id '{table_id}' -- not found in {TABLES_PATH}")
+        if row.get("deleted"):
+            logger.info(f"Table already soft-deleted: {table_id}")
+            return row
+        row["deleted"] = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        storage.write_csv(TABLES_PATH, rows)
+    logger.info(f"Table soft-deleted from the registry: {table_id} ({row['deleted']})")
+    return row
+
+
+def append_run(storage: ObjectStorage, row: dict) -> None:
+    """Append one row to the run log (`_lookups/runs.csv`), filling any
+    missing field with "" so a partial row (a run that failed early) still
+    writes a complete, well-formed line."""
+
+    _upsert(storage, RUNS_PATH, "run_id", {field: str(row.get(field, "")) for field in RUN_FIELDS})
+
+
+def update_run(storage: ObjectStorage, run_id: str, **fields) -> None:
+    """Update fields of an existing run row (e.g. record that its publish
+    finally succeeded). Unknown field names are rejected rather than silently
+    dropped -- a typo'd column here would quietly lose audit data."""
+
+    unknown = set(fields) - set(RUN_FIELDS)
+    if unknown:
+        raise ValueError(f"Unknown run field(s) {sorted(unknown)}; allowed: {RUN_FIELDS}")
+
+    with FileLock(storage.lock_path(RUNS_PATH)):
+        rows = storage.read_csv(RUNS_PATH) if storage.exists(RUNS_PATH) else []
+        row = next((r for r in rows if r["run_id"] == run_id), None)
+        if row is None:
+            raise ValueError(f"Unknown run_id '{run_id}' -- not found in {RUNS_PATH}")
+        row.update({k: str(v) for k, v in fields.items()})
+        storage.write_csv(RUNS_PATH, rows)
+
+
+def unpublished_runs(storage: ObjectStorage) -> dict[str, dict]:
+    """{table_id: newest run row that wrote a snapshot but is not in
+    OpenMetadata yet} -- what the republish command iterates over.
+
+    Only rows whose run actually wrote a snapshot count (`publish_status`
+    != "not_attempted"), and the newest such row wins per table, so a later
+    failed run doesn't hide the snapshot an earlier run left unpublished."""
+
+    if not storage.exists(RUNS_PATH):
+        return {}
+    with_snapshot: dict[str, dict] = {}
+    for row in storage.read_csv(RUNS_PATH):  # append-ordered: last wins
+        if row.get("publish_status") != "not_attempted":
+            with_snapshot[row["table_id"]] = row
+    return {table_id: row for table_id, row in with_snapshot.items() if row.get("publish_status") != "published"}
 
 
 if __name__ == "__main__":

@@ -60,7 +60,7 @@ def parse_csv_columns(path: str) -> list[dict]:
     canonical shape as ddl_parser.parse_postgres_columns, regardless of
     that department's own header names or column order."""
 
-    with open(path, newline="") as f:
+    with open(path, newline="", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
         header_map = _build_header_map(reader.fieldnames or [])
 

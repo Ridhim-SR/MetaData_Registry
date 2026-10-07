@@ -1,4 +1,6 @@
-from src.schema_registry.curate import curate_schema
+import pytest
+
+from src.schema_registry.curate import KNOWN_TAGS, curate_schema
 
 
 def _col(name, data_type="integer", **overrides):
@@ -48,15 +50,36 @@ def test_business_metadata_overrides_auto_tag():
     business_metadata = {
         "total_cost": {
             "business_description": "Total sanctioned project cost",
-            "tag": "Custom Tag",
+            "tag": "PII",
             "glossary_term": "Sanctioned Cost",
             "active": True,
         }
     }
     curated = curate_schema([_col("total_cost", "double precision")], business_metadata)
-    assert curated[0]["tag"] == "Custom Tag"
+    assert curated[0]["tag"] == "PII"
     assert curated[0]["business_description"] == "Total sanctioned project cost"
     assert curated[0]["glossary_term"] == "Sanctioned Cost"
+
+
+def test_unknown_tag_is_rejected():
+    """A tag outside KNOWN_TAGS must not be accepted: publishing it would
+    auto-create a new tag in OpenMetadata's FieldTag Classification."""
+
+    business_metadata = {"total_cost": {"tag": "Custom Tag"}}
+
+    with pytest.raises(ValueError, match="unknown tag 'Custom Tag'"):
+        curate_schema([_col("total_cost", "double precision")], business_metadata)
+    assert "Custom Tag" not in KNOWN_TAGS
+
+
+def test_glossary_term_with_dot_is_rejected():
+    """A "." inside a glossary term breaks OpenMetadata's dot-separated
+    FQN (BusinessGlossary.<term>), so the term would silently never resolve."""
+
+    business_metadata = {"total_cost": {"glossary_term": "Cost.Total"}}
+
+    with pytest.raises(ValueError, match="contains '.'"):
+        curate_schema([_col("total_cost", "double precision")], business_metadata)
 
 
 def test_field_without_business_metadata_stays_blank():
