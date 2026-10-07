@@ -189,7 +189,7 @@ Then: add a test that reproduces it, confirm the full suite passes, and verify t
 - `source_format="csv"` won't guess semantically-inverted columns (e.g. `Required` vs `Nullable`) — add a mapping in `parsers/csv_schema_parser.py` if needed.
 - `publish_table()` ignores the curated `active` flag — a column marked inactive still gets published like any other.
 - Renaming a column looks like a delete + an add to the diff — it requires `allow_column_removal=True`, and the old name's business metadata won't carry over (matching is by exact column name only).
-- OpenMetadata's PUT merges tags/extension rather than replacing them by default — `_ensure_database()` works around this with an explicit JSON-Patch replace so a cleared `category`/custom property actually clears; column-level tags on the Table entity don't have this fix yet, so clearing a stale column `tag`/`classification` still needs a manual JSON-Patch `remove`.
+- OpenMetadata's PUT merges tags/extension rather than replacing them by default — so does a Table's PUT, one level down, for each column's tags. Both are patched explicitly right after the PUT (JSON-Patch `replace` on the Database's `tags`/`extension`/`owners`, `add` on every `/columns/{i}/tags`), which is what makes a cleared `category`, custom property or column `tag`/`classification` actually clear instead of staying stuck.
 - The run log (`_lookups/runs.csv`) is a flat CSV, not a queryable store — one row per run is enough for "what happened and is it in OpenMetadata?", but cross-run analytics would want a real table (and `_lookups/*.csv`'s file locking only covers single-machine runs).
 
 ## Just run it

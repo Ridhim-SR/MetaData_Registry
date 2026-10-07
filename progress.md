@@ -384,6 +384,44 @@ personal-data classification items 1–10 were explicitly out of scope).
 
 ---
 
+### Column-tag JSON-Patch fix (2026-10-07)
+Closes the known limitation left open at the end of the subtasks 11–18 pass:
+OpenMetadata merges `columns[].tags` on PUT, so the `FieldTag.Internal` labels
+that 4 `farmers` columns carried before `tag` was blanked in the field
+dictionary stayed put no matter what `_to_column()` sent.
+
+- `_patch_entity()` — the transport, extracted out of `_replace_entity_fields()`
+- `_replace_column_tags(client, table_id, columns)` — called by `publish_table()`
+  right after the table PUT; one op per column on `/columns/{i}/tags` with that
+  column's full TagLabel list (`[]` clears a stale label). Per column rather
+  than replacing `/columns` wholesale, so OpenMetadata's own per-column fields
+  (`ordinalPosition`, `dataTypeDisplay`, `fullyQualifiedName`) survive; `add`
+  rather than `replace` (RFC 6902 §4.1) so it works whether or not the stored
+  column JSON has a `tags` key at all.
+- Tests: `test_publish_table_patches_column_tags_right_after_the_put`,
+  `test_publish_table_patches_an_empty_tag_list_to_clear_a_stale_label`. The
+  Database-patch assertions in `test_openmetadata_publish.py` and
+  `test_ownership.py` now pick their patch by `/databases/` path instead of
+  `call_args` — the table patch is now the last one `publish_table()` sends.
+- `python -m pytest tests/ -q` → **157 passed, 2 skipped** (was 155 + 2)
+- README's Known-limitations bullet rewritten: the manual JSON-Patch `remove`
+  workaround it told people to use is no longer needed.
+- **Live verification (local stack, 2026-10-07)**: Docker Desktop was down, so
+  started it and `docker compose up -d` (migrate exit 0, all 4 services
+  healthy, no wipe). `python -m src.schema_registry.openmetadata.publish`
+  with `TABLE_ID=agriculture_department.farmer_registration_master_dataset.
+  farmers` exited 0 → the nested `/columns/{i}/tags` PATCH is accepted by a
+  real OM 2.0.2 (the fallback of replacing `/columns` wholesale wasn't
+  needed). Before/after diff of `?fields=tags,columns`: **exactly the 4 stale
+  `FieldTag.Internal` labels gone** (`district_id`, `application_no`,
+  `registration_no`, `block_id`), nothing else touched, 53/53 columns still
+  tagged. Swept the other 8 tables (235 columns): 0 `FieldTag.Internal` left,
+  so the whole local stack is clean.
+- Local stack left **up** after the verification (it was `docker compose
+  down` at the end of the previous session).
+
+---
+
 ### Future Work
 - [ ] Add Field Dictionary (business metadata) for remaining tables
 - [ ] Add dataset governance fields (owner, retention_policy, lineage)

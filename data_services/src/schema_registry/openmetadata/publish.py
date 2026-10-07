@@ -101,6 +101,10 @@ def _create_or_update(client: OpenMetadata, request):
 
 
 @_retry_transient
+def _patch_entity(client: OpenMetadata, rest_suffix: str, entity_id, patch: list[dict]) -> None:
+    client.client.patch(path=f"{rest_suffix}/{entity_id}", data=json.dumps(patch))
+
+
 def _replace_entity_fields(client: OpenMetadata, rest_suffix: str, entity_id, fields: dict) -> None:
     """create_or_update()'s PUT merges array/object fields (tags, extension)
     instead of replacing them -- verified live: clearing a dataset's
@@ -114,7 +118,35 @@ def _replace_entity_fields(client: OpenMetadata, rest_suffix: str, entity_id, fi
     the entity's JSON, and OpenMetadata omits null fields from its responses."""
 
     patch = [{"op": "replace", "path": f"/{field}", "value": value} for field, value in fields.items()]
-    client.client.patch(path=f"{rest_suffix}/{entity_id}", data=json.dumps(patch))
+    _patch_entity(client, rest_suffix, entity_id, patch)
+
+
+def _replace_column_tags(client: OpenMetadata, entity_id, columns: list[Column]) -> None:
+    """Same merge quirk as _replace_entity_fields(), one level down: the
+    table's PUT already sends every column's `tags` in full (see _to_column),
+    but OpenMetadata merges each column's tag array with the one it already
+    stored -- verified live, a `tag` blanked in a Field Dictionary left its
+    old FieldTag label on that column forever. So the tags are patched again
+    right after the PUT, column by column.
+
+    Per column, not on `/columns` wholesale: replacing the whole array would
+    also discard what OpenMetadata computes and stores per column
+    (ordinalPosition, dataTypeDisplay, fullyQualifiedName, ...).
+
+    `add` rather than `replace`: identical effect when the member already
+    exists (RFC 6902 4.1), and it still succeeds for a column whose stored
+    JSON has no `tags` key at all, where `replace` would fail on a missing
+    path."""
+
+    patch = [
+        {
+            "op": "add",
+            "path": f"/columns/{index}/tags",
+            "value": [t.model_dump(mode="json", exclude_none=True) for t in (column.tags or [])],
+        }
+        for index, column in enumerate(columns)
+    ]
+    _patch_entity(client, "/tables", entity_id, patch)
 
 
 # Where curate.py's per-column `tag`/`classification`/`glossary_term`
@@ -239,6 +271,9 @@ def _to_column(row: dict) -> Column:
         # `tags` field as "leave existing tags alone", so a column that had
         # a tag/classification/glossary_term removed on this run would keep
         # its old, now-stale tags forever unless we say so explicitly.
+        # Sending [] still isn't enough on its own -- OM merges the tag array
+        # it already stored with the one sent here; _replace_column_tags()
+        # right after the PUT is what actually makes the removal stick.
         "tags": _column_tags(row),
     }
     if data_type in _LENGTH_REQUIRED_TYPES:
@@ -588,6 +623,7 @@ def publish_table(client: OpenMetadata, storage: ObjectStorage, table_id: str, s
             columns=columns,
         ),
     )
+    _replace_column_tags(client, _unwrap(table.id), columns)
 
     logger.info(f"Published {table_id} -> {_fqn(table)} ({len(curated_columns)} column(s)) from {curated_path}")
 

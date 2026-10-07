@@ -63,10 +63,24 @@ def _fake_client():
         fqn = f"{parent}.{name}" if parent else str(name)
         entity.fullyQualifiedName = fqn
         entity.name = name
+        # a real id, so the follow-up JSON-Patch paths read like
+        # /tables/pwd.vishwakarma.t1 instead of a MagicMock repr
+        entity.id = fqn
         return entity
 
     client.create_or_update.side_effect = _create_or_update
     return client
+
+
+def _patch_body(client, rest_suffix: str) -> dict:
+    """The last JSON-Patch sent for entities under `rest_suffix`, as
+    path -> value. publish_table() now patches the table's column tags too,
+    so client.client.patch.call_args alone no longer says which entity it
+    was for."""
+
+    calls = [c for c in client.client.patch.call_args_list if c.kwargs["path"].startswith(f"{rest_suffix}/")]
+    assert calls, f"no PATCH request under {rest_suffix}"
+    return {op["path"]: op["value"] for op in json.loads(calls[-1].kwargs["data"])}
 
 
 def test_publish_table_builds_full_entity_chain(tmp_path):
@@ -193,8 +207,7 @@ def test_publish_table_clears_stale_category_and_description_on_republish(tmp_pa
     client = _fake_client()
     publish_table(client, storage, "pwd.vishwakarma.t1")
 
-    patch_call = client.client.patch.call_args
-    patch_body = {op["path"]: op["value"] for op in json.loads(patch_call.kwargs["data"])}
+    patch_body = _patch_body(client, "/databases")
     assert patch_body["/tags"] == [
         {
             "tagFQN": "DataSensitivity.CAT-2",
@@ -224,8 +237,7 @@ def test_publish_table_clears_stale_category_and_description_on_republish(tmp_pa
     storage.write_csv(lookups.DATASETS_PATH, rows)
     publish_table(client, storage, "pwd.vishwakarma.t1")
 
-    patch_call = client.client.patch.call_args
-    patch_body = {op["path"]: op["value"] for op in json.loads(patch_call.kwargs["data"])}
+    patch_body = _patch_body(client, "/databases")
     assert patch_body["/tags"] == []
     assert patch_body["/extension"] == {"apiAvailable": "", "datasetOwner": "", "frequency": "", "timeline": ""}
 
@@ -237,6 +249,72 @@ def test_publish_table_clears_stale_category_and_description_on_republish(tmp_pa
         for c in table_request.columns
     ] == [
         ["MDSF.Internal"],
+        ["FieldTag.Firm/Contractor-Identifier", "MDSF.PII"],
+        ["FieldTag.Financial", "MDSF.Financial"],
+    ]
+
+
+def test_publish_table_patches_column_tags_right_after_the_put(tmp_path):
+    """Same merge quirk as the Database above, one level down: the table PUT
+    carries every column's tags, but OpenMetadata merges each column's tag
+    array with the one already stored -- verified live, 4 `farmers` columns
+    kept a stale FieldTag.Internal after their dictionary `tag` was blanked.
+    So publish_table() must patch the tags again, per column, right after the
+    PUT."""
+
+    storage = _ingested_storage(tmp_path)
+    client = _fake_client()
+    publish_table(client, storage, "pwd.vishwakarma.tbd_confirm_with_pwd")
+
+    table_patches = [
+        call for call in client.client.patch.call_args_list if call.kwargs["path"].startswith("/tables/")
+    ]
+    assert len(table_patches) == 1
+    assert table_patches[0].kwargs["path"] == "/tables/pwd.vishwakarma.public.TBD_confirm_with_pwd"
+
+    ops = json.loads(table_patches[0].kwargs["data"])
+    assert [(op["op"], op["path"]) for op in ops] == [
+        ("add", "/columns/0/tags"),
+        ("add", "/columns/1/tags"),
+        ("add", "/columns/2/tags"),
+    ]
+    assert [[tag["tagFQN"] for tag in op["value"]] for op in ops] == [
+        ["MDSF.Internal"],
+        ["FieldTag.Firm/Contractor-Identifier", "MDSF.PII"],
+        ["FieldTag.Financial", "MDSF.Financial"],
+    ]
+    # the labels are the same TagLabel shape OpenMetadata stores, so the patch
+    # overwrites rather than appends
+    assert ops[0]["value"][0] == {
+        "tagFQN": "MDSF.Internal",
+        "source": "Classification",
+        "labelType": "Automated",
+        "state": "Confirmed",
+    }
+
+
+def test_publish_table_patches_an_empty_tag_list_to_clear_a_stale_label(tmp_path):
+    """The clearing case is the whole point of the patch: a column whose tags
+    were all removed since the last publish must send `[]`, not be omitted
+    (which would mean "leave the stale labels alone")."""
+
+    storage = _ingested_storage(tmp_path)
+    curated_path = storage.list("department/pwd/vishwakarma/tbd_confirm_with_pwd/curated/schemas/")[-1]
+    rows = storage.read_csv(curated_path)
+    rows[0]["classification"] = ""
+    rows[0]["tag"] = ""
+    storage.write_csv(curated_path, rows)
+
+    client = _fake_client()
+    publish_table(client, storage, "pwd.vishwakarma.tbd_confirm_with_pwd")
+
+    table_patches = [
+        call for call in client.client.patch.call_args_list if call.kwargs["path"].startswith("/tables/")
+    ]
+    ops = json.loads(table_patches[-1].kwargs["data"])
+    assert ops[0] == {"op": "add", "path": "/columns/0/tags", "value": []}
+    # the other columns still carry their curated labels
+    assert [[tag["tagFQN"] for tag in op["value"]] for op in ops[1:]] == [
         ["FieldTag.Firm/Contractor-Identifier", "MDSF.PII"],
         ["FieldTag.Financial", "MDSF.Financial"],
     ]

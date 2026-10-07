@@ -78,6 +78,16 @@ def _storage_with_owner(tmp_path, owner: str) -> LocalObjectStorage:
     return storage
 
 
+def _database_patch_body(client) -> dict:
+    """path -> value of the last JSON-Patch sent to a Database. publish_table
+    patches the table's column tags too, so call_args alone no longer says
+    which entity the patch was for."""
+
+    calls = [c for c in client.client.patch.call_args_list if c.kwargs["path"].startswith("/databases/")]
+    assert calls, "publish_table() sent no Database JSON-Patch"
+    return {op["path"]: op["value"] for op in json.loads(calls[-1].kwargs["data"])}
+
+
 def test_resolve_owner_finds_a_user_by_name(tmp_path):
     client = _client_with_users({"john.doe": "John Doe"})
 
@@ -135,10 +145,7 @@ def test_publish_sends_owners_on_the_database(tmp_path):
 
     # ...and the JSON-Patch replace carries it too, so clearing the owner in
     # datasets.csv actually clears it in OM (same quirk as tags/extension)
-    patch_body = {
-        op["path"]: op["value"]
-        for op in json.loads(client.client.patch.call_args.kwargs["data"])
-    }
+    patch_body = _database_patch_body(client)
     assert len(patch_body["/owners"]) == 1
     assert "john.doe" in json.dumps(patch_body["/owners"])
 
@@ -159,8 +166,5 @@ def test_publish_sends_an_empty_owners_list_when_nothing_resolves(tmp_path):
     )
     assert _unwrap(database_request.owners) == []
 
-    patch_body = {
-        op["path"]: op["value"]
-        for op in json.loads(client.client.patch.call_args.kwargs["data"])
-    }
+    patch_body = _database_patch_body(client)
     assert patch_body["/owners"] == []
