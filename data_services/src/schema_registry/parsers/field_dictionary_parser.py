@@ -1,4 +1,5 @@
 import csv
+import io
 import re
 
 from src.utils.logger import get_logger
@@ -43,7 +44,7 @@ def parse_format(format_text: str) -> tuple[str, int | None]:
     )
 
 
-def parse_field_dictionary(path: str) -> dict[str, dict]:
+def parse_field_dictionary_text(text: str, label: str = "<text>") -> dict[str, dict]:
     """Parse a multi-table Field Dictionary CSV (columns: Dataset Name,
     Dataset Field, Data Description, Format, Mandatory (Y/N), ...) into one
     entry per distinct "Dataset Name", each with the canonical raw-column
@@ -58,29 +59,29 @@ def parse_field_dictionary(path: str) -> dict[str, dict]:
 
     tables: dict[str, dict] = {}
 
-    with open(path, newline="", encoding="utf-8-sig") as f:
-        for row in csv.DictReader(f):
-            table_name = row["Dataset Name"].strip()
-            field_name = row["Dataset Field"].strip()
-            data_type, length = parse_format(row["Format"])
-            nullable = row["Mandatory (Y/N)"].strip().upper() != "Y"
+    for row in csv.DictReader(io.StringIO(text)):
+        table_name = row["Dataset Name"].strip()
+        field_name = row["Dataset Field"].strip()
+        data_type, length = parse_format(row["Format"])
+        nullable = row["Mandatory (Y/N)"].strip().upper() != "Y"
 
-            table = tables.setdefault(table_name, {"columns": [], "business_metadata": {}})
-            table["columns"].append(
-                {
-                    "name": field_name,
-                    "data_type": data_type,
-                    "length": length,
-                    "scale": None,
-                    "nullable": nullable,
-                    "default": None,
-                }
-            )
-            table["business_metadata"][field_name] = {
-                "business_description": row.get("Data Description", "").strip(),
+        table = tables.setdefault(table_name, {"columns": [], "business_metadata": {}})
+        table["columns"].append(
+            {
+                "name": field_name,
+                "data_type": data_type,
+                "length": length,
+                "scale": None,
+                "nullable": nullable,
+                "default": None,
             }
+        )
+        table["business_metadata"][field_name] = {
+            "business_description": row.get("Data Description", "").strip(),
+        }
 
     for table_name, table in tables.items():
         logger.info(f"field_dictionary_parser: '{table_name}' -> {len(table['columns'])} column(s)")
-    logger.info(f"field_dictionary_parser: parsed {len(tables)} table(s) from {path}")
+    logger.info(f"field_dictionary_parser: parsed {len(tables)} table(s) from {label}")
     return tables
+

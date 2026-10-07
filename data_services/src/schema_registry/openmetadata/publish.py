@@ -1,9 +1,10 @@
 import json
 import os
+import re
 from collections.abc import Iterable
 
 import requests
-from dotenv import load_dotenv
+from src.utils.config import load_env
 from metadata.generated.schema.api.classification.createClassification import (
     CreateClassificationRequest,
 )
@@ -90,15 +91,19 @@ def _create_or_update(client: OpenMetadata, request):
 
 
 @_retry_transient
-def _replace_entity_fields(client: OpenMetadata, rest_suffix: str, entity_id, fields: dict) -> None:
+def _replace_entity_fields(client: OpenMetadata, rest_suffix: str, entity_id, fields: dict, op: str = "replace") -> None:
     """create_or_update()'s PUT merges array/object fields (tags, extension)
     instead of replacing them -- verified live: clearing a dataset's
     `category`/custom-property value in _lookups/datasets.csv and
     republishing left the old tag/extension values stuck in OpenMetadata.
     A JSON-Patch `replace` on the exact fields that carry this risk is the
-    only way a cleared value actually clears here too."""
+    only way a cleared value actually clears here too.
 
-    patch = [{"op": "replace", "path": f"/{field}", "value": value} for field, value in fields.items()]
+    `op="add"` sets a path whether or not it exists yet (JSON-Patch `add` on
+    an existing object member replaces it) -- used for per-column tags,
+    where a column with no tags may not carry a `tags` member at all."""
+
+    patch = [{"op": op, "path": f"/{field}", "value": value} for field, value in fields.items()]
     client.client.patch(path=f"{rest_suffix}/{entity_id}", data=json.dumps(patch))
 
 
@@ -142,6 +147,12 @@ _DEFAULT_LENGTH = 256
 
 
 def get_client(host_port: str, jwt_token: str) -> OpenMetadata:
+    # Quick reachability check first: the SDK otherwise retries for ~35 s and
+    # floods the screen with its own warnings before failing.
+    try:
+        requests.get(f"{host_port.rstrip('/')}/v1/system/version", timeout=8)
+    except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
+        raise requests.exceptions.ConnectionError(f"OpenMetadata at {host_port} isn't reachable") from exc
     server_config = OpenMetadataConnection(
         hostPort=host_port,
         authProvider=AuthProvider.openmetadata,
@@ -205,10 +216,8 @@ def _to_column(row: dict) -> Column:
         "name": row["name"],
         "dataType": data_type,
         "description": row.get("business_description") or None,
-        # Explicit [] on purpose, not None: OpenMetadata treats a missing
-        # `tags` field as "leave existing tags alone", so a column that had
-        # a tag/classification/glossary_term removed on this run would keep
-        # its old, now-stale tags forever unless we say so explicitly.
+        # The PUT still merges these with whatever tags the column already
+        # has -- _replace_column_tags() is what actually makes them exact.
         "tags": _column_tags(row),
     }
     if data_type in _LENGTH_REQUIRED_TYPES:
@@ -362,6 +371,69 @@ def _ensure_sensitivity_tag(client: OpenMetadata, category: str) -> None:
     )
 
 
+_CATEGORY_RE = re.compile(r"^CAT-(\d+)$", re.IGNORECASE)
+
+
+def _category_level(value: str) -> int | None:
+    match = _CATEGORY_RE.match((value or "").strip())
+    return int(match.group(1)) if match else None
+
+
+def _check_category_covers_columns(table_id: str, category: str, curated_columns: list[dict]) -> None:
+    """MDSF: when a dataset mixes categories, the highest one applies. So a
+    dataset published as CAT-1 (Open) while one of its columns is CAT-3
+    (Restricted) would advertise restricted data as open -- refuse that
+    before anything is written to OpenMetadata.
+
+    A blank dataset category (not confirmed yet) is only warned about, since
+    most datasets are still waiting on their department's answer."""
+
+    column_levels = {
+        row["name"]: level
+        for row in curated_columns
+        if (level := _category_level(row.get("classification", ""))) is not None
+    }
+    if not column_levels:
+        return
+    highest = max(column_levels.values())
+    highest_columns = sorted(name for name, level in column_levels.items() if level == highest)
+
+    dataset_level = _category_level(category)
+    if dataset_level is None:
+        if category:
+            raise ValueError(f"{table_id}: dataset category '{category}' isn't a CAT-<n> value.")
+        logger.warning(
+            f"{table_id}: dataset has no category yet, but column(s) {', '.join(highest_columns)} "
+            f"are CAT-{highest}. Set the dataset's CATEGORY to at least CAT-{highest}."
+        )
+        return
+    if dataset_level < highest:
+        raise ValueError(
+            f"{table_id}: dataset category is {category} but column(s) {', '.join(highest_columns)} "
+            f"are CAT-{highest}. Under MDSF the highest category applies -- set the dataset's "
+            f"CATEGORY to at least CAT-{highest}, or pass allow_category_below_columns=True if "
+            f"those columns are removed/anonymised before sharing."
+        )
+
+
+def _replace_column_tags(client: OpenMetadata, table, columns: list[Column]) -> None:
+    """create_or_update()'s PUT merges column tags with the ones already
+    there, so a column moved from CAT-3 to CAT-1 would carry both labels.
+    Set each column's tags to exactly this run's list, matching columns by
+    name against the entity the server returned (its order, not ours)."""
+
+    server_names = [str(_unwrap(c.name)) for c in (getattr(table, "columns", None) or [])]
+    fields = {}
+    for column in columns:
+        name = str(_unwrap(column.name))
+        if name not in server_names:
+            raise ValueError(f"Column '{name}' missing from {_fqn(table)} after publish -- can't set its tags.")
+        index = server_names.index(name)
+        fields[f"columns/{index}/tags"] = [t.model_dump(mode="json", exclude_none=True) for t in column.tags or []]
+    if fields:
+        _replace_entity_fields(client, "/tables", _unwrap(table.id), fields, op="add")
+
+
 def _ensure_tags_and_terms(client: OpenMetadata, curated_columns: list[dict]) -> None:
     """Create-or-reuse every Classification/Tag/Glossary/GlossaryTerm the
     curated columns reference, before the table request tries to attach
@@ -388,7 +460,13 @@ def _ensure_tags_and_terms(client: OpenMetadata, curated_columns: list[dict]) ->
             )
 
 
-def publish_table(client: OpenMetadata, storage: ObjectStorage, table_id: str, service_name: str | None = None) -> dict:
+def publish_table(
+    client: OpenMetadata,
+    storage: ObjectStorage,
+    table_id: str,
+    service_name: str | None = None,
+    allow_category_below_columns: bool = False,
+) -> dict:
     """Publish one table's latest curated schema snapshot into OpenMetadata
     as a Table entity (Service -> Database -> Schema -> Table -> Columns).
 
@@ -398,6 +476,10 @@ def publish_table(client: OpenMetadata, storage: ObjectStorage, table_id: str, s
     `table_id` is the same hierarchical id used throughout this pipeline
     ("pwd.vishwakarma.<table>"); service defaults to the department so each
     department gets its own OpenMetadata database service.
+
+    Refuses to publish a dataset whose `category` is lower than its most
+    sensitive column's `classification` (see _check_category_covers_columns)
+    unless `allow_category_below_columns=True`.
     """
 
     department_id, dataset_slug, table_slug = table_id.split(".")
@@ -411,8 +493,15 @@ def publish_table(client: OpenMetadata, storage: ObjectStorage, table_id: str, s
     curated_path = lookups.latest_curated_snapshot_path(storage, department_id, dataset_slug, table_slug)
     curated_columns = storage.read_csv(curated_path)
 
-    service = _ensure_service(client, service_name or department_id)
+    # Checked before any OpenMetadata call, so a refused publish leaves no
+    # half-updated service/database behind.
     category = dataset_row.get("category", "")
+    if allow_category_below_columns:
+        logger.warning(f"{table_id}: dataset-vs-column category check skipped (allow_category_below_columns=True)")
+    else:
+        _check_category_covers_columns(table_id, category, curated_columns)
+
+    service = _ensure_service(client, service_name or department_id)
     if category:
         _ensure_sensitivity_tag(client, category)
     database = _ensure_database(
@@ -444,6 +533,7 @@ def publish_table(client: OpenMetadata, storage: ObjectStorage, table_id: str, s
             columns=columns,
         ),
     )
+    _replace_column_tags(client, table, columns)
 
     logger.info(f"Published {table_id} -> {_fqn(table)} ({len(curated_columns)} column(s)) from {curated_path}")
 
@@ -455,11 +545,28 @@ def publish_table(client: OpenMetadata, storage: ObjectStorage, table_id: str, s
     }
 
 
-if __name__ == "__main__":
-    load_dotenv()
+def _main(argv: list[str]) -> int:
+    """Command line entry point (settings come from .env / the shell)."""
+
+    load_env()
     _storage = storage_from_env()
     _client = get_client(
         host_port=os.environ.get("OPENMETADATA_HOST_PORT", "http://localhost:8585/api"),
         jwt_token=os.environ["OPENMETADATA_JWT_TOKEN"],
     )
-    publish_table(_client, _storage, os.environ["TABLE_ID"])
+    publish_table(
+        _client,
+        _storage,
+        os.environ["TABLE_ID"],
+        allow_category_below_columns=os.environ.get("ALLOW_CATEGORY_BELOW_COLUMNS", "").strip().lower()
+        in {"y", "yes", "true", "1"},
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+
+    from src.utils.cli import run_cli
+
+    sys.exit(run_cli("publish", _main, sys.argv[1:]))

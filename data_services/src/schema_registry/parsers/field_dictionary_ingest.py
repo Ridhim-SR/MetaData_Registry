@@ -4,15 +4,20 @@ from pathlib import Path
 
 from metadata.ingestion.ometa.ometa_api import OpenMetadata
 
-from src.schema_registry.parsers.field_dictionary_parser import parse_field_dictionary
-from src.schema_registry.pipeline import run
+from src.schema_registry import inputs
+from src.schema_registry.parsers.field_dictionary_parser import parse_field_dictionary_text
+from src.schema_registry.pipeline import _timestamp, run
+from src.schema_registry.registry import lookups, paths
 from src.storage.base import ObjectStorage
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 _COLUMN_FIELDS = ["name", "data_type", "length", "nullable", "default"]
-_METADATA_FIELDS = ["name", "business_description", "tag", "classification", "glossary_term", "active"]
+# Only what a Field Dictionary actually answers. Writing blank tag/
+# classification/glossary_term or a hard-coded active=true here would
+# overwrite answers set by hand on an earlier run every time it's re-ingested.
+_METADATA_FIELDS = ["name", "business_description"]
 
 
 def run_field_dictionary(
@@ -37,7 +42,16 @@ def run_field_dictionary(
     as run() itself.
     """
 
-    tables = parse_field_dictionary(source_file)
+    # `source_file` may be a local path or a storage:<key> (see inputs.py).
+    # The original multi-table file is archived once at dataset level; each
+    # table's run() then archives the per-table split it actually parsed.
+    source_bytes, source_name = inputs.read_input(storage, source_file)
+    tables = parse_field_dictionary_text(inputs.decode(source_bytes), label=source_file)
+    archive_path = paths.dataset_source_path(
+        lookups.slugify(department), lookups.slugify(dataset), _timestamp(), source_name
+    )
+    inputs.archive(storage, archive_path, source_bytes)
+    logger.info(f"Field dictionary: archived original -> {archive_path}")
     results: dict[str, dict] = {}
 
     with tempfile.TemporaryDirectory() as tmp_dir:
@@ -62,16 +76,7 @@ def run_field_dictionary(
                 writer = csv.DictWriter(f, fieldnames=_METADATA_FIELDS)
                 writer.writeheader()
                 for name, meta in table["business_metadata"].items():
-                    writer.writerow(
-                        {
-                            "name": name,
-                            "business_description": meta.get("business_description", ""),
-                            "tag": "",
-                            "classification": "",
-                            "glossary_term": "",
-                            "active": "true",
-                        }
-                    )
+                    writer.writerow({"name": name, "business_description": meta.get("business_description", "")})
 
             logger.info(f"Field dictionary: ingesting table '{table_name}' ({len(table['columns'])} column(s))")
             results[table_name] = run(
@@ -89,32 +94,3 @@ def run_field_dictionary(
 
     return results
 
-
-if __name__ == "__main__":
-    import os
-
-    from dotenv import load_dotenv
-
-    from src.schema_registry.openmetadata.publish import get_client
-    from src.storage import storage_from_env
-
-    load_dotenv()
-    _storage = storage_from_env()
-
-    _client = None
-    if os.environ.get("OPENMETADATA_JWT_TOKEN"):
-        _client = get_client(
-            host_port=os.environ.get("OPENMETADATA_HOST_PORT", "http://localhost:8585/api"),
-            jwt_token=os.environ["OPENMETADATA_JWT_TOKEN"],
-        )
-
-    _results = run_field_dictionary(
-        department=os.environ["DEPARTMENT"],
-        dataset=os.environ["DATASET"],
-        source_file=os.environ["SOURCE_FILE"],
-        storage=_storage,
-        schema_name=os.environ.get("SCHEMA_NAME", "public"),
-        openmetadata_client=_client,
-    )
-    for _table_name, _result in _results.items():
-        print(f"{_table_name}: {_result['column_count']} column(s), {_result['warning_count']} warning(s)")

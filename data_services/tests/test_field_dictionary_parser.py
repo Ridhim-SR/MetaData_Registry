@@ -1,6 +1,15 @@
 import pytest
 
-from src.schema_registry.parsers.field_dictionary_parser import parse_field_dictionary, parse_format
+import os
+
+import pytest
+
+from src.schema_registry.parsers.field_dictionary_parser import parse_field_dictionary_text, parse_format
+
+
+def parse_field_dictionary(path):
+    with open(path, newline="", encoding="utf-8-sig") as f:
+        return parse_field_dictionary_text(f.read(), label=str(path))
 
 
 def test_parse_format_numeric():
@@ -80,6 +89,8 @@ def test_data_description_becomes_business_metadata(tmp_path):
     assert business_metadata["col_a"]["business_description"] == "What this field means"
 
 
+@pytest.mark.skipif(not os.path.exists("samples/kanya_sumangla_field_dictionary.csv"),
+                    reason="real sample file is gitignored; not on this machine")
 def test_real_sample_file_parses_into_seven_tables():
     tables = parse_field_dictionary("samples/kanya_sumangla_field_dictionary.csv")
 

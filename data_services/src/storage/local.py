@@ -1,7 +1,11 @@
 import csv
+import os
+import tempfile
 from pathlib import Path
 
-from src.storage.base import ObjectStorage
+from filelock import FileLock
+
+from src.storage.base import ObjectStorage, rows_to_csv
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -21,16 +25,34 @@ class LocalObjectStorage(ObjectStorage):
     def _full_path(self, path: str) -> Path:
         return self.root / path
 
-    def write_csv(self, path: str, rows: list[dict]) -> None:
+    def _atomic_write(self, path: str, data: bytes) -> None:
+        """Write to a temp file in the same folder, then swap it into place
+        with os.replace (atomic on one filesystem). Opening the target with
+        "w" empties it first, so a crash mid-write used to leave a truncated
+        _lookups/*.csv -- i.e. a wiped registry."""
+
         full = self._full_path(path)
         full.parent.mkdir(parents=True, exist_ok=True)
 
-        with full.open("w", newline="") as f:
-            if not rows:
-                return
-            writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
-            writer.writeheader()
-            writer.writerows(rows)
+        fd, tmp_path = tempfile.mkstemp(dir=full.parent, prefix=f".{full.name}.", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(data)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, full)
+        except BaseException:
+            Path(tmp_path).unlink(missing_ok=True)
+            raise
+
+    def write_csv(self, path: str, rows: list[dict]) -> None:
+        self._atomic_write(path, rows_to_csv(rows).encode("utf-8"))
+
+    def write_bytes(self, path: str, data: bytes) -> None:
+        self._atomic_write(path, data)
+
+    def read_bytes(self, path: str) -> bytes:
+        return self._full_path(path).read_bytes()
 
     def read_csv(self, path: str) -> list[dict]:
         with self._full_path(path).open(newline="") as f:
@@ -53,3 +75,8 @@ class LocalObjectStorage(ObjectStorage):
         full = self._full_path(path)
         full.parent.mkdir(parents=True, exist_ok=True)
         return str(full) + ".lock"
+
+    def lock(self, path: str) -> FileLock:
+        # Local storage is only ever shared by processes on this machine,
+        # which an OS file lock covers.
+        return FileLock(self.lock_path(path))

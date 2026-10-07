@@ -1,8 +1,6 @@
 import re
+from collections import Counter
 
-from src.utils.logger import get_logger
-
-logger = get_logger(__name__)
 
 KNOWN_POSTGRES_TYPES = {
     "integer", "bigint", "smallint", "serial", "bigserial",
@@ -56,32 +54,52 @@ def auto_classification(field_name: str) -> str | None:
     return None
 
 
-def validate_column(column: dict) -> list[str]:
-    """Return validation warnings for one column (empty list = clean)."""
+def validate_schema(table_id: str, columns: list[dict]) -> None:
+    """Refuse a parsed schema that can't be stored or published correctly:
+    empty column names, duplicate names (OpenMetadata rejects them, and the
+    by-name diff/metadata merge would silently collapse them), and data
+    types with no known mapping. These used to be warnings only -- the bad
+    snapshot still became the table's "latest" and every later publish
+    failed on it. Raises one error listing every problem, so the department
+    can fix the whole file in one go."""
 
-    warnings: list[str] = []
+    problems: list[str] = []
 
-    if not column["name"]:
-        warnings.append("Missing column name")
+    empty_positions = [str(i) for i, col in enumerate(columns, start=1) if not col["name"]]
+    if empty_positions:
+        problems.append(f"column(s) at position {', '.join(empty_positions)} have no name")
 
-    if column["data_type"].lower() not in KNOWN_POSTGRES_TYPES:
-        warnings.append(f"Unrecognized Postgres type '{column['data_type']}'")
+    name_counts = Counter(col["name"] for col in columns if col["name"])
+    duplicates = sorted(name for name, count in name_counts.items() if count > 1)
+    if duplicates:
+        problems.append(f"duplicate column name(s): {', '.join(duplicates)}")
 
-    return warnings
+    unknown_types = [
+        f"{col['name'] or '?'} ({col['data_type'] or 'no type'})"
+        for col in columns
+        if col["data_type"].lower() not in KNOWN_POSTGRES_TYPES
+    ]
+    if unknown_types:
+        problems.append(
+            f"unrecognized data type(s): {', '.join(unknown_types)} -- if a type is valid, add it to "
+            f"KNOWN_POSTGRES_TYPES (curate.py) and _TYPE_MAP (openmetadata/publish.py)"
+        )
+
+    if problems:
+        raise ValueError(f"{table_id}: schema rejected, nothing was stored -- " + "; ".join(problems))
 
 
 def curate_schema(
     raw_columns: list[dict],
     business_metadata: dict[str, dict] | None = None,
 ) -> list[dict]:
-    """Validate & standardize raw columns, merging in business metadata
+    """Standardize raw columns (already checked by validate_schema), merging in business metadata
     (business description / tag / glossary term / active) keyed by field
     name where it's available. Fields without an answer yet are left
     blank rather than guessed, except `tag`, which falls back to a
     rule-based auto-tag so sensitive fields are never left unclassified.
 
-    Returns one row per field, each carrying its own `validation_warning`
-    (empty string if clean) so the whole thing writes straight to CSV.
+    Returns one row per field, ready to write straight to CSV.
 
     `classification` (CAT-1/CAT-2/CAT-3, per the Model Data Sharing
     Framework) works the same way as `tag`: a business-metadata override
@@ -94,10 +112,6 @@ def curate_schema(
 
     for column in raw_columns:
         name = column["name"]
-        warnings = validate_column(column)
-        if warnings:
-            logger.warning(f"{name}: {'; '.join(warnings)}")
-
         meta = business_metadata.get(name, {})
 
         curated_columns.append(
@@ -108,7 +122,6 @@ def curate_schema(
                 "classification": meta.get("classification") or auto_classification(name) or "",
                 "glossary_term": meta.get("glossary_term", ""),
                 "active": meta.get("active", True),
-                "validation_warning": "; ".join(warnings),
             }
         )
 
