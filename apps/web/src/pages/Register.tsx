@@ -28,13 +28,15 @@ export function RegisterPage() {
   };
 
   const inputClass =
-    "w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-slate-900 focus:outline-none";
+    "w-full px-3 py-2 text-sm";
+
+  const inputStyle: React.CSSProperties = { border: "1px solid var(--border)", borderRadius: 6 };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-100">
-      <div className="w-full max-w-sm rounded-lg bg-white p-8 shadow">
-        <h1 className="mb-6 text-2xl font-semibold">Create account</h1>
-        {error && <div className="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+    <div className="flex min-h-screen items-center justify-center" style={{ background: "var(--bg-alt)" }}>
+      <div className="w-full max-w-sm p-8" style={{ background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 6 }}>
+        <h1 className="mb-6 text-2xl font-semibold" style={{ color: "var(--navy-900)" }}>Create account</h1>
+        {error && <div className="mb-4 rounded-md px-3 py-2 text-sm" style={{ background: "var(--confid-bg)", color: "var(--confid-fg)", border: "1px solid var(--confid-fg)" }}>{error}</div>}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -46,6 +48,7 @@ export function RegisterPage() {
                 maxLength={100}
                 autoComplete="given-name"
                 className={inputClass}
+                style={inputStyle}
               />
             </div>
             <div>
@@ -57,6 +60,7 @@ export function RegisterPage() {
                 maxLength={100}
                 autoComplete="family-name"
                 className={inputClass}
+                style={inputStyle}
               />
             </div>
           </div>
@@ -69,6 +73,7 @@ export function RegisterPage() {
               required
               autoComplete="email"
               className={inputClass}
+              style={inputStyle}
             />
           </div>
           <div>
@@ -81,12 +86,13 @@ export function RegisterPage() {
               minLength={6}
               autoComplete="new-password"
               className={inputClass}
+              style={inputStyle}
             />
           </div>
           <button
             type="submit"
             disabled={mutation.isPending}
-            className="w-full rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+            className="btn-primary w-full disabled:opacity-50"
           >
             {mutation.isPending ? "Creating…" : "Register"}
           </button>
@@ -126,12 +132,12 @@ export function SocialButtons() {
 
   return (
     <div className="space-y-2">
-      {error && <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+      {error && <div className="rounded-md px-3 py-2 text-sm" style={{ background: "var(--confid-bg)", color: "var(--confid-fg)" }}>{error}</div>}
       <button
         type="button"
         onClick={() => start("google")}
         disabled={pending !== null}
-        className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+        className="btn-secondary w-full disabled:opacity-50"
       >
         {pending === "google" ? "Redirecting…" : "Continue with Google"}
       </button>
@@ -139,7 +145,7 @@ export function SocialButtons() {
         type="button"
         onClick={() => start("microsoft")}
         disabled={pending !== null}
-        className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+        className="btn-secondary w-full disabled:opacity-50"
       >
         {pending === "microsoft" ? "Redirecting…" : "Continue with Microsoft"}
       </button>

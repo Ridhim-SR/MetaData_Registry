@@ -35,6 +35,22 @@ async def lifespan(app: FastAPI):
         await conn.execute(text("ALTER TABLE users.users ADD COLUMN IF NOT EXISTS auth_provider users.auth_provider NOT NULL DEFAULT 'local'"))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_users_department ON users.users (department)"))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_users_provider ON users.users (auth_provider, provider_sub)"))
+        # Registry: confidential access level on pre-existing databases.
+        # ALTER TYPE ... ADD VALUE cannot run inside a transaction block,
+        # so it runs on a separate AUTOCOMMIT connection (create_all above
+        # already creates the value on fresh databases).
+        def _add_confidential_value(sync_conn):
+            autocommit_conn = sync_conn.execution_options(isolation_level="AUTOCOMMIT")
+            autocommit_conn.execute(text("ALTER TYPE users.visibility ADD VALUE IF NOT EXISTS 'confidential'"))
+
+        extra = await engine.connect()
+        try:
+            try:
+                await extra.run_sync(_add_confidential_value)
+            except Exception:
+                pass
+        finally:
+            await extra.close()
     yield
     await engine.dispose()
 

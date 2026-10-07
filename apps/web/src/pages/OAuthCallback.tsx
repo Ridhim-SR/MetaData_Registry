@@ -53,21 +53,21 @@ export function OAuthCallbackPage() {
   }, [provider, searchParams, navigate, setAuth]);
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-100">
-      <div className="w-full max-w-sm rounded-lg bg-white p-8 text-center shadow">
+    <div className="flex min-h-screen items-center justify-center" style={{ background: "var(--bg-alt)" }}>
+      <div className="w-full max-w-sm p-8 text-center" style={{ background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 6 }}>
         {error ? (
           <>
-            <h1 className="mb-2 text-lg font-semibold text-red-700">Sign-in failed</h1>
-            <p className="mb-4 text-sm text-slate-600">{error}</p>
+            <h1 className="mb-2 text-lg font-semibold" style={{ color: "var(--confid-fg)" }}>Sign-in failed</h1>
+            <p className="mb-4 text-sm" style={{ color: "var(--text-muted)" }}>{error}</p>
             <button
               onClick={() => navigate("/login")}
-              className="w-full rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700"
+              className="btn-primary w-full"
             >
               Back to sign in
             </button>
           </>
         ) : (
-          <p className="text-sm text-slate-600">Completing sign-in…</p>
+          <p className="text-sm" style={{ color: "var(--text-muted)" }}>Completing sign-in…</p>
         )}
       </div>
     </div>
