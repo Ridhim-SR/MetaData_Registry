@@ -1,3 +1,7 @@
+import os
+
+import pytest
+
 from src.schema_registry.parsers.ddl_parser import parse_postgres_columns
 
 
@@ -66,6 +70,8 @@ def test_multiple_columns_and_bare_type_no_length():
     assert cols[0]["length"] is None
 
 
+@pytest.mark.skipif(not os.path.exists("samples/pwd_vishwakarma_full_raw_columns.txt"),
+                    reason="real sample file is gitignored; not on this machine")
 def test_real_vishwakarma_sample_parses_all_213_columns():
     ddl_text = open("samples/pwd_vishwakarma_full_raw_columns.txt").read()
     cols = parse_postgres_columns(ddl_text)

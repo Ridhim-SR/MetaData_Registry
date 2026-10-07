@@ -36,8 +36,7 @@ def load_env() -> str:
 
     load_dotenv(_ENV_FILE)
 
-    # OPENMETADATA_ENV is the older name of this switch -- still accepted.
-    env = (os.environ.get("ENVIRONMENT") or os.environ.get("OPENMETADATA_ENV") or "local").strip().lower()
+    env = (os.environ.get("ENVIRONMENT") or "local").strip().lower()
     if env not in ENVIRONMENTS:
         raise ValueError(f"ENVIRONMENT={env!r} -- must be one of: {', '.join(ENVIRONMENTS)}")
     os.environ["ENVIRONMENT"] = env

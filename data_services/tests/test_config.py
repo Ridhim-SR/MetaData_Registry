@@ -5,7 +5,7 @@ import pytest
 from src.utils import config
 
 _KEYS = (
-    "ENVIRONMENT", "OPENMETADATA_ENV", "OPENMETADATA_HOST_PORT", "OPENMETADATA_JWT_TOKEN",
+    "ENVIRONMENT", "OPENMETADATA_HOST_PORT", "OPENMETADATA_JWT_TOKEN",
     "LOCAL_OPENMETADATA_HOST_PORT", "LOCAL_OPENMETADATA_JWT_TOKEN",
     "DEV_OPENMETADATA_HOST_PORT", "DEV_OPENMETADATA_JWT_TOKEN",
     "PROD_OPENMETADATA_HOST_PORT", "PROD_OPENMETADATA_JWT_TOKEN",
@@ -84,11 +84,6 @@ def test_exported_values_win_over_env_file(env_file, monkeypatch):
     config.load_env()
     assert os.environ["OPENMETADATA_JWT_TOKEN"] == "from-shell"
     assert os.environ["WASABI_PREFIX"] == "sandbox-aditya"
-
-
-def test_old_switch_name_still_works(env_file, monkeypatch):
-    env_file.write_text("OPENMETADATA_ENV=local\n")
-    assert config.load_env() == "local"
 
 
 def test_defaults_to_local(env_file):

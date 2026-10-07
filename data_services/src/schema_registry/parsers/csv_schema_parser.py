@@ -82,7 +82,3 @@ def parse_csv_text(text: str, label: str = "<text>") -> list[dict]:
     logger.info(f"csv_schema_parser: parsed {len(columns)} column(s) from {label}")
     return columns
 
-
-def parse_csv_columns(path: str) -> list[dict]:
-    with open(path, newline="", encoding="utf-8-sig") as f:
-        return parse_csv_text(f.read(), label=path)

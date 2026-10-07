@@ -1,237 +1,223 @@
-# Schema Registry (Department Metadata Cataloging)
+# Schema Registry
 
-Parses a department's raw column-definition submission (Postgres DDL dump
-or CSV), validates/standardizes it, auto-tags sensitive fields, saves raw +
-curated versions to object storage, and publishes the curated result into
-OpenMetadata as a Table entity.
+This takes the column lists that departments send us (PWD, Samaj Kalyan, ...),
+checks them, tags sensitive columns, keeps every version in storage, and puts
+them into OpenMetadata.
 
-Code: `src/schema_registry/`, `src/storage/`.
+Everything on the OpenMetadata server comes from scripts, never from clicking
+in the UI. So if a server is wiped or a new one is set up, **one command
+rebuilds it exactly**.
 
-## The pipeline
-
-One `run()` call, three stages:
+## How it works
 
 ```
-raw file --parse--> raw columns --curate_schema()--> curated columns --publish_table()--> OpenMetadata
-             |                          |                                    |
-       raw/schemas/<ts>.csv     curated/schemas/<ts>.csv          Service->Database->Schema->Table
+Department's file ──upload──▶ Wasabi
+                                │
+catalog.yaml (in git) ──────────┤  "what should be in OpenMetadata"
+                                ▼
+                         sync command
+             parse ─▶ check ─▶ store ─▶ publish to OpenMetadata
 ```
 
-- Pass an OpenMetadata client/token → all three stages run in one call.
-- Omit it → stops after writing the curated CSV. Publish later with `openmetadata_publish.py`, no re-ingest needed.
-- `batch.py` runs the same thing once per row of a manifest CSV, for many tables at once.
-- A run that's rejected — unparseable file, unknown type, duplicate or empty column name, missing metadata file, or the column-removal guard below — writes nothing: no snapshot, and `_lookups/` is left exactly as it was. The registry is only updated after the new snapshots are stored.
-- Every run diffs the new source against the table's previous curated snapshot: additions/updates go through automatically; a column that existed before but is missing now raises an error unless you pass `allow_column_removal=True` — this catches a partial/incremental submission before it silently deletes a column from OpenMetadata. Answers in `business_metadata_file` merge field by field: a blank cell or a missing column keeps the previous answer, so a description-only file never resets a hand-set `classification`/`glossary_term`/`active`. To change an answer, send the new value — a blank never clears one.
+- **Wasabi** keeps the files: what departments sent, every processed version, and the list of departments and tables.
+- **`catalog.yaml`** says what should be in OpenMetadata: departments, datasets, tables, and which file each table comes from. It's in git, so every change is reviewed.
+- **`sync`** makes Wasabi and OpenMetadata match `catalog.yaml`. Running it again changes nothing.
 
-## Concepts
-
-- **department → dataset → table → columns.** IDs are slugified and hierarchical: `pwd.vishwakarma.<table>`.
-- **Departments are a controlled vocabulary** — must be registered before ingesting (`run()` refuses to auto-create one). Datasets/tables auto-create on first use.
-- **Source formats**: `postgres_ddl` (raw column-list dump) or `csv` (arbitrary headers, normalized via alias map — only `name`/`data_type` required). A multi-table Field Dictionary CSV (one file, many tables) goes through `parsers/field_dictionary_ingest.py` instead, which splits it and calls `run()` once per table.
-- **Dataset-level fields** — set once per dataset (not per column), optional kwargs on `run()`:
-
-  | Field | Meaning |
-  |---|---|
-  | `category` | MDSF CAT-1/2/3/4 — the dataset's overall classification (separate from each column's own `classification`) |
-  | `api_available` | Y/N — exposed via an API? |
-  | `owner` | who's accountable for this dataset |
-  | `frequency` | how often the data is refreshed/submitted |
-  | `timeline` | the period/date range the dataset covers |
-  | `dataset_description` | what the dataset is |
-
-  A blank value carries forward whatever's already set, rather than wiping it — so only mention a field when you're setting or changing it. `category`/`dataset_description` also get pushed onto OpenMetadata's Database entity; the rest live in `_lookups/datasets.csv` only (see [Known limitations](#known-limitations)).
-
-## Quickstart
+## First-time setup
 
 ```bash
-# 1. Setup
-python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt
-
-# 2. Register a department (one-time)
-DEPARTMENT_ID=pwd DEPARTMENT_NAME="Public Works Department" python3 -m src.schema_registry.registry.lookups
-
-# 3. Get a JWT token (skip if not publishing yet)
-#    OpenMetadata running? see infrastructure/openmetadata/README.md
-#    Log into http://localhost:8585 -- email admin@open-metadata.org / password admin
-#    Settings -> Bots -> ingestion-bot -> generate a token
-
-# 4. Run the full pipeline: ingest -> curate -> publish
-OPENMETADATA_JWT_TOKEN=<token> \
-DEPARTMENT=pwd DATASET=vishwakarma TABLE_NAME=vishwakarma_T \
-SOURCE_FILE=samples/pwd_vishwakarma_full_raw_columns.txt SOURCE_FORMAT=postgres_ddl \
-python3 -m src.schema_registry.pipeline
-
-# 5. Tests
-python3 -m pytest tests/
+cd data_services
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env     # then fill in .env (see below)
 ```
 
-**Config**: everything lives in one file, `.env` (copy `.env.example`; never commit `.env`). One line, `ENVIRONMENT`, decides where a run reads and writes:
+Never commit `.env`. It holds passwords and keys.
 
-| `ENVIRONMENT=` | Storage | OpenMetadata settings used |
-| --- | --- | --- |
-| `local` (default) | `storage/` folder on this machine — never Wasabi | `LOCAL_OPENMETADATA_HOST_PORT` / `_JWT_TOKEN` |
-| `development` | Wasabi `WASABI_BUCKET`, folder `dev/` | `DEV_OPENMETADATA_HOST_PORT` / `_JWT_TOKEN` (BIPP2) |
-| `production` | Wasabi `WASABI_BUCKET`, folder `prod/` | `PROD_OPENMETADATA_HOST_PORT` / `_JWT_TOKEN` |
+## Choose where you work
 
-`development`/`production` refuse to run if `WASABI_BUCKET` is blank, so shared data never ends up on one laptop by accident. To switch for a single run without editing the file: `ENVIRONMENT=development python3 -m src.schema_registry.pipeline`. Anything exported in the shell wins over `.env` (e.g. `WASABI_PREFIX=sandbox-<name>` to experiment in Wasabi without touching `dev/`).
+One line in `.env` decides where everything goes:
 
-**`vishwakarma_T` is a provisional table name**, not a confirmed one — PWD's
-raw submission was only a column-list dump with no `CREATE TABLE <name>`,
-so the real Postgres table/schema/database name is still unknown. Rename it
-(re-run with a different `TABLE_NAME`, then delete the old one) once PWD
-confirms the actual name.
+```
+ENVIRONMENT=local        # local | development | production
+```
 
-## Command reference
+| `ENVIRONMENT` | Files go to | OpenMetadata used |
+|---|---|---|
+| `local` (default) | the `storage/` folder on your laptop. Never Wasabi | `LOCAL_OPENMETADATA_...` (your laptop) |
+| `development` | Wasabi, folder `dev/` | `DEV_OPENMETADATA_...` (BIPP2, 10.0.96.105) |
+| `production` | Wasabi, folder `prod/` | `PROD_OPENMETADATA_...` (not set up yet) |
+
+- Use `local` to try things out. It can't change shared data.
+- `development` and `production` stop with an error if `WASABI_BUCKET` is blank, so shared data never ends up on one laptop by mistake.
+- To switch for one command only, put it in front: `ENVIRONMENT=development python3 -m src.schema_registry.sync`
+- **Token:** in that server's OpenMetadata UI, go to Settings → Bots → ingestion-bot and copy the token into `.env`. Without a token, commands still save to storage but don't publish.
+
+## Adding or updating a department's data
+
+This is the normal way. Do it the same way every time.
+
+**1. Run `add` with the department's file**
+```bash
+ENVIRONMENT=development python3 -m src.schema_registry.add samples/pwd_vishwakarma_full_raw_columns.txt \
+    --department pwd --dataset vishwakarma --table vishwakarma_T
+```
+This does two things at once:
+- uploads the file to Wasabi, at `dev/inputs/pwd/vishwakarma/<file name>`. You never pick or copy a path.
+- adds the table to `catalog.yaml`, or points the existing entry at the new file.
+
+It prints what it did:
+```
+  - uploaded samples/pwd_vishwakarma_full_raw_columns.txt -> inputs/pwd/vishwakarma/pwd_vishwakarma_full_raw_columns.txt
+  - added table pwd/vishwakarma/vishwakarma_T
+```
+
+| Situation | Add to the command |
+|---|---|
+| First file of a **new department** | `--department-name "Full Department Name"` |
+| A `.csv` file | nothing. The format is picked from the file name. Use `--format` to override |
+| A file with descriptions/tags for the columns | `--metadata path/to/metadata.csv` |
+| **One file describing several tables** (field dictionary) | `--field-dictionary` instead of `--table` |
+| Table lives in another database schema | `--schema <name>` |
+
+A department sends an **updated file**? Run the same `add` command again. Wasabi keeps the old version.
+
+**2. Fill in the dataset's details** in `catalog.yaml` when you know them: `category` (CAT-1 to CAT-4), `owner`, `frequency`, ... `add` leaves them blank for a new dataset.
+
+**3. Commit `catalog.yaml` and open a PR.** Get it reviewed and merged. If `add` says "catalog.yaml already up to date", there's nothing to commit.
+
+**4. Run sync**
+```bash
+ENVIRONMENT=development python3 -m src.schema_registry.sync --dry-run          # see what would happen
+ENVIRONMENT=development python3 -m src.schema_registry.sync                    # all departments
+ENVIRONMENT=development python3 -m src.schema_registry.sync --department pwd   # just one
+```
+It prints a summary:
+```
+TABLE                          INGEST        PUBLISH        DETAIL
+pwd.vishwakarma.vishwakarma_t  ingested      published      source file changed; 213 columns
+```
+- `unchanged`: the file is the same as last time, so it isn't processed again. It's still published, in case the server was wiped.
+- `failed`: the reason is in DETAIL. Other tables carry on, and the command exits with an error so scripts notice.
+
+Running all departments is fine: unchanged files are skipped, so only new work is done.
+
+**5. Check it in OpenMetadata.**
+
+**Going to production:** run the same `add` command with `ENVIRONMENT=production`. It uploads to `prod/`, and the catalog is already right. Then run `sync` with `ENVIRONMENT=production`.
+
+## Rules
+
+- **Don't change data in the OpenMetadata UI.** The next `sync` overwrites column tags and dataset details. Change the file or `catalog.yaml` instead.
+- **Every change goes through `catalog.yaml` and a PR.** That's how we know what's on the server and who changed it.
+- **Try things on `local` first.**
+- **Departments' files stay out of git.** They're in Wasabi.
+
+## Restoring a wiped server
+
+```bash
+ENVIRONMENT=development python3 -m src.schema_registry.sync                  # full: from catalog.yaml
+ENVIRONMENT=development python3 -m src.schema_registry.sync --publish-only   # quick: republish everything already in Wasabi
+```
+Both are safe to run as often as you like.
+
+## Other commands
 
 | I want to... | Command |
 |---|---|
-| Register a department | `DEPARTMENT_ID=pwd DEPARTMENT_NAME="..." python3 -m src.schema_registry.registry.lookups` |
-| Ingest + curate, storage only | `DEPARTMENT=pwd DATASET=<ds> TABLE_NAME=<t> SOURCE_FILE=<path> SOURCE_FORMAT=postgres_ddl python3 -m src.schema_registry.pipeline` |
-| Ingest + curate + publish, one call | same, plus `OPENMETADATA_JWT_TOKEN=<token>` |
-| Register + ingest together | add `DEPARTMENT_NAME="..."` to the ingest command |
-| Set a dataset's fields (see [Concepts](#concepts)) | add any of `CATEGORY`/`API_AVAILABLE`/`OWNER`/`FREQUENCY`/`TIMELINE`/`DATASET_DESCRIPTION` to the ingest command |
-| Batch many tables from a manifest CSV | `MANIFEST_FILE=manifest.csv python3 -m src.schema_registry.batch` (+ `OPENMETADATA_JWT_TOKEN` to publish each) |
-| (Re-)publish without re-ingesting | `OPENMETADATA_JWT_TOKEN=<token> TABLE_ID=<id> python3 -m src.schema_registry.openmetadata.publish` |
+| See uploaded files | `python3 -m src.schema_registry.inputs list` |
+| Upload a file without touching the catalog | `python3 -m src.schema_registry.inputs upload <file> inputs/<dept>/<dataset>/<file>` |
+| Try a single table without the catalog | `DEPARTMENT=pwd DATASET=vishwakarma TABLE_NAME=vishwakarma_T SOURCE_FILE=samples/x.txt SOURCE_FORMAT=postgres_ddl python3 -m src.schema_registry.pipeline` (add `DEPARTMENT_NAME="..."` the first time to register the department) |
+| Republish one table | `TABLE_ID=pwd.vishwakarma.vishwakarma_t python3 -m src.schema_registry.openmetadata.publish` |
 | Run all tests | `python3 -m pytest tests/` |
-| Run one test | `python3 -m pytest tests/test_pipeline.py -v` |
-| Start OpenMetadata | `cd ../infrastructure/openmetadata && docker compose up -d` |
+| Start OpenMetadata on your laptop | `cd ../infrastructure/openmetadata && docker compose up -d`, then log in at http://localhost:8585 |
 
-Same calls work from Python: `from src.schema_registry.pipeline import run`,
-passing `openmetadata_client=` (from `openmetadata_publish.get_client(...)`)
-to publish, or omitting it to skip.
+`SOURCE_FILE` and metadata files can be a path on your laptop or `storage:<key>` for a file in Wasabi.
 
-## Storage layout
+## What happens when you run again
+
+- **Same file:** nothing changes in storage, and the same result goes to OpenMetadata.
+- **New columns:** they're added.
+- **Columns missing from the file:** the table stops with an error. This catches a department sending only part of the table. If they really removed columns, add `allow_column_removal: true` to that table in `catalog.yaml` for one sync, then remove it again.
+- **Bad file** (unknown type, duplicate column name, a pasted `CREATE TABLE`): it's rejected and nothing is saved.
+- **Descriptions and tags** come from a metadata file (`metadata:` in the catalog). A blank cell keeps the old answer; it never erases one.
+- **Dataset category lower than its most sensitive column** (e.g. CAT-1 with a CAT-3 phone number column): publishing is refused. Raise the category. Only if those columns are removed before sharing, add `allow_category_below_columns: true` to the dataset.
+- **Column tags** in OpenMetadata are set to exactly what the pipeline decided. Old ones are removed.
+
+## When something fails
+
+The error always names the exact problem. Fix the cause; don't bypass the check.
+
+| Error says | What to do |
+|---|---|
+| `not found in storage -- upload it first` | Run `add` for that file in this ENVIRONMENT (e.g. it was added in development but not yet in production) |
+| `isn't in catalog.yaml yet -- add --department-name` | First file of a new department: add `--department-name "..."` |
+| `unknown key(s)` / `must be CAT-1 ... CAT-4` | Fix that line in `catalog.yaml` |
+| `this run is missing N column(s)` | Partial file: ask the department for the full one. Real removal: `allow_column_removal: true` for one sync |
+| `schema rejected ... unrecognized data type(s)` | If it's a real Postgres type, add it to `KNOWN_POSTGRES_TYPES` (`curate.py`) and `_TYPE_MAP` (`openmetadata/publish.py`); otherwise fix the file |
+| `schema rejected ... duplicate column name(s)` / `have no name` | Fix the department's file |
+| `full CREATE TABLE statement` / `table-level constraint` | Keep only the column lines, without `CREATE TABLE` or `CONSTRAINT` lines |
+| `dataset category is CAT-x but column(s) ... are CAT-y` | Set `category:` to at least CAT-y in `catalog.yaml` |
+| `name(s) matching no column` (warning) | Typo in the metadata file. Those rows were ignored |
+| `Unrecognized Format value` (field dictionary) | Add one rule to `FORMAT_TYPE_RULES` in `field_dictionary_parser.py` |
+| `Couldn't lock ... held by` | Someone else is running sync. Wait, or if their run died, it frees itself after 15 minutes |
+| `401` from OpenMetadata | Token expired: get a new one into `.env` |
+| Wasabi `AccessDenied` / `InvalidAccessKeyId` | Check the Wasabi keys in `.env` |
+
+## Where files are stored
+
+Same layout on your laptop (`storage/`) and in Wasabi (`dev/`, `prod/`):
 
 ```
-storage/
-├── _lookups/{departments,datasets,tables}.csv   # registry + dataset-level fields
-└── department/<dept>/<dataset>/<table>/
-    ├── raw/source/<ts>__<file>    # the original submission + .sha256
-    ├── raw/schemas/<ts>.csv       # parsed structure
-    └── curated/schemas/<ts>.csv   # + business_description, tag, classification, glossary_term, active, validation_warning
+inputs/<dept>/<dataset>/<file>              files uploaded with `add`
+_lookups/departments.csv, datasets.csv, tables.csv   list of departments, datasets, tables
+department/<dept>/<dataset>/<table>/
+    raw/source/<time>__<file>               the exact file used, + .sha256
+    raw/schemas/<time>.csv                  columns as read from the file
+    curated/schemas/<time>.csv              + descriptions, tags, classification
+department/<dept>/<dataset>/_source/        a multi-table field dictionary, once per dataset
+_locks/                                     stops two people writing at the same time
 ```
 
-Every run adds a new timestamped snapshot (version history); re-running
-doesn't duplicate lookups. `publish_table()` always uses the **latest**
-curated snapshot. Fill in `business_description`/`tag`/`glossary_term`
-later via a Field Dictionary CSV passed as `business_metadata_file`.
+Every run adds new files with a time in the name. Nothing is overwritten, so the full history stays. OpenMetadata always gets the newest version.
 
-**Backend**: everything goes through `ObjectStorage` (`src/storage/base.py`), swappable without touching `schema_registry/`:
+## How it looks in OpenMetadata
 
-- **`LocalObjectStorage`** — plain filesystem, default for local dev.
-- **`S3ObjectStorage`** — Wasabi or any S3-compatible provider via `boto3`. `storage_from_env()` picks between the two: set `WASABI_BUCKET` (+ `WASABI_ENDPOINT_URL`/`WASABI_ACCESS_KEY_ID`/`WASABI_SECRET_ACCESS_KEY`, optionally `WASABI_PREFIX`/`WASABI_REGION`) in `.env` to switch to Wasabi; leave it unset to keep using Local.
-- **Concurrency**: `storage.lock()` — an OS file lock on local storage, and on Wasabi a lock object under `_locks/` created with a conditional PUT, so several machines can push to the same bucket without losing registry rows (tested with two processes against Wasabi, 2026-10-07). A lock left by a crashed run expires after 15 minutes. Each locked write costs a few round trips (~3 s on Wasabi).
+| Ours | In OpenMetadata |
+|---|---|
+| Department (`pwd`) | Database service. Created once |
+| Dataset (`vishwakarma`) | Database: description, category tag, and owner / frequency / timeline / API as custom properties |
+| `schema:` (default `public`) | Schema. Created once |
+| Table | Table: columns, types, descriptions |
+| Column tags | `FieldTag` (Financial, Geospatial, ...), `DataSensitivity` (CAT-1 to CAT-4), `BusinessGlossary` terms |
 
-**Inputs from storage**: `SOURCE_FILE` and `BUSINESS_METADATA_FILE` (and manifest columns) accept either a local path or `storage:<key>`, read from the current environment's storage. Upload once, then anyone (or BIPP2) can run without a local copy:
-```bash
-python3 -m src.schema_registry.inputs upload samples/pwd_vishwakarma_full_raw_columns.txt inputs/pwd/pwd_vishwakarma_full_raw_columns.txt
-SOURCE_FILE=storage:inputs/pwd/pwd_vishwakarma_full_raw_columns.txt python3 -m src.schema_registry.pipeline
-python3 -m src.schema_registry.inputs list
-```
-Every run also archives the exact files it parsed, byte for byte with a `.sha256` beside them, at `department/<dept>/<dataset>/<table>/raw/source/<ts>__<file>` (a multi-table Field Dictionary once at `department/<dept>/<dataset>/_source/`).
+Columns whose names look like personal data (Aadhaar, PAN, mobile, email, ...) get CAT-3 automatically, unless the metadata file says otherwise.
 
-## Publish to OpenMetadata
+`sync` also does the one-time OpenMetadata setup (the custom properties) on its own.
 
-`openmetadata_publish.py` pushes a table's latest curated snapshot as a
-Table entity via the `openmetadata-ingestion` SDK (pin it to match the
-running server's version). One function, `publish_table(client, storage,
-table_id)`, does the Service → Database → Schema → Table create-or-update.
+## Known limits
 
-**Mapping**: department → service, dataset → database, `schema_name` →
-schema, `table_name` → table. Columns come from the curated CSV's
-`data_type` (unrecognized types fail loudly, never guessed). Each column's
-`tag`/`classification`/`glossary_term` are pushed as TagLabels — `tag`
-under a `FieldTag` Classification, `classification` (MDSF CAT-1/2/3) under
-`DataSensitivity`, `glossary_term` under a `BusinessGlossary` — created on
-first use, reused after. The dataset's own `category`/`dataset_description`
-are pushed the same way, one level up, onto the Database entity.
+- Renaming or removing a table leaves the old one in OpenMetadata. Delete it there by hand.
+- A renamed column counts as one removed plus one added, so it needs `allow_column_removal`, and its description doesn't carry over.
+- Columns marked `active: false` are still published.
+- Personal-data detection misses many names (e.g. `bride_name`, `groom_dob`, `account_no`). Check sensitive tables by hand.
+- Each locked write to Wasabi takes about 3 seconds, so a big sync takes a few minutes.
+- `vishwakarma_T` is a temporary table name. PWD's file had no table name. Change it in `catalog.yaml` once PWD confirms it.
 
-**Re-running is safe** — the service and schema are reused; the database
-and table are always create-or-update, so a later-confirmed `category`/
-`dataset_description` actually lands, and removed columns are actually
-removed in OpenMetadata too. Each column's tags are then set to exactly
-this run's list (JSON-Patch), so a column downgraded from CAT-3 to CAT-2
-doesn't keep both labels.
+## For developers
 
-**Category check** — publishing refuses a dataset whose `category` is
-lower than its most sensitive column's `classification` (MDSF: the highest
-category applies), before anything is written to OpenMetadata. A blank
-category only logs a warning. Override with `allow_category_below_columns=True`
-(`ALLOW_CATEGORY_BELOW_COLUMNS=true` on the CLI) only when those columns are
-removed or anonymised before sharing.
+| Code | What it does |
+|---|---|
+| `src/schema_registry/add.py` | The `add` command: upload + catalog entry |
+| `src/schema_registry/sync.py` | The `sync` command |
+| `src/schema_registry/catalog.py` | Reads and checks `catalog.yaml` |
+| `src/schema_registry/pipeline.py` | One table: parse → check → store (`run()`) |
+| `src/schema_registry/inputs.py` | Upload/list files, read `storage:` files, archive originals |
+| `src/schema_registry/parsers/` | Readers for Postgres column lists, CSV, field dictionaries |
+| `src/schema_registry/curate.py` | Checks types and names, adds automatic tags and classification |
+| `src/schema_registry/openmetadata/publish.py` | Sends one table to OpenMetadata |
+| `src/schema_registry/registry/` | Department/dataset/table lists, and folder layout |
+| `src/storage/` | Laptop folder or Wasabi, plus locking |
+| `src/utils/config.py` | Reads `.env` and applies `ENVIRONMENT` |
 
-**Standalone republish** (no re-ingest):
-```bash
-OPENMETADATA_JWT_TOKEN=<token> OPENMETADATA_HOST_PORT=http://localhost:8585/api \
-TABLE_ID=pwd.vishwakarma.vishwakarma_t python3 -m src.schema_registry.openmetadata.publish
-```
-
-**One-time per OpenMetadata instance**: `api_available`/`owner`/`frequency`/`timeline` ride on OpenMetadata Custom Properties, which must be registered before they'll show up:
-```bash
-OPENMETADATA_JWT_TOKEN=<token> python3 -m src.schema_registry.openmetadata.setup_custom_properties
-```
-
-## Tests
-
-```bash
-python3 -m pytest tests/
-```
-Covers parsers, curation/tagging, lookup dedup, concurrency, and the full pipeline/batch/publish flow end to end.
-
-## A new department's data fails the pipeline — what to do
-
-It's built to fail loudly, never guess — the error names the exact bad value. Match it to one of these; don't bypass it:
-
-| Error says... | Means | Fix |
-|---|---|---|
-| `Unknown department` | Not registered | `lookups.register_department(...)`, rerun — no code change |
-| Parser can't make sense of the file at all | A genuinely new raw file *shape* | Write `parsers/<name>_parser.py` producing the same column-dict shape (`name`/`data_type`/`length`/`scale`/`nullable`/`default`), add a test against the real sample file, wire it in (see `field_dictionary_parser.py` for a template) |
-| `Unrecognized Format value`, `missing required field`, or similar, on a *known* format | One value the parser's rule table doesn't cover yet | Small targeted addition — one line in `FORMAT_TYPE_RULES`, the CSV alias map, or the DDL regex. Don't rewrite the parser |
-| `schema rejected, nothing was stored -- unrecognized data type(s)` | A type never seen before | If it's a real type, add it to `KNOWN_POSTGRES_TYPES` (curate.py) and `_TYPE_MAP` (openmetadata/publish.py); otherwise fix the source file |
-| `schema rejected ... duplicate column name(s)` / `have no name` | Broken source file | Fix the source file — the previous snapshot is untouched |
-| `full CREATE TABLE statement` / `table-level constraint` | Whole DDL pasted instead of the column list | Keep only the column definitions between the outer parentheses, drop `CONSTRAINT`/`PRIMARY KEY (...)` lines |
-| `business_metadata_file has N name(s) matching no column` (warning) | Typo in the metadata file | Fix the names — those rows were ignored; the run's result lists them under `unmatched_metadata_names` |
-| `dataset category is CAT-x but column(s) ... are CAT-y` | Category check | Set the dataset's `CATEGORY` to at least CAT-y. Only use `ALLOW_CATEGORY_BELOW_COLUMNS=true` if those columns are removed/anonymised before sharing |
-| `this run is missing N column(s)...` | Column-removal guard | Real full resubmission → `allow_column_removal=True`. Accidental partial file → fix the source file instead, the guard just did its job |
-| OpenMetadata/Wasabi error | Could be code or credentials/network | Verify independently (curl, AWS CLI) before touching code |
-
-Then: add a test that reproduces it, confirm the full suite passes, and verify the actual published result via the OpenMetadata API — not just "no exception was thrown."
-
-## Known limitations
-
-- `source_format="csv"` won't guess semantically-inverted columns (e.g. `Required` vs `Nullable`) — add a mapping in `parsers/csv_schema_parser.py` if needed.
-- No mode is tracked explicitly (Initial Load/Append/Update/Full Refresh) — `run()` infers safety from a diff against the previous snapshot rather than the caller declaring which one this is, and nothing persists *which* decision was made for audit purposes.
-- `publish_table()` ignores the curated `active` flag — a column marked inactive still gets published like any other.
-- Renaming a column looks like a delete + an add to the diff — it requires `allow_column_removal=True`, and the old name's business metadata won't carry over (matching is by exact column name only).
-- OpenMetadata's PUT merges tags/extension rather than replacing them by default — `_ensure_database()` and `_replace_column_tags()` work around this with explicit JSON-Patches so a cleared `category`, custom property or column tag actually clears.
-- Because a blank metadata cell means "keep the previous answer", clearing a column's `business_description`/`tag`/`glossary_term` back to empty still means editing the latest curated snapshot directly.
-
-## Just run it
-
-Every option lives in `.env` — copy `.env.example`, fill it in once, then
-the command itself never changes:
-
-```bash
-cd /Users/adityaoffice/Desktop/UP_SDA/MetaData_Registry/data_services
-source .venv/bin/activate
-python3 -m src.schema_registry.pipeline
-```
-
-`.env.example` documents every key, required and optional, with what each
-one does — nothing hidden in `pipeline.py` that you'd have to go read
-source code to discover:
-
-| Key | Required? | Notes |
-|---|---|---|
-| `ENVIRONMENT` | no | `local` (default), `development` or `production` — picks storage folder and server |
-| `LOCAL_`/`DEV_`/`PROD_OPENMETADATA_HOST_PORT` | yes, for the server you use | must end in `/api` |
-| `LOCAL_`/`DEV_`/`PROD_OPENMETADATA_JWT_TOKEN` | yes, for the server you use | Settings → Bots → ingestion-bot in the OpenMetadata UI. An admin session token expires in ~1hr — refresh it if a run fails with 401 (see the comment in `.env` for the exact `curl`) |
-| `DEPARTMENT` | yes | must already be registered (see Quickstart) |
-| `DATASET` | yes | auto-creates on first use |
-| `TABLE_NAME` | yes | |
-| `SOURCE_FILE` | yes | |
-| `SOURCE_FORMAT` | yes | `postgres_ddl` or `csv` |
-| `WASABI_BUCKET` | for development/production | the Wasabi bucket; `local` ignores it |
-| `CATEGORY`/`API_AVAILABLE`/`OWNER`/`FREQUENCY`/`TIMELINE`/`DATASET_DESCRIPTION` | no | dataset-level fields (see [Concepts](#concepts)) — type a real value only once you have it; blank/omitted carries forward whatever was last set, so these rarely need touching after the first time |
-
-To run a different table, just edit `.env` and run the same command again.
+A department sends a file in a new layout? Write a parser in `parsers/` that returns the same column fields (`name`, `data_type`, `length`, `scale`, `nullable`, `default`), add a test with a real example file, and add it to `_PARSERS` in `pipeline.py`.

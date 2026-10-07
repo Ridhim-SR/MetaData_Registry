@@ -85,7 +85,3 @@ def parse_field_dictionary_text(text: str, label: str = "<text>") -> dict[str, d
     logger.info(f"field_dictionary_parser: parsed {len(tables)} table(s) from {label}")
     return tables
 
-
-def parse_field_dictionary(path: str) -> dict[str, dict]:
-    with open(path, newline="", encoding="utf-8-sig") as f:
-        return parse_field_dictionary_text(f.read(), label=path)

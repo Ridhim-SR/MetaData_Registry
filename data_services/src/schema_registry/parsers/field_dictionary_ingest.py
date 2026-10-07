@@ -94,32 +94,3 @@ def run_field_dictionary(
 
     return results
 
-
-if __name__ == "__main__":
-    import os
-
-    from src.utils.config import load_env
-
-    from src.schema_registry.openmetadata.publish import get_client
-    from src.storage import storage_from_env
-
-    load_env()
-    _storage = storage_from_env()
-
-    _client = None
-    if os.environ.get("OPENMETADATA_JWT_TOKEN"):
-        _client = get_client(
-            host_port=os.environ.get("OPENMETADATA_HOST_PORT", "http://localhost:8585/api"),
-            jwt_token=os.environ["OPENMETADATA_JWT_TOKEN"],
-        )
-
-    _results = run_field_dictionary(
-        department=os.environ["DEPARTMENT"],
-        dataset=os.environ["DATASET"],
-        source_file=os.environ["SOURCE_FILE"],
-        storage=_storage,
-        schema_name=os.environ.get("SCHEMA_NAME", "public"),
-        openmetadata_client=_client,
-    )
-    for _table_name, _result in _results.items():
-        print(f"{_table_name}: {_result['column_count']} column(s), {_result['warning_count']} warning(s)")

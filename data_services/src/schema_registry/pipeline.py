@@ -243,7 +243,6 @@ def run(
         business_metadata = _merge_business_metadata(business_metadata, submitted_metadata)
 
         curated_columns = curate_schema(raw_columns, business_metadata)
-        warning_count = sum(1 for c in curated_columns if c["validation_warning"])
 
         # The exact files this run parsed, byte for byte, beside the raw
         # schema they produced -- evidence for every snapshot, and what lets
@@ -266,7 +265,7 @@ def run(
         storage.write_csv(curated_path, curated_columns)
         logger.info(
             f"Stored curated schema -> {curated_path} "
-            f"({len(curated_columns)} column(s), {warning_count} warning(s))"
+            f"({len(curated_columns)} column(s))"
         )
 
     lookups.upsert_dataset(
@@ -281,7 +280,6 @@ def run(
         "curated_path": curated_path,
         "columns": curated_columns,
         "column_count": len(curated_columns),
-        "warning_count": warning_count,
         "unmatched_metadata_names": unmatched_metadata_names,
         "source_archive_path": source_archive,
         "source_sha256": source_sha256,

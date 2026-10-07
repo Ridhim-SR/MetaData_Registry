@@ -36,3 +36,11 @@ def dataset_source_path(department_id: str, dataset_slug: str, timestamp: str, f
     a multi-table Field Dictionary), kept once at dataset level."""
 
     return f"department/{department_id}/{dataset_slug}/_source/{timestamp}__{filename}"
+
+
+def raw_source_prefix(department_id: str, dataset_slug: str, table_slug: str) -> str:
+    return f"{table_prefix(department_id, dataset_slug, table_slug)}/raw/source/"
+
+
+def dataset_source_prefix(department_id: str, dataset_slug: str) -> str:
+    return f"department/{department_id}/{dataset_slug}/_source/"

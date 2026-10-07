@@ -1,11 +1,8 @@
-import os
 import re
 from collections.abc import Callable
 
-from src.utils.config import load_env
 
 from src.schema_registry.registry import paths
-from src.storage import storage_from_env
 from src.storage.base import ObjectStorage
 from src.utils.logger import get_logger
 
@@ -145,6 +142,25 @@ def upsert_dataset(
     logger.info(f"Dataset {'updated' if existing else 'created'}: {dataset_id}")
 
 
+DATASET_FIELDS = ("category", "api_available", "owner", "frequency", "timeline", "dataset_description")
+
+
+def set_dataset_fields(storage: ObjectStorage, dataset_id: str, department_id: str, dataset_name: str, fields: dict) -> bool:
+    """Set a dataset's fields to exactly `fields` -- a blank value clears
+    it. Unlike upsert_dataset() (which keeps old values for blanks), this
+    is for sync: catalog.yaml is reviewed in git and is the truth, so a
+    field removed there must be removed here too. Returns True if anything
+    changed."""
+
+    new_row = {"dataset_id": dataset_id, "department_id": department_id, "dataset_name": dataset_name}
+    new_row.update({field: (fields.get(field) or "") for field in DATASET_FIELDS})
+    existing = _upsert(storage, DATASETS_PATH, "dataset_id", dataset_id, lambda _: new_row)
+    changed = existing is None or any((existing.get(k) or "") != v for k, v in new_row.items())
+    if changed:
+        logger.info(f"Dataset fields set from catalog: {dataset_id}")
+    return changed
+
+
 def latest_curated_snapshot_path(
     storage: ObjectStorage, department_id: str, dataset_slug: str, table_slug: str
 ) -> str:
@@ -170,11 +186,3 @@ def upsert_table(storage: ObjectStorage, table_id: str, dataset_id: str, table_n
     )
     logger.info(f"Table {'re-registered' if existing else 'registered'}: {table_id}")
 
-
-if __name__ == "__main__":
-    load_env()
-    register_department(
-        storage_from_env(),
-        slugify(os.environ["DEPARTMENT_ID"]),
-        os.environ["DEPARTMENT_NAME"],
-    )

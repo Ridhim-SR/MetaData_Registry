@@ -66,7 +66,6 @@ def test_run_with_postgres_ddl_format(tmp_path):
     )
 
     assert result["column_count"] == 2
-    assert result["warning_count"] == 0
     assert storage.exists(result["raw_path"])
     assert storage.exists(result["curated_path"])
 
