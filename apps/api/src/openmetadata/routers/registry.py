@@ -14,6 +14,7 @@ local department_profile table, never from formatted service IDs.
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import PlainTextResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -320,7 +321,8 @@ async def registry_table(
 ) -> dict:
     """Single table. Public → anyone; confidential → 404 (non-admin).
 
-    Historical codes otherwise unchanged: 401 anon / 403 denied.
+    Viewers without full access receive 200 with a locked table summary
+    (name, description, column count, columns: []); there is no 403.
     Used by the frontend only to resolve legacy table links to datasets.
     """
     ctx = user_context(user)
@@ -344,21 +346,99 @@ async def registry_table(
     owner = vmap.get(fqn, {}).get("department") or service
     annotated = {**table, "access_level": visibility, "department": owner}
     full, _ = vis.visible_tables([table], vmap, ctx)
+    if full:
+        info = (await table_info_map(session, [fqn])).get(fqn)
+        info = info or {
+            "api_available": None, "dataset_owner": None, "frequency": None, "timeline": None,
+        }
+        annotated["info"] = info
+        owners = table.get("owners") or []
+        first_owner = owners[0] if owners else {}
+        annotated["facts"] = {
+            "owner": first_owner.get("displayName") or first_owner.get("name"),
+            "steward": None,
+            "department_contact": None,
+            "updated_at": table.get("updatedAt"),
+            "frequency": info.get("frequency"),
+            "source": None,
+        }
+        return annotated
+    columns = table.get("columns") or []
+    return {
+        "id": table.get("id"),
+        "name": table.get("name"),
+        "fullyQualifiedName": fqn,
+        "description": table.get("description"),
+        "column_count": len(columns),
+        "columns": [],
+        "locked": True,
+        "access_level": visibility,
+        "department": owner,
+    }
+
+
+def _csv_cell(value: object) -> str:
+    text = "" if value is None else str(value)
+    if any(ch in text for ch in (',', '"', "\n", "\r")):
+        return '"' + text.replace('"', '""') + '"'
+    return text
+
+
+@router.get("/tables/{table_id}/dictionary")
+async def table_dictionary(
+    table_id: str,
+    session: AsyncSession = Depends(db_get_session),
+    user: User | None = Depends(get_optional_user),
+):
+    """Downloadable data dictionary (CSV) for one table — full access only.
+
+    Viewers without full access are refused (403 locked, 404 hidden or
+    confidential); the frontend hides the button unless the table is open.
+    """
+    ctx = user_context(user)
+    async with OpenMetadataClient() as client:
+        try:
+            table = await client.get_table(table_id)
+        except Exception as exc:
+            message = str(exc).lower()
+            if "404" in message or "not found" in message:
+                raise HTTPException(status_code=404, detail="Table not found")
+            raise
+    fqn = table.get("fullyQualifiedName") or ""
+    rows = (await session.execute(
+        select(DatasetVisibility).where(DatasetVisibility.fqn == fqn)
+    )).scalars().all()
+    vmap = {r.fqn: {"visibility": r.visibility.value, "department": r.department} for r in rows}
+    visibility = vis.normalize_visibility(vmap.get(fqn, {}).get("visibility"))
+    if visibility == vis.CONFIDENTIAL and not (ctx and ctx.get("role") == "admin"):
+        raise HTTPException(status_code=404, detail="Table not found")
+    service, _, _, _ = vis.split_fqn(fqn)
+    owner = vmap.get(fqn, {}).get("department") or service
+    full, _ = vis.visible_tables([table], vmap, ctx)
     if not full:
-        if user is None:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="This metadata requires sign-in.",
-            )
+        # The table exists (fetched above) but the viewer may not open it.
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You do not have permission to view this metadata.",
+            detail="Sign in with an authorized account to download this dictionary.",
         )
-    info = (await table_info_map(session, [fqn])).get(fqn)
-    annotated["info"] = info or {
-        "api_available": None, "dataset_owner": None, "frequency": None, "timeline": None,
-    }
-    return annotated
+    lines = ["column_name,data_type,description,tags"]
+    for col in table.get("columns") or []:
+        tags = ";".join(
+            t.get("tagFQN") or t.get("name") or ""
+            for t in col.get("tags") or []
+        )
+        lines.append(",".join([
+            _csv_cell(col.get("name")),
+            _csv_cell(col.get("dataTypeDisplay") or col.get("dataType")),
+            _csv_cell(col.get("description")),
+            _csv_cell(tags),
+        ]))
+    filename = f"{(table.get('name') or 'table')}_data_dictionary.csv"
+    return PlainTextResponse(
+        "\n".join(lines) + "\n",
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 # ---- search ----
@@ -461,12 +541,19 @@ async def registry_search(
         service = key.split(".")[0]
         if not card.get("locked"):
             kept_datasets[key] = card
-            kept_tables.append(t)
+            # Per-table gate: table/column names are only exposed for tables
+            # the viewer may open in full (never for non-public data).
+            meta = vmap.get(fqn, {})
+            owner = meta.get("department") or service
+            if vis.table_decision(vis.normalize_visibility(meta.get("visibility")), owner, ctx) == "full":
+                kept_tables.append(t)
             continue
         if user is not None:
             # Logged-in historical behavior: non-public OM hits still surface
-            # the dataset teaser (table teasers unchanged elsewhere).
+            # the dataset teaser (table teasers unchanged elsewhere). Tables
+            # of locked datasets enter the strict name/description gate below.
             kept_datasets[key] = card
+            kept_tables.append(t)
             continue
         # Guest + non-public: keep only on a non-column match.
         allowed = _dataset_allowed_text(card, tables_by_dataset, dept_text_by_service.get(service, ""))
@@ -485,12 +572,19 @@ async def registry_search(
         fqn = t.get("fullyQualifiedName") or ""
         key = vis.dataset_fqn(fqn)
         card = cards_by_dataset.get(key)
-        if card is None or card.get("locked"):
+        if card is None:
             continue
-        table_text = " ".join(
-            [t.get("name") or "", t.get("displayName") or "", t.get("description") or ""]
+        locked = bool(card.get("locked"))
+        name_hit = bool(needle) and needle in " ".join(
+            [t.get("name") or "", t.get("displayName") or ""]
         ).lower()
-        if needle and needle in table_text:
+        desc_hit = bool(needle) and needle in (t.get("description") or "").lower()
+        if locked:
+            # Viewers without full access: only name/description matches are
+            # shown; column-only matches stay hidden, as do column names.
+            if not (name_hit or desc_hit):
+                continue
+            matched_in = (["name"] if name_hit else []) + (["description"] if desc_hit else [])
             table_items.append(
                 {
                     "id": t.get("id"),
@@ -499,18 +593,53 @@ async def registry_search(
                     "description": t.get("description"),
                     "department": card.get("department"),
                     "dataset": key,
+                    "matched_in": matched_in,
+                    "matched_columns": [],
+                    "tags": [],
+                    "updated_at": None,
                 }
             )
-        for col in t.get("columns") or []:
-            if needle and needle in (col.get("name") or "").lower():
-                column_items.append(
-                    {
-                        "name": col.get("name"),
-                        "dataType": col.get("dataTypeDisplay") or col.get("dataType"),
-                        "table": t.get("name"),
-                        "dataset": key,
-                    }
-                )
+            continue
+        col_hits = [
+            col.get("name")
+            for col in t.get("columns") or []
+            if needle and needle in (col.get("name") or "").lower()
+        ]
+        matched_in = (
+            (["name"] if name_hit else [])
+            + (["description"] if desc_hit else [])
+            + (["column"] if col_hits else [])
+        )
+        table_items.append(
+            {
+                "id": t.get("id"),
+                "name": t.get("name"),
+                "fullyQualifiedName": fqn,
+                "description": t.get("description"),
+                "department": card.get("department"),
+                "dataset": key,
+                "matched_in": matched_in,
+                "matched_columns": col_hits,
+                "tags": [
+                    tag.get("tagFQN") or tag.get("name")
+                    for tag in t.get("tags") or []
+                    if tag.get("tagFQN") or tag.get("name")
+                ],
+                "updated_at": t.get("updatedAt"),
+            }
+        )
+        for col_name in col_hits:
+            col = next(
+                (c for c in t.get("columns") or [] if c.get("name") == col_name), {}
+            )
+            column_items.append(
+                {
+                    "name": col_name,
+                    "dataType": col.get("dataTypeDisplay") or col.get("dataType"),
+                    "table": t.get("name"),
+                    "dataset": key,
+                }
+            )
 
     dept_items = [p for p in profiles if needle in _profile_text(p)] if needle else []
     if department:

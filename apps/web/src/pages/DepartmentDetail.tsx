@@ -40,6 +40,12 @@ export function DepartmentDetailPage() {
   const cards = trimmed
     ? (searchQuery.data?.datasets.items ?? [])
     : (deptQuery.data?.datasets ?? []);
+  // Loaders on every fetch so stale content never flashes as current.
+  // NOTE: the within-department search is disabled until a term is typed;
+  // a disabled query is perpetually "pending", so only treat it as loading
+  // while an actual search term is active.
+  const deptLoading = deptQuery.isPending || deptQuery.isFetching;
+  const deptSearching = trimmed.length > 0 && (searchQuery.isPending || searchQuery.isFetching);
 
   return (
     <div className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
@@ -51,11 +57,11 @@ export function DepartmentDetailPage() {
         <span style={{ color: "var(--text)" }}>{humanizeRaw(profile?.display_name ?? slug)}</span>
       </nav>
 
-      {deptQuery.isPending && <LoadingBlock lines={4} />}
-      {deptQuery.error && (
+      {deptLoading && <LoadingBlock lines={4} />}
+      {!deptLoading && deptQuery.error && (
         <ErrorBlock message="Unable to load this department. Please try again." onRetry={() => deptQuery.refetch()} />
       )}
-      {deptQuery.data && profile && (
+      {!deptLoading && deptQuery.data && profile && (
         <div>
           <h1 className="font-bold" style={{ color: "var(--navy-900)", fontSize: "1.75rem" }}>
             {profile.display_name ? humanizeRaw(profile.display_name) : humanizeRaw(slug)}
@@ -65,7 +71,7 @@ export function DepartmentDetailPage() {
               {profile.description}
             </p>
           ) : (
-            <p className="not-provided mt-1 text-sm">Not provided</p>
+            <p className="not-provided mt-1 text-sm">No description</p>
           )}
           <p className="mt-2 text-sm" style={{ color: "var(--text)", fontSize: "0.9375rem" }} role="status">
             {profile.dataset_count} {profile.dataset_count === 1 ? "dataset" : "datasets"}
@@ -110,11 +116,11 @@ export function DepartmentDetailPage() {
           </form>
 
           <div className="mt-6">
-            {searchQuery.isPending && <LoadingBlock lines={3} />}
-            {searchQuery.error && (
+            {deptSearching && <LoadingBlock lines={3} />}
+            {!deptSearching && searchQuery.error && (
               <ErrorBlock message="Search is unavailable. Please try again." onRetry={() => searchQuery.refetch()} />
             )}
-            {!searchQuery.isPending && !searchQuery.error && cards.length === 0 && (
+            {!deptSearching && !searchQuery.error && cards.length === 0 && (
               <EmptyBlock
                 title={trimmed ? `No results for "${trimmed}" in ${profile.display_name}.` : "No datasets published yet."}
                 body={
@@ -131,7 +137,7 @@ export function DepartmentDetailPage() {
                 }
               />
             )}
-            {cards.length > 0 && (
+            {!deptSearching && cards.length > 0 && (
               <div>
                 {trimmed && (
                   <p className="mb-3 text-sm" style={{ color: "var(--text-muted)" }} role="status">

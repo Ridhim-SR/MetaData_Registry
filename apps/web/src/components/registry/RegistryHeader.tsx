@@ -64,7 +64,7 @@ export function RegistryHeader() {
   const userMenuRef = useRef<HTMLDivElement>(null);
   const { idx, set } = useTextSize();
   const { lang, toggle } = useLanguage();
-  const isAdmin = user?.role === "admin";
+  // isAdmin NavLink hidden for now (see nav below); restore with the links.
 
   useEffect(() => {
     if (!userMenuOpen) return;
@@ -262,6 +262,8 @@ export function RegistryHeader() {
             <NavLink to="/departments" style={navLinkStyle}>
               Departments
             </NavLink>
+            {/* Hidden for now: My Requests (/dashboard) and Admin (/users).
+                Re-enable by restoring the authenticated NavLinks below.
             {isAuthenticated && (
               <NavLink to="/dashboard" style={navLinkStyle}>
                 My Requests
@@ -271,7 +273,7 @@ export function RegistryHeader() {
               <NavLink to="/users" style={navLinkStyle}>
                 Admin
               </NavLink>
-            )}
+            )} */}
           </nav>
 
           <div className="ml-auto flex items-center gap-2 py-1.5">
@@ -366,8 +368,7 @@ export function RegistryHeader() {
               { to: "/", label: "Home" },
               { to: "/explore", label: "Catalog" },
               { to: "/departments", label: "Departments" },
-              ...(isAuthenticated ? [{ to: "/dashboard", label: "My Requests" }] : []),
-              ...(isAuthenticated && isAdmin ? [{ to: "/users", label: "Admin" }] : []),
+              // Hidden for now: My Requests (/dashboard) and Admin (/users).
             ].map((l) => (
               <NavLink
                 key={l.label + l.to}

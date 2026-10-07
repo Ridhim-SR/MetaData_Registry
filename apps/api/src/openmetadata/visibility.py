@@ -70,9 +70,9 @@ def table_decision(visibility: str, owner_department: str | None, user: dict | N
       department/restricted (or unclassified, which defaults to department)
         -> teaser (counted, never named).
       confidential -> hidden (never listed, searched, counted, or detailed).
-    Logged-in: unchanged historical behavior, except confidential which is
-    hidden from non-admins (there are no pre-existing confidential rows, so
-    no existing behavior is altered) and fully visible to admins.
+    Logged-in non-admin without access: department and restricted both
+      teaser (table names, no columns); only confidential is hidden.
+    Admins: full everywhere.
     """
     visibility = normalize_visibility(visibility)
     if visibility == CONFIDENTIAL:
@@ -86,7 +86,9 @@ def table_decision(visibility: str, owner_department: str | None, user: dict | N
     if visibility == DEPARTMENT:
         user_services = department_candidates(user.get("department"))
         owner_services = department_candidates(owner_department)
-        return "full" if (user_services & owner_services) else "hidden"
+        if user_services & owner_services:
+            return "full"
+        return "teaser"  # no access: teaser (names, no columns), not hidden
     return "teaser"  # restricted: teaser only, never full for non-admins
 
 
@@ -113,9 +115,9 @@ def visible_tables(
 
     visibility_by_fqn maps table FQN -> {"visibility": str, "department": str|None}.
     Missing entries default to department visibility owned by the FQN service.
-    Restricted tables the caller may not open are returned as teasers with
-    columns stripped. Anonymous callers only receive public tables.
-    Confidential tables are hidden from everyone except admins.
+    Tables the caller may not open are returned as teasers carrying table
+    names but no columns (never for guests). Anonymous callers only receive
+    public tables. Confidential tables are hidden from everyone except admins.
     """
     full: list[dict] = []
     teasers: list[dict] = []
@@ -128,12 +130,12 @@ def visible_tables(
         decision = table_decision(visibility, owner, user)
         if decision == "full":
             full.append({**table, "access_level": visibility, "department": owner})
-        elif decision == "teaser" and user is not None and visibility == RESTRICTED:
+        elif decision == "teaser" and user is not None:
             teaser = {k: table.get(k) for k in ("id", "name", "fullyQualifiedName", "description")}
             teaser["columns"] = []
-            teaser["access_level"] = RESTRICTED
+            teaser["access_level"] = visibility
             teaser["department"] = owner
-            teaser["restricted"] = True
+            teaser["restricted"] = visibility == RESTRICTED
             teasers.append(teaser)
     return full, teasers
 
@@ -248,6 +250,13 @@ def visible_catalog(
                 }
                 for t in entry["full"]
             ]
+            tag_set: list[str] = []
+            for t in entry["full"]:
+                for tag in t.get("tags") or []:
+                    label = tag.get("tagFQN") or tag.get("name")
+                    if label and label not in tag_set:
+                        tag_set.append(label)
+            updated = [t.get("updatedAt") for t in entry["full"] if t.get("updatedAt")]
             cards.append(
                 {
                     "dataset": key,
@@ -260,6 +269,8 @@ def visible_catalog(
                     "access_level": entry["level"],
                     "locked": False,
                     "tables": slim,
+                    "tags": tag_set,
+                    "updated_at": max(updated) if updated else None,
                 }
             )
         else:
@@ -274,6 +285,8 @@ def visible_catalog(
                     "table_count": table_count,
                     "access_level": entry["level"],
                     "locked": True,
+                    "tags": [],
+                    "updated_at": None,
                 }
             )
     return cards

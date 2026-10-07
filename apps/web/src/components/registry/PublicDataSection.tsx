@@ -22,7 +22,11 @@ export function PublicDataSection() {
   const items = pub.data && pub.data.items.length > 0 ? pub.data.items.slice(0, 6) : [];
   const fallbackItems = fallback.data ? fallback.data.items.slice(0, 6) : [];
   const shown = items.length > 0 ? items : fallbackItems;
-  const isPending = pub.isPending || (showFallback && fallback.isPending);
+  // Loader on every fetch so stale cards never flash as current.
+  const isPending =
+    pub.isPending ||
+    pub.isFetching ||
+    (showFallback && (fallback.isPending || fallback.isFetching));
   const error = pub.error ?? (showFallback ? fallback.error : null);
 
   return (
@@ -57,7 +61,7 @@ export function PublicDataSection() {
           </div>
         )}
 
-        {error && (
+        {!isPending && error && (
           <div className="mt-4">
             <ErrorBlock
               message="Dataset information is temporarily unavailable."

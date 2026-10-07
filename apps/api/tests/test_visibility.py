@@ -69,12 +69,16 @@ def test_department_user_sees_own_plus_public_plus_teasers():
     assert teasers[0]["columns"] == []
 
 
-def test_cross_department_table_hidden():
+def test_cross_department_table_teaser():
     tables = [_table("ag.db.s2.sales")]
     vmap = {"ag.db.s2.sales": {"visibility": "department", "department": "agriculture"}}
     user = {"role": "user", "department": "pwd"}
     full, teasers = visible_tables(tables, vmap, user)
-    assert full == [] and teasers == []
+    assert full == []
+    assert len(teasers) == 1
+    assert teasers[0]["name"] == "t"  # table names are shown...
+    assert teasers[0]["columns"] == []  # ...but no columns
+    assert teasers[0]["access_level"] == "department"
 
 
 def test_admin_sees_everything_full():
@@ -89,9 +93,11 @@ def test_admin_sees_everything_full():
 
 def test_missing_sidecar_row_defaults_to_department():
     tables = [_table("ag.db.s9.new_table")]
-    full, _ = visible_tables(tables, {}, {"role": "user", "department": "agriculture"})
+    full, teasers = visible_tables(tables, {}, {"role": "user", "department": "agriculture"})
     # owner falls back to the FQN service; candidate matching is department-based
     assert full == []  # 'ag' service does not match 'agriculture' candidates
+    assert len(teasers) == 1  # unclassified behaves as department: teaser, not hidden
+    assert teasers[0]["access_level"] == "department"
     assert can_view_full("department", "agriculture", {"role": "user", "department": "agriculture"})
 
 
@@ -116,6 +122,16 @@ def test_guest_decisions_by_level():
     # Unclassified (no row) behaves as department.
     assert table_decision("", "pwd", None) == "teaser"
     assert table_decision(None, "pwd", None) == "teaser"
+
+
+def test_logged_in_cross_department_decisions_by_level():
+    user = {"role": "user", "department": "other"}
+    assert table_decision("public", "pwd", user) == "full"
+    assert table_decision("department", "pwd", user) == "teaser"
+    assert table_decision("restricted", "pwd", user) == "teaser"
+    assert table_decision("confidential", "pwd", user) == "hidden"
+    assert table_decision("", "pwd", user) == "teaser"
+    assert table_decision(None, "pwd", user) == "teaser"
 
 
 def test_confidential_logged_in_non_admin_hidden_admin_full():
@@ -145,7 +161,9 @@ def test_visible_catalog_guest_teaser_fields_only():
     assert set(card) == {
         "dataset", "service", "database", "name", "description",
         "department", "table_count", "access_level", "locked",
+        "tags", "updated_at",
     }
+    assert card["tags"] == [] and card["updated_at"] is None
 
 
 def test_visible_catalog_guest_public_full_confidential_absent():

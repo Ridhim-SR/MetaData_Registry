@@ -15,6 +15,8 @@ export function DepartmentGrid({ compact = false }: { compact?: boolean }) {
   const sortedTop = query.data
     ? [...query.data.items].sort((a, b) => b.dataset_count - a.dataset_count)
     : [];
+  // Show the loader on every fetch so stale tiles never flash as current.
+  const loading = query.isPending || query.isFetching;
   const total = query.data?.total ?? 0;
   const shown = compact ? sortedTop.slice(0, 8) : sortedTop;
 
@@ -43,7 +45,7 @@ export function DepartmentGrid({ compact = false }: { compact?: boolean }) {
         )}
       </div>
 
-      {query.isPending && (
+      {loading && (
         <div
           className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4"
           role="status"
@@ -54,12 +56,12 @@ export function DepartmentGrid({ compact = false }: { compact?: boolean }) {
           ))}
         </div>
       )}
-      {query.error && (
+      {!loading && query.error && (
         <div className="mt-4">
           <ErrorBlock message="Unable to load departments. Please try again." onRetry={() => query.refetch()} />
         </div>
       )}
-      {query.data && query.data.items.length === 0 && (
+      {!loading && query.data && query.data.items.length === 0 && (
         <div className="mt-4">
           <EmptyBlock
             title="No departments published yet."
@@ -67,7 +69,7 @@ export function DepartmentGrid({ compact = false }: { compact?: boolean }) {
           />
         </div>
       )}
-      {query.data && shown.length > 0 && (
+      {!loading && query.data && shown.length > 0 && (
         <ul className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {shown.map((d, i) => (
             <li key={d.slug}>

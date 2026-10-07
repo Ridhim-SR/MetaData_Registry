@@ -1,5 +1,6 @@
 import { Link, Outlet } from "react-router-dom";
 import { RegistryHeader } from "./registry/RegistryHeader";
+import { TopLoadingBar } from "./registry/TopLoadingBar";
 
 export function RegistryLayout() {
   const year = new Date().getFullYear();
@@ -15,6 +16,7 @@ export function RegistryLayout() {
       style={{ background: "var(--bg)", color: "var(--text)" }}
     >
       <RegistryHeader />
+      <TopLoadingBar />
       <main id="main-content" className="flex-1" tabIndex={-1}>
         <Outlet />
       </main>
