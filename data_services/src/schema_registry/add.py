@@ -150,7 +150,7 @@ def add(
     if lookups.slugify(department) != department:
         raise ValueError(f"--department must be lowercase letters, digits and _ (try '{lookups.slugify(department)}')")
     if not Path(file).is_file():
-        raise FileNotFoundError(f"No such file: {file}")
+        raise FileNotFoundError(f"No such file: {file} -- check the path and file name (run the command from data_services/)")
 
     source_key = input_key(department, dataset, Path(file).name)
     metadata_key = input_key(department, dataset, Path(metadata_file).name) if metadata_file else None
@@ -208,4 +208,6 @@ def _main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(_main(sys.argv[1:]))
+    from src.utils.cli import run_cli
+
+    sys.exit(run_cli("add", _main, sys.argv[1:]))

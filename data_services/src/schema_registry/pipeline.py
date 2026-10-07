@@ -312,7 +312,9 @@ def run(
     return result
 
 
-if __name__ == "__main__":
+def _main(argv: list[str]) -> int:
+    """Command line entry point (settings come from .env / the shell)."""
+
     load_env()
     _storage = storage_from_env()
 
@@ -353,3 +355,12 @@ if __name__ == "__main__":
         allow_category_below_columns=os.environ.get("ALLOW_CATEGORY_BELOW_COLUMNS", "").strip().lower()
         in _TRUE_VALUES,
     )
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+
+    from src.utils.cli import run_cli
+
+    sys.exit(run_cli("pipeline", _main, sys.argv[1:]))

@@ -252,4 +252,6 @@ def _main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(_main(sys.argv[1:]))
+    from src.utils.cli import run_cli
+
+    sys.exit(run_cli("sync", _main, sys.argv[1:]))

@@ -48,7 +48,16 @@ ENVIRONMENT=local        # local | development | production
 | `development` | Wasabi, folder `dev/` | `DEV_OPENMETADATA_...` (BIPP2, 10.0.96.105) |
 | `production` | Wasabi, folder `prod/` | `PROD_OPENMETADATA_...` (not set up yet) |
 
-- Use `local` to try things out. It can't change shared data.
+**Which environment each git branch may use.** This is enforced: the command stops if you break the rule.
+
+| Git branch you're on | Allowed | Blocked |
+|---|---|---|
+| `main` | `development`, `production` | `local` |
+| any other branch | `local`, `development` | `production` |
+
+So production data only ever comes from reviewed code on `main`. If git can't tell the branch, production is blocked.
+
+- Use `local` to try things out (on a feature branch). It can't change shared data.
 - `development` and `production` stop with an error if `WASABI_BUCKET` is blank, so shared data never ends up on one laptop by mistake.
 - To switch for one command only, put it in front: `ENVIRONMENT=development python3 -m src.schema_registry.sync`
 - **Token:** in that server's OpenMetadata UI, go to Settings → Bots → ingestion-bot and copy the token into `.env`. Without a token, commands still save to storage but don't publish.
@@ -144,9 +153,49 @@ Both are safe to run as often as you like.
 - **Dataset category lower than its most sensitive column** (e.g. CAT-1 with a CAT-3 phone number column): publishing is refused. Raise the category. Only if those columns are removed before sharing, add `allow_category_below_columns: true` to the dataset.
 - **Column tags** in OpenMetadata are set to exactly what the pipeline decided. Old ones are removed.
 
+## Changing columns or dataset details
+
+### Columns
+
+The department sends an updated file. You run `add` (same names as before), then `sync`.
+
+| Change in the file | What happens | Anything extra? |
+|---|---|---|
+| **New column** | Added in Wasabi and OpenMetadata, with automatic tags/classification | No |
+| **Type, length or nullable changed** | Updated in place in OpenMetadata | No (not checked, so look at the dry run) |
+| **Column removed** | `sync` **stops** for that table: `missing N column(s)`. Protects against partial files | Add `allow_column_removal: true` to the table in `catalog.yaml` for **one** sync, then remove it. The column then disappears from OpenMetadata |
+| **Column renamed** | Counts as one removed plus one added | Same as removed. Its description and tags **don't** carry over to the new name |
+
+Column **descriptions, tags, classification, glossary terms** come from a metadata file: `add … --metadata <file>`, then `sync`.
+- A new value replaces the old one. The old sensitivity tag is removed in OpenMetadata.
+- A blank cell **keeps** the old value; it never erases one.
+- Edits made in the OpenMetadata UI are overwritten on the next `sync`.
+
+Old versions are never lost: Wasabi keeps every snapshot, and OpenMetadata keeps its own version history.
+
+### Dataset details (category, owner, frequency, timeline, api_available, description)
+
+1. Edit them under the dataset in `catalog.yaml`.
+2. Open a PR and get it merged.
+3. Run `sync`. No new file or `add` is needed.
+
+- The new values go to the dataset (the "database") in OpenMetadata: category as a tag, the rest as its description and properties.
+- **Deleting a value in `catalog.yaml` clears it** in OpenMetadata. The catalog is the truth.
+- **`category` must be at least as high as the most sensitive column.** Otherwise publishing is refused (e.g. CAT-1 while a column is CAT-3).
+
 ## When something fails
 
-The error always names the exact problem. Fix the cause; don't bypass the check.
+Every command ends with either `Finished (ok)` or a short box like this. Never a wall of Python errors:
+```
+------------------------------------------------------------------------------
+ERROR: Can't reach the OpenMetadata server (http://10.0.96.105:8585/api).
+What to do: ... For BIPP2 (development) you need the office network or VPN ...
+Log file: logs/sync_20261007_164556.log
+------------------------------------------------------------------------------
+```
+- **Every run writes a log file** in `data_services/logs/` (not in git), named after the command and time.
+- The log has everything that run printed, plus the full technical details if it failed. **To get help, send that file.**
+- The box always says what went wrong and what to do. Fix the cause; don't bypass the check.
 
 | Error says | What to do |
 |---|---|
@@ -160,6 +209,8 @@ The error always names the exact problem. Fix the cause; don't bypass the check.
 | `dataset category is CAT-x but column(s) ... are CAT-y` | Set `category:` to at least CAT-y in `catalog.yaml` |
 | `name(s) matching no column` (warning) | Typo in the metadata file. Those rows were ignored |
 | `Unrecognized Format value` (field dictionary) | Add one rule to `FORMAT_TYPE_RULES` in `field_dictionary_parser.py` |
+| `ENVIRONMENT=production isn't allowed on branch '...'` | Production only runs on `main`: merge your PR, `git checkout main && git pull`, then run it |
+| `ENVIRONMENT=local isn't allowed on branch 'main'` | On `main` use `development` or `production`; do local trials on a feature branch |
 | `Couldn't lock ... held by` | Someone else is running sync. Wait, or if their run died, it frees itself after 15 minutes |
 | `401` from OpenMetadata | Token expired: get a new one into `.env` |
 | Wasabi `AccessDenied` / `InvalidAccessKeyId` | Check the Wasabi keys in `.env` |

@@ -24,6 +24,7 @@ def env_file(tmp_path, monkeypatch):
         "WASABI_BUCKET=pwd-schema-registry\nDEPARTMENT=pwd\n"
     )
     monkeypatch.setattr(config, "_ENV_FILE", path)
+    monkeypatch.setattr(config, "_current_branch", lambda: "feature/some-work")  # tests pick their branch
     for key in _KEYS:
         monkeypatch.delenv(key, raising=False)
     yield path
@@ -40,6 +41,7 @@ def test_development_uses_dev_server_and_dev_folder_in_wasabi(env_file):
 
 
 def test_production_uses_prod_server_and_prod_folder(env_file, monkeypatch):
+    monkeypatch.setattr(config, "_current_branch", lambda: "main")
     monkeypatch.setenv("ENVIRONMENT", "production")
     assert config.load_env() == "production"
     assert os.environ["OPENMETADATA_HOST_PORT"] == "http://prod:8585/api"
@@ -95,3 +97,43 @@ def test_unknown_environment_is_rejected(env_file, monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "staging")
     with pytest.raises(ValueError, match="must be one of: local, development, production"):
         config.load_env()
+
+
+@pytest.mark.parametrize(
+    "branch, env, allowed",
+    [
+        ("main", "production", True),
+        ("main", "development", True),   # BIPP2 dev server runs main
+        ("main", "local", False),
+        ("fix/SDA-DS-001", "local", True),
+        ("fix/SDA-DS-001", "development", True),
+        ("fix/SDA-DS-001", "production", False),
+        (None, "production", False),     # unknown branch = not main
+        (None, "development", True),
+    ],
+)
+def test_branch_rule(branch, env, allowed):
+    if allowed:
+        config.check_branch_allows(env, branch)
+    else:
+        with pytest.raises(PermissionError, match=f"ENVIRONMENT={env} isn't allowed"):
+            config.check_branch_allows(env, branch)
+
+
+def test_production_blocked_off_main_before_anything_else_happens(env_file, monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    with pytest.raises(PermissionError, match="production can only be used on 'main'"):
+        config.load_env()
+    assert "WASABI_PREFIX" not in os.environ  # refused before any setting was applied
+
+
+def test_local_blocked_on_main_with_a_hint(env_file, monkeypatch):
+    monkeypatch.setattr(config, "_current_branch", lambda: "main")
+    monkeypatch.setenv("ENVIRONMENT", "local")
+    with pytest.raises(PermissionError, match="use development or production"):
+        config.load_env()
+
+
+def test_real_git_branch_is_detected():
+    branch = config._current_branch()
+    assert branch is None or (branch and branch != "HEAD")

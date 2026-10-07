@@ -65,7 +65,10 @@ def _check_keys(where: str, value, allowed: set[str], required: set[str] = froze
         raise CatalogError(f"{where}: expected a section of keys, got {type(value).__name__}")
     unknown = sorted(set(value) - allowed)
     if unknown:
-        raise CatalogError(f"{where}: unknown key(s) {unknown} -- allowed: {sorted(allowed)}")
+        raise CatalogError(
+            f"{where}: unknown key(s) {unknown} in catalog.yaml -- fix the spelling there. "
+            f"Allowed here: {', '.join(sorted(allowed))}"
+        )
     missing = sorted(required - set(value))
     if missing:
         raise CatalogError(f"{where}: missing required key(s) {missing}")

@@ -147,6 +147,12 @@ _DEFAULT_LENGTH = 256
 
 
 def get_client(host_port: str, jwt_token: str) -> OpenMetadata:
+    # Quick reachability check first: the SDK otherwise retries for ~35 s and
+    # floods the screen with its own warnings before failing.
+    try:
+        requests.get(f"{host_port.rstrip('/')}/v1/system/version", timeout=8)
+    except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
+        raise requests.exceptions.ConnectionError(f"OpenMetadata at {host_port} isn't reachable") from exc
     server_config = OpenMetadataConnection(
         hostPort=host_port,
         authProvider=AuthProvider.openmetadata,
@@ -539,7 +545,9 @@ def publish_table(
     }
 
 
-if __name__ == "__main__":
+def _main(argv: list[str]) -> int:
+    """Command line entry point (settings come from .env / the shell)."""
+
     load_env()
     _storage = storage_from_env()
     _client = get_client(
@@ -553,3 +561,12 @@ if __name__ == "__main__":
         allow_category_below_columns=os.environ.get("ALLOW_CATEGORY_BELOW_COLUMNS", "").strip().lower()
         in {"y", "yes", "true", "1"},
     )
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+
+    from src.utils.cli import run_cli
+
+    sys.exit(run_cli("publish", _main, sys.argv[1:]))

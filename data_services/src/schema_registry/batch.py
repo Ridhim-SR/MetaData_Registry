@@ -73,7 +73,9 @@ def run_batch(manifest_file: str, storage: ObjectStorage, openmetadata_client: O
     return results
 
 
-if __name__ == "__main__":
+def _main(argv: list[str]) -> int:
+    """Command line entry point (settings come from .env / the shell)."""
+
     load_env()
     _client = None
     if os.environ.get("OPENMETADATA_JWT_TOKEN"):
@@ -82,8 +84,17 @@ if __name__ == "__main__":
             jwt_token=os.environ["OPENMETADATA_JWT_TOKEN"],
         )
 
-    run_batch(
+    results = run_batch(
         manifest_file=os.environ["MANIFEST_FILE"],
         storage=storage_from_env(),
         openmetadata_client=_client,
     )
+    return 1 if any(r["status"] == "failed" for r in results) else 0
+
+
+if __name__ == "__main__":
+    import sys
+
+    from src.utils.cli import run_cli
+
+    sys.exit(run_cli("batch", _main, sys.argv[1:]))

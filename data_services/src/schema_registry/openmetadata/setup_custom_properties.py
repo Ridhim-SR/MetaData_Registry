@@ -19,6 +19,8 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+_TIMEOUT = 15  # seconds -- an unreachable server fails fast instead of hanging
+
 _DESCRIPTIONS = {
     "apiAvailable": "Whether this dataset is exposed via an API (Y/N).",
     "datasetOwner": "Who owns/is accountable for this dataset (free text).",
@@ -29,18 +31,15 @@ _DESCRIPTIONS = {
 
 def setup(host_port: str, jwt_token: str) -> None:
     auth = {"Authorization": f"Bearer {jwt_token}"}
-    type_id = requests.get(f"{host_port}/v1/metadata/types/name/database", headers=auth).json()["id"]
-    string_type_id = next(
-        t["id"]
-        for t in requests.get(f"{host_port}/v1/metadata/types?category=field&limit=50", headers=auth).json()["data"]
-        if t["name"] == "string"
-    )
-    existing = {
-        p["name"]
-        for p in requests.get(f"{host_port}/v1/metadata/types/{type_id}?fields=customProperties", headers=auth)
-        .json()
-        .get("customProperties", [])
-    }
+
+    def get(path: str) -> dict:
+        response = requests.get(f"{host_port}{path}", headers=auth, timeout=_TIMEOUT)
+        response.raise_for_status()  # e.g. 401 -> a clear "token not valid" message, not a KeyError
+        return response.json()
+
+    type_id = get("/v1/metadata/types/name/database")["id"]
+    string_type_id = next(t["id"] for t in get("/v1/metadata/types?category=field&limit=50")["data"] if t["name"] == "string")
+    existing = {p["name"] for p in get(f"/v1/metadata/types/{type_id}?fields=customProperties").get("customProperties", [])}
 
     for property_name in _CUSTOM_PROPERTY_NAMES.values():
         if property_name in existing:
@@ -61,6 +60,7 @@ def setup(host_port: str, jwt_token: str) -> None:
             f"{host_port}/v1/metadata/types/{type_id}",
             headers={**auth, "Content-Type": "application/json-patch+json"},
             json=patch,
+            timeout=_TIMEOUT,
         )
         if not resp.ok:
             logger.error(f"Failed to add '{property_name}': {resp.status_code} {resp.text}")
@@ -68,9 +68,20 @@ def setup(host_port: str, jwt_token: str) -> None:
         logger.info(f"Added '{property_name}' to the Database entity type.")
 
 
-if __name__ == "__main__":
+def _main(argv: list[str]) -> int:
+    """Command line entry point (settings come from .env / the shell)."""
+
     load_env()
     setup(
         host_port=os.environ.get("OPENMETADATA_HOST_PORT", "http://localhost:8585/api"),
         jwt_token=os.environ["OPENMETADATA_JWT_TOKEN"],
     )
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+
+    from src.utils.cli import run_cli
+
+    sys.exit(run_cli("setup_custom_properties", _main, sys.argv[1:]))
