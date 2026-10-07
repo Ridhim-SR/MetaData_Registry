@@ -546,3 +546,61 @@ def test_missing_metadata_file_fails_before_anything_is_stored(tmp_path):
 
     assert _snapshot_files(storage) == []
     assert lookups.get_table(storage, "pwd.vishwakarma.t1") is None
+
+
+def test_run_archives_the_exact_source_and_metadata_files(tmp_path):
+    import hashlib
+
+    storage = _storage_with_department(tmp_path)
+    ddl_file = tmp_path / "pwd_raw.txt"
+    ddl_file.write_bytes(b"sno integer NOT NULL, phone character varying(10)")
+    meta = _write_metadata_csv(tmp_path, "meta.csv", "name,business_description\nphone,Contact\n")
+
+    result = run(
+        department="pwd", dataset="vishwakarma", table_name="t1", source_file=str(ddl_file),
+        storage=storage, business_metadata_file=meta,
+    )
+
+    assert result["source_archive_path"].endswith("__pwd_raw.txt")
+    assert "/raw/source/" in result["source_archive_path"]
+    assert storage.read_bytes(result["source_archive_path"]) == ddl_file.read_bytes()
+    expected = hashlib.sha256(ddl_file.read_bytes()).hexdigest()
+    assert result["source_sha256"] == expected
+    assert storage.read_bytes(result["source_archive_path"] + ".sha256").decode().startswith(expected)
+    assert storage.read_bytes(result["metadata_archive_path"]) == open(meta, "rb").read()
+
+
+def test_run_reads_source_and_metadata_from_storage(tmp_path):
+    """No local file at all: everything comes from the run's storage, the
+    way BIPP2 (or anyone without the original files) runs it."""
+
+    storage = _storage_with_department(tmp_path)
+    storage.write_bytes("inputs/pwd/cols.csv", b"\xef\xbb\xbfname,data_type\r\nphone,text\r\n")  # BOM, CRLF
+    storage.write_bytes("inputs/pwd/meta.csv", b"name,business_description\nphone,Contact\n")
+
+    result = run(
+        department="pwd", dataset="vishwakarma", table_name="t1", storage=storage, source_format="csv",
+        source_file="storage:inputs/pwd/cols.csv", business_metadata_file="storage:inputs/pwd/meta.csv",
+    )
+
+    assert [c["name"] for c in result["columns"]] == ["phone"]
+    assert result["columns"][0]["business_description"] == "Contact"
+    assert result["source_archive_path"].endswith("__cols.csv")
+
+
+def test_missing_storage_input_says_how_to_upload(tmp_path):
+    storage = _storage_with_department(tmp_path)
+    with pytest.raises(FileNotFoundError, match="upload it first"):
+        run(department="pwd", dataset="vishwakarma", table_name="t1", storage=storage,
+            source_file="storage:inputs/pwd/nope.txt")
+
+
+def test_rejected_run_archives_nothing(tmp_path):
+    storage = _storage_with_department(tmp_path)
+    ddl_file = tmp_path / "raw.txt"
+    ddl_file.write_text("a integer, a integer")
+
+    with pytest.raises(ValueError, match="duplicate"):
+        run(department="pwd", dataset="vishwakarma", table_name="t1", source_file=str(ddl_file), storage=storage)
+
+    assert storage.list("department/") == []

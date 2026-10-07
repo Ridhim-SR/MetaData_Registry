@@ -3,7 +3,6 @@ import re
 from collections.abc import Callable
 
 from src.utils.config import load_env
-from filelock import FileLock
 
 from src.schema_registry.registry import paths
 from src.storage import storage_from_env
@@ -43,11 +42,11 @@ def _upsert(
     from a stale read and overwrite a concurrent run's changes. Returns the
     existing row, or None if this inserted a new one.
 
-    Locked per-path so concurrent callers (parallel ingestion runs writing
-    to the same lookup file) can't race on the read-modify-write and lose
-    or corrupt rows."""
+    Locked per-path (storage.lock -- across machines on Wasabi) so
+    concurrent callers writing to the same lookup file can't race on the
+    read-modify-write and lose or corrupt rows."""
 
-    with FileLock(storage.lock_path(path)):
+    with storage.lock(path):
         rows = storage.read_csv(path) if storage.exists(path) else []
         existing = next((r for r in rows if r[key] == key_value), None)
         rows = [r for r in rows if r[key] != key_value]

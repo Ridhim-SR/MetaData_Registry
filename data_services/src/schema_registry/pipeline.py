@@ -1,16 +1,16 @@
 import csv
+import io
 import os
 from datetime import datetime, timezone
-from pathlib import Path
 
 from src.utils.config import load_env
-from filelock import FileLock
 from metadata.ingestion.ometa.ometa_api import OpenMetadata
 
+from src.schema_registry import inputs
 from src.schema_registry.registry import lookups, paths
 from src.schema_registry.curate import curate_schema, validate_schema
 from src.schema_registry.openmetadata.publish import get_client, publish_table
-from src.schema_registry.parsers.csv_schema_parser import parse_csv_columns
+from src.schema_registry.parsers.csv_schema_parser import parse_csv_text
 from src.schema_registry.parsers.ddl_parser import parse_postgres_columns
 from src.storage import storage_from_env
 from src.storage.base import ObjectStorage
@@ -20,9 +20,11 @@ logger = get_logger(__name__)
 
 _TRUE_VALUES = {"y", "yes", "true", "1"}
 
+# source_format -> parser over the submission's text (see inputs.read_input
+# for where that text comes from: a local path or a storage:<key>)
 _PARSERS = {
-    "postgres_ddl": lambda path: parse_postgres_columns(Path(path).read_text()),
-    "csv": parse_csv_columns,
+    "postgres_ddl": parse_postgres_columns,
+    "csv": parse_csv_text,
 }
 
 
@@ -69,13 +71,11 @@ def _merge_business_metadata(previous: dict[str, dict], new: dict[str, dict]) ->
     return merged
 
 
-def _load_business_metadata(path: str) -> dict[str, dict]:
-    """Load a Field Dictionary export (CSV: name, business_description,
-    tag, glossary_term, active) keyed by field name."""
+def _parse_business_metadata(text: str) -> dict[str, dict]:
+    """A Field Dictionary export (CSV: name, business_description, tag,
+    classification, glossary_term, active), keyed by field name."""
 
-    with open(path, newline="") as f:
-        rows = list(csv.DictReader(f))
-    return _business_metadata_from_rows(rows)
+    return _business_metadata_from_rows(list(csv.DictReader(io.StringIO(text))))
 
 
 def _previous_curated_columns(
@@ -202,12 +202,16 @@ def run(
     # tables.csv/datasets.csv exactly as they were.
     ts = _timestamp()
 
-    parsed_columns = _PARSERS[source_format](source_file)
+    source_bytes, source_name = inputs.read_input(storage, source_file)
+    parsed_columns = _PARSERS[source_format](inputs.decode(source_bytes))
     validate_schema(table_id, parsed_columns)
     raw_columns = [{"table_id": table_id, "ingestion_timestamp": ts, **col} for col in parsed_columns]
     logger.info(f"Parsed {len(raw_columns)} column(s) from {source_file}")
 
-    submitted_metadata = _load_business_metadata(business_metadata_file) if business_metadata_file else {}
+    metadata_bytes, metadata_name, submitted_metadata = None, None, {}
+    if business_metadata_file:
+        metadata_bytes, metadata_name = inputs.read_input(storage, business_metadata_file)
+        submitted_metadata = _parse_business_metadata(inputs.decode(metadata_bytes))
     column_names = {col["name"] for col in raw_columns}
     unmatched_metadata_names = sorted(set(submitted_metadata) - column_names)
     if unmatched_metadata_names:
@@ -222,8 +226,7 @@ def run(
     # double-triggered CLI call, two batch jobs targeting the same row)
     # could both read the same "previous" state and both proceed on stale
     # information.
-    lock_path = storage.lock_path(paths.pipeline_lock_path(department_id, dataset_slug, table_slug))
-    with FileLock(lock_path):
+    with storage.lock(paths.pipeline_lock_path(department_id, dataset_slug, table_slug)):
         previous_curated = _previous_curated_columns(storage, department_id, dataset_slug, table_slug)
 
         if previous_curated is not None:
@@ -241,6 +244,19 @@ def run(
 
         curated_columns = curate_schema(raw_columns, business_metadata)
         warning_count = sum(1 for c in curated_columns if c["validation_warning"])
+
+        # The exact files this run parsed, byte for byte, beside the raw
+        # schema they produced -- evidence for every snapshot, and what lets
+        # a rebuild work from storage alone.
+        source_archive = paths.raw_source_path(department_id, dataset_slug, table_slug, ts, source_name)
+        source_sha256 = inputs.archive(storage, source_archive, source_bytes)
+        metadata_archive = None
+        if metadata_bytes is not None:
+            metadata_archive = paths.raw_source_path(
+                department_id, dataset_slug, table_slug, ts, f"metadata__{metadata_name}"
+            )
+            inputs.archive(storage, metadata_archive, metadata_bytes)
+        logger.info(f"Archived source -> {source_archive} (sha256 {source_sha256[:12]}...)")
 
         raw_path = paths.raw_schema_path(department_id, dataset_slug, table_slug, ts)
         storage.write_csv(raw_path, raw_columns)
@@ -267,6 +283,9 @@ def run(
         "column_count": len(curated_columns),
         "warning_count": warning_count,
         "unmatched_metadata_names": unmatched_metadata_names,
+        "source_archive_path": source_archive,
+        "source_sha256": source_sha256,
+        "metadata_archive_path": metadata_archive,
     }
 
     if openmetadata_client is not None:

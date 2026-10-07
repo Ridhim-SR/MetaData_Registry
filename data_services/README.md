@@ -65,18 +65,15 @@ python3 -m src.schema_registry.pipeline
 python3 -m pytest tests/
 ```
 
-**Config**: everything lives in one file, `.env` (copy `.env.example`; never commit `.env`). Both OpenMetadata servers sit side by side in it, and one line picks which to use:
+**Config**: everything lives in one file, `.env` (copy `.env.example`; never commit `.env`). One line, `ENVIRONMENT`, decides where a run reads and writes:
 
-```
-OPENMETADATA_ENV=development     # local | development
+| `ENVIRONMENT=` | Storage | OpenMetadata settings used |
+| --- | --- | --- |
+| `local` (default) | `storage/` folder on this machine — never Wasabi | `LOCAL_OPENMETADATA_HOST_PORT` / `_JWT_TOKEN` |
+| `development` | Wasabi `WASABI_BUCKET`, folder `dev/` | `DEV_OPENMETADATA_HOST_PORT` / `_JWT_TOKEN` (BIPP2) |
+| `production` | Wasabi `WASABI_BUCKET`, folder `prod/` | `PROD_OPENMETADATA_HOST_PORT` / `_JWT_TOKEN` |
 
-LOCAL_OPENMETADATA_HOST_PORT=http://localhost:8585/api
-LOCAL_OPENMETADATA_JWT_TOKEN=...
-DEV_OPENMETADATA_HOST_PORT=http://10.0.96.105:8585/api
-DEV_OPENMETADATA_JWT_TOKEN=...
-```
-
-To switch for a single run without editing the file: `OPENMETADATA_ENV=local python3 -m src.schema_registry.pipeline`.
+`development`/`production` refuse to run if `WASABI_BUCKET` is blank, so shared data never ends up on one laptop by accident. To switch for a single run without editing the file: `ENVIRONMENT=development python3 -m src.schema_registry.pipeline`. Anything exported in the shell wins over `.env` (e.g. `WASABI_PREFIX=sandbox-<name>` to experiment in Wasabi without touching `dev/`).
 
 **`vishwakarma_T` is a provisional table name**, not a confirmed one — PWD's
 raw submission was only a column-list dump with no `CREATE TABLE <name>`,
@@ -109,7 +106,8 @@ to publish, or omitting it to skip.
 storage/
 ├── _lookups/{departments,datasets,tables}.csv   # registry + dataset-level fields
 └── department/<dept>/<dataset>/<table>/
-    ├── raw/schemas/<ts>.csv       # parsed structure only
+    ├── raw/source/<ts>__<file>    # the original submission + .sha256
+    ├── raw/schemas/<ts>.csv       # parsed structure
     └── curated/schemas/<ts>.csv   # + business_description, tag, classification, glossary_term, active, validation_warning
 ```
 
@@ -122,7 +120,15 @@ later via a Field Dictionary CSV passed as `business_metadata_file`.
 
 - **`LocalObjectStorage`** — plain filesystem, default for local dev.
 - **`S3ObjectStorage`** — Wasabi or any S3-compatible provider via `boto3`. `storage_from_env()` picks between the two: set `WASABI_BUCKET` (+ `WASABI_ENDPOINT_URL`/`WASABI_ACCESS_KEY_ID`/`WASABI_SECRET_ACCESS_KEY`, optionally `WASABI_PREFIX`/`WASABI_REGION`) in `.env` to switch to Wasabi; leave it unset to keep using Local.
-- **Concurrency**: `filelock`, local-filesystem-only for both backends — fine for single-machine runs, not yet safe for multiple machines writing to the same bucket concurrently (would need conditional-PUT/ETag locking).
+- **Concurrency**: `storage.lock()` — an OS file lock on local storage, and on Wasabi a lock object under `_locks/` created with a conditional PUT, so several machines can push to the same bucket without losing registry rows (tested with two processes against Wasabi, 2026-10-07). A lock left by a crashed run expires after 15 minutes. Each locked write costs a few round trips (~3 s on Wasabi).
+
+**Inputs from storage**: `SOURCE_FILE` and `BUSINESS_METADATA_FILE` (and manifest columns) accept either a local path or `storage:<key>`, read from the current environment's storage. Upload once, then anyone (or BIPP2) can run without a local copy:
+```bash
+python3 -m src.schema_registry.inputs upload samples/pwd_vishwakarma_full_raw_columns.txt inputs/pwd/pwd_vishwakarma_full_raw_columns.txt
+SOURCE_FILE=storage:inputs/pwd/pwd_vishwakarma_full_raw_columns.txt python3 -m src.schema_registry.pipeline
+python3 -m src.schema_registry.inputs list
+```
+Every run also archives the exact files it parsed, byte for byte with a `.sha256` beside them, at `department/<dept>/<dataset>/<table>/raw/source/<ts>__<file>` (a multi-table Field Dictionary once at `department/<dept>/<dataset>/_source/`).
 
 ## Publish to OpenMetadata
 
@@ -217,15 +223,15 @@ source code to discover:
 
 | Key | Required? | Notes |
 |---|---|---|
-| `OPENMETADATA_ENV` | no | `local` (default) or `development` — picks which server's pair below is used |
-| `LOCAL_`/`DEV_OPENMETADATA_HOST_PORT` | yes, for the server you use | must end in `/api` |
-| `LOCAL_`/`DEV_OPENMETADATA_JWT_TOKEN` | yes, for the server you use | Settings → Bots → ingestion-bot in the OpenMetadata UI. An admin session token expires in ~1hr — refresh it if a run fails with 401 (see the comment in `.env` for the exact `curl`) |
+| `ENVIRONMENT` | no | `local` (default), `development` or `production` — picks storage folder and server |
+| `LOCAL_`/`DEV_`/`PROD_OPENMETADATA_HOST_PORT` | yes, for the server you use | must end in `/api` |
+| `LOCAL_`/`DEV_`/`PROD_OPENMETADATA_JWT_TOKEN` | yes, for the server you use | Settings → Bots → ingestion-bot in the OpenMetadata UI. An admin session token expires in ~1hr — refresh it if a run fails with 401 (see the comment in `.env` for the exact `curl`) |
 | `DEPARTMENT` | yes | must already be registered (see Quickstart) |
 | `DATASET` | yes | auto-creates on first use |
 | `TABLE_NAME` | yes | |
 | `SOURCE_FILE` | yes | |
 | `SOURCE_FORMAT` | yes | `postgres_ddl` or `csv` |
-| `WASABI_BUCKET` | no | leave blank for local storage; fill in once Wasabi is confirmed clean (see [Storage layout](#storage-layout)) |
+| `WASABI_BUCKET` | for development/production | the Wasabi bucket; `local` ignores it |
 | `CATEGORY`/`API_AVAILABLE`/`OWNER`/`FREQUENCY`/`TIMELINE`/`DATASET_DESCRIPTION` | no | dataset-level fields (see [Concepts](#concepts)) — type a real value only once you have it; blank/omitted carries forward whatever was last set, so these rarely need touching after the first time |
 
 To run a different table, just edit `.env` and run the same command again.

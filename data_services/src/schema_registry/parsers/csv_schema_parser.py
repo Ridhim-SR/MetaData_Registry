@@ -1,4 +1,5 @@
 import csv
+import io
 import re
 
 from src.utils.logger import get_logger
@@ -55,30 +56,33 @@ def _build_header_map(headers: list[str]) -> dict[str, str]:
     return header_map
 
 
+def parse_csv_text(text: str, label: str = "<text>") -> list[dict]:
+    """Parse department-submitted column definitions (CSV text) into the
+    same canonical shape as ddl_parser.parse_postgres_columns, regardless
+    of that department's own header names or column order."""
+
+    reader = csv.DictReader(io.StringIO(text))
+    header_map = _build_header_map(reader.fieldnames or [])
+
+    columns = []
+    for row in reader:
+        length = (row.get(header_map.get("length", ""), "") or "").strip()
+
+        columns.append(
+            {
+                "name": row[header_map["name"]].strip(),
+                "data_type": row[header_map["data_type"]].strip(),
+                "length": int(length) if length.isdigit() else None,
+                "scale": None,
+                "nullable": _to_bool(row.get(header_map.get("nullable", ""))),
+                "default": (row.get(header_map.get("default", ""), "") or "").strip() or None,
+            }
+        )
+
+    logger.info(f"csv_schema_parser: parsed {len(columns)} column(s) from {label}")
+    return columns
+
+
 def parse_csv_columns(path: str) -> list[dict]:
-    """Parse a department-submitted CSV of column definitions into the same
-    canonical shape as ddl_parser.parse_postgres_columns, regardless of
-    that department's own header names or column order."""
-
-    with open(path, newline="") as f:
-        reader = csv.DictReader(f)
-        header_map = _build_header_map(reader.fieldnames or [])
-
-
-        columns = []
-        for row in reader:
-            length = (row.get(header_map.get("length", ""), "") or "").strip()
-
-            columns.append(
-                {
-                    "name": row[header_map["name"]].strip(),
-                    "data_type": row[header_map["data_type"]].strip(),
-                    "length": int(length) if length.isdigit() else None,
-                    "scale": None,
-                    "nullable": _to_bool(row.get(header_map.get("nullable", ""))),
-                    "default": (row.get(header_map.get("default", ""), "") or "").strip() or None,
-                }
-            )
-
-        logger.info(f"csv_schema_parser: parsed {len(columns)} column(s) from {path}")
-        return columns
+    with open(path, newline="", encoding="utf-8-sig") as f:
+        return parse_csv_text(f.read(), label=path)

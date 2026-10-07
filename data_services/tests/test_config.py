@@ -5,9 +5,11 @@ import pytest
 from src.utils import config
 
 _KEYS = (
-    "OPENMETADATA_ENV", "OPENMETADATA_HOST_PORT", "OPENMETADATA_JWT_TOKEN",
+    "ENVIRONMENT", "OPENMETADATA_ENV", "OPENMETADATA_HOST_PORT", "OPENMETADATA_JWT_TOKEN",
     "LOCAL_OPENMETADATA_HOST_PORT", "LOCAL_OPENMETADATA_JWT_TOKEN",
-    "DEV_OPENMETADATA_HOST_PORT", "DEV_OPENMETADATA_JWT_TOKEN", "DEPARTMENT",
+    "DEV_OPENMETADATA_HOST_PORT", "DEV_OPENMETADATA_JWT_TOKEN",
+    "PROD_OPENMETADATA_HOST_PORT", "PROD_OPENMETADATA_JWT_TOKEN",
+    "WASABI_BUCKET", "WASABI_PREFIX", "DEPARTMENT",
 )
 
 
@@ -15,10 +17,11 @@ _KEYS = (
 def env_file(tmp_path, monkeypatch):
     path = tmp_path / ".env"
     path.write_text(
-        "OPENMETADATA_ENV=development\n"
+        "ENVIRONMENT=development\n"
         "LOCAL_OPENMETADATA_HOST_PORT=http://localhost:8585/api\nLOCAL_OPENMETADATA_JWT_TOKEN=local-token\n"
         "DEV_OPENMETADATA_HOST_PORT=http://10.0.96.105:8585/api\nDEV_OPENMETADATA_JWT_TOKEN=dev-token\n"
-        "DEPARTMENT=pwd\n"
+        "PROD_OPENMETADATA_HOST_PORT=http://prod:8585/api\nPROD_OPENMETADATA_JWT_TOKEN=prod-token\n"
+        "WASABI_BUCKET=pwd-schema-registry\nDEPARTMENT=pwd\n"
     )
     monkeypatch.setattr(config, "_ENV_FILE", path)
     for key in _KEYS:
@@ -28,33 +31,72 @@ def env_file(tmp_path, monkeypatch):
         os.environ.pop(key, None)
 
 
-def test_openmetadata_env_picks_that_servers_address_and_token(env_file):
+def test_development_uses_dev_server_and_dev_folder_in_wasabi(env_file):
     assert config.load_env() == "development"
     assert os.environ["OPENMETADATA_HOST_PORT"] == "http://10.0.96.105:8585/api"
     assert os.environ["OPENMETADATA_JWT_TOKEN"] == "dev-token"
+    assert (os.environ["WASABI_BUCKET"], os.environ["WASABI_PREFIX"]) == ("pwd-schema-registry", "dev")
     assert os.environ["DEPARTMENT"] == "pwd"
 
 
-def test_shell_can_switch_server_for_one_run(env_file, monkeypatch):
-    monkeypatch.setenv("OPENMETADATA_ENV", "local")
+def test_production_uses_prod_server_and_prod_folder(env_file, monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    assert config.load_env() == "production"
+    assert os.environ["OPENMETADATA_HOST_PORT"] == "http://prod:8585/api"
+    assert os.environ["WASABI_PREFIX"] == "prod"
+
+
+def test_local_never_uses_wasabi_even_if_bucket_is_set(env_file, monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "local")
     assert config.load_env() == "local"
-    assert os.environ["OPENMETADATA_HOST_PORT"] == "http://localhost:8585/api"
+    assert os.environ["WASABI_BUCKET"] == ""
     assert os.environ["OPENMETADATA_JWT_TOKEN"] == "local-token"
 
 
-def test_exported_token_wins_over_env_file(env_file, monkeypatch):
+def test_storage_follows_environment(env_file, monkeypatch, tmp_path):
+    from src.storage import storage_from_env
+    from src.storage.local import LocalObjectStorage
+    from src.storage.s3 import S3ObjectStorage
+
+    monkeypatch.setenv("ENVIRONMENT", "local")
+    monkeypatch.setenv("STORAGE_ROOT", str(tmp_path / "storage"))
+    config.load_env()
+    assert isinstance(storage_from_env(), LocalObjectStorage)
+
+    for key in _KEYS:
+        os.environ.pop(key, None)
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    config.load_env()
+    storage = storage_from_env()
+    assert isinstance(storage, S3ObjectStorage)
+    assert storage._key("_lookups/tables.csv") == "dev/_lookups/tables.csv"
+
+
+def test_development_without_bucket_refuses_to_run(env_file, monkeypatch):
+    env_file.write_text("ENVIRONMENT=development\n")
+    with pytest.raises(ValueError, match="WASABI_BUCKET is blank"):
+        config.load_env()
+
+
+def test_exported_values_win_over_env_file(env_file, monkeypatch):
     monkeypatch.setenv("OPENMETADATA_JWT_TOKEN", "from-shell")
+    monkeypatch.setenv("WASABI_PREFIX", "sandbox-aditya")
     config.load_env()
     assert os.environ["OPENMETADATA_JWT_TOKEN"] == "from-shell"
+    assert os.environ["WASABI_PREFIX"] == "sandbox-aditya"
+
+
+def test_old_switch_name_still_works(env_file, monkeypatch):
+    env_file.write_text("OPENMETADATA_ENV=local\n")
+    assert config.load_env() == "local"
 
 
 def test_defaults_to_local(env_file):
-    env_file.write_text("LOCAL_OPENMETADATA_HOST_PORT=http://localhost:8585/api\n")
+    env_file.write_text("DEPARTMENT=pwd\n")
     assert config.load_env() == "local"
-    assert os.environ["OPENMETADATA_HOST_PORT"] == "http://localhost:8585/api"
 
 
 def test_unknown_environment_is_rejected(env_file, monkeypatch):
-    monkeypatch.setenv("OPENMETADATA_ENV", "staging")
-    with pytest.raises(ValueError, match="must be one of: local, development"):
+    monkeypatch.setenv("ENVIRONMENT", "staging")
+    with pytest.raises(ValueError, match="must be one of: local, development, production"):
         config.load_env()

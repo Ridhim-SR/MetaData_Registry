@@ -1,7 +1,12 @@
 import csv
-import hashlib
 import io
-from pathlib import Path
+import json
+import os
+import socket
+import time
+import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 import boto3
 from botocore.exceptions import ClientError
@@ -19,10 +24,10 @@ class S3ObjectStorage(ObjectStorage):
     boto3 way (env vars `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`, or pass
     them explicitly) -- nothing custom to configure here.
 
-    Locking is still local-filesystem-only (see lock_path()): fine for
-    today's single-machine pipeline runs, not yet safe for multiple
-    machines writing to the same bucket concurrently -- that would need
-    conditional-PUT/ETag-based locking instead of filelock.
+    Locking (lock()) works across machines: a lock is an object under
+    `_locks/` created with a conditional PUT ("only if it doesn't exist"),
+    so of several machines racing for it exactly one succeeds. Verified
+    against Wasabi on 2026-10-07 (If-None-Match and If-Match both enforced).
     """
 
     def __init__(
@@ -33,7 +38,9 @@ class S3ObjectStorage(ObjectStorage):
         aws_access_key_id: str | None = None,
         aws_secret_access_key: str | None = None,
         region_name: str | None = None,
-        lock_dir: str | Path = "/tmp/schema-registry-locks",
+        lock_timeout_seconds: float = 120,
+        lock_ttl_seconds: float = 900,
+        lock_poll_seconds: float = 1.0,
     ):
         self.bucket = bucket
         self.prefix = prefix.strip("/")
@@ -44,7 +51,9 @@ class S3ObjectStorage(ObjectStorage):
             aws_secret_access_key=aws_secret_access_key,
             region_name=region_name,
         )
-        self.lock_dir = Path(lock_dir)
+        self.lock_timeout_seconds = lock_timeout_seconds
+        self.lock_ttl_seconds = lock_ttl_seconds
+        self.lock_poll_seconds = lock_poll_seconds
         logger.info(f"S3ObjectStorage ready: bucket={bucket}, endpoint={endpoint_url}, prefix={self.prefix or '(none)'}")
 
     def _key(self, path: str) -> str:
@@ -70,22 +79,27 @@ class S3ObjectStorage(ObjectStorage):
             logger.error(f"S3 {action} failed on '{path}' (bucket={self.bucket}): {code} -- {exc}")
 
     def write_csv(self, path: str, rows: list[dict]) -> None:
+        self.write_bytes(path, rows_to_csv(rows).encode("utf-8"))
+
+    def write_bytes(self, path: str, data: bytes) -> None:
         # A single PUT is already atomic on S3 -- readers see the old object
         # or the new one, never a partial write.
         try:
-            self.client.put_object(Bucket=self.bucket, Key=self._key(path), Body=rows_to_csv(rows).encode("utf-8"))
+            self.client.put_object(Bucket=self.bucket, Key=self._key(path), Body=data)
         except ClientError as exc:
             self._log_client_error(exc, "write", path)
             raise
 
-    def read_csv(self, path: str) -> list[dict]:
+    def read_bytes(self, path: str) -> bytes:
         try:
             obj = self.client.get_object(Bucket=self.bucket, Key=self._key(path))
         except ClientError as exc:
             self._log_client_error(exc, "read", path)
             raise
-        text = obj["Body"].read().decode("utf-8")
-        return list(csv.DictReader(io.StringIO(text)))
+        return obj["Body"].read()
+
+    def read_csv(self, path: str) -> list[dict]:
+        return list(csv.DictReader(io.StringIO(self.read_bytes(path).decode("utf-8"))))
 
     def exists(self, path: str) -> bool:
         try:
@@ -108,7 +122,69 @@ class S3ObjectStorage(ObjectStorage):
         ]
         return sorted(keys)
 
-    def lock_path(self, path: str) -> str:
-        self.lock_dir.mkdir(parents=True, exist_ok=True)
-        safe_name = hashlib.sha256(self._key(path).encode()).hexdigest()
-        return str(self.lock_dir / f"{safe_name}.lock")
+    @contextmanager
+    def lock(self, path: str) -> Iterator[None]:
+        """Hold `_locks/<path>.lock` for the duration of the `with` block.
+
+        Acquire = PUT the lock object with If-None-Match: * -- the store
+        refuses it (412) while anyone else holds it, so of several machines
+        racing, exactly one wins. A holder that died without releasing is
+        recognised by its `expires_at` (lock_ttl_seconds after acquiring)
+        and taken over with If-Match on the lock's current ETag, so two
+        machines can't both take over the same stale lock. Gives up with
+        TimeoutError after lock_timeout_seconds, naming who holds it."""
+
+        key = self._key(f"_locks/{path}.lock")
+        owner = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
+        deadline = time.monotonic() + self.lock_timeout_seconds
+
+        while True:
+            now = time.time()
+            body = json.dumps({"owner": owner, "acquired_at": now, "expires_at": now + self.lock_ttl_seconds}).encode()
+            if self._conditional_put(key, body, IfNoneMatch="*"):
+                break
+            held = self._read_lock(key)
+            if held is None:
+                continue  # released between our attempt and the read -- try again at once
+            holder, etag = held
+            if holder.get("expires_at", 0) < now and self._conditional_put(key, body, IfMatch=etag):
+                logger.warning(f"Took over expired lock on '{path}' from {holder.get('owner')}")
+                break
+            if time.monotonic() > deadline:
+                raise TimeoutError(
+                    f"Couldn't lock '{path}' within {self.lock_timeout_seconds:.0f}s -- held by "
+                    f"{holder.get('owner')} since {time.ctime(holder.get('acquired_at', 0))}. If that run "
+                    f"is dead, the lock frees itself at {time.ctime(holder.get('expires_at', 0))}."
+                )
+            time.sleep(self.lock_poll_seconds)
+
+        try:
+            yield
+        finally:
+            held = self._read_lock(key)
+            if held is not None and held[0].get("owner") == owner:
+                self.client.delete_object(Bucket=self.bucket, Key=key)
+            else:
+                logger.warning(f"Lock on '{path}' was no longer ours at release (expired and taken over?)")
+
+    def _conditional_put(self, key: str, body: bytes, **condition) -> bool:
+        """True if written, False if the condition failed (someone else got
+        there first); any other error is raised."""
+
+        try:
+            self.client.put_object(Bucket=self.bucket, Key=key, Body=body, **condition)
+            return True
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") in ("PreconditionFailed", "ConditionalRequestConflict"):
+                return False
+            self._log_client_error(exc, "lock", key)
+            raise
+
+    def _read_lock(self, key: str) -> tuple[dict, str] | None:
+        try:
+            obj = self.client.get_object(Bucket=self.bucket, Key=key)
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") in ("NoSuchKey", "404"):
+                return None
+            raise
+        return json.loads(obj["Body"].read() or b"{}"), obj["ETag"]

@@ -1,6 +1,7 @@
 import csv
 import io
 from abc import ABC, abstractmethod
+from contextlib import AbstractContextManager
 
 
 def rows_to_csv(rows: list[dict]) -> str:
@@ -49,7 +50,19 @@ class ObjectStorage(ABC):
         ...
 
     @abstractmethod
-    def lock_path(self, path: str) -> str:
-        """A filesystem path usable with filelock.FileLock to serialize
-        concurrent read-modify-write access to the file at `path`."""
+    def write_bytes(self, path: str, data: bytes) -> None:
+        """Store a file exactly as given -- e.g. a department's original
+        submission, kept byte for byte as evidence of what was parsed."""
+        ...
+
+    @abstractmethod
+    def read_bytes(self, path: str) -> bytes:
+        ...
+
+    @abstractmethod
+    def lock(self, path: str) -> AbstractContextManager:
+        """`with storage.lock(path):` -- serialize read-modify-write access
+        to `path` across every process that shares this storage: threads
+        and processes on one machine for local storage, and every machine
+        writing to the same bucket for S3/Wasabi."""
         ...

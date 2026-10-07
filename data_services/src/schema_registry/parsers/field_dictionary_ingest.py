@@ -4,8 +4,10 @@ from pathlib import Path
 
 from metadata.ingestion.ometa.ometa_api import OpenMetadata
 
-from src.schema_registry.parsers.field_dictionary_parser import parse_field_dictionary
-from src.schema_registry.pipeline import run
+from src.schema_registry import inputs
+from src.schema_registry.parsers.field_dictionary_parser import parse_field_dictionary_text
+from src.schema_registry.pipeline import _timestamp, run
+from src.schema_registry.registry import lookups, paths
 from src.storage.base import ObjectStorage
 from src.utils.logger import get_logger
 
@@ -40,7 +42,16 @@ def run_field_dictionary(
     as run() itself.
     """
 
-    tables = parse_field_dictionary(source_file)
+    # `source_file` may be a local path or a storage:<key> (see inputs.py).
+    # The original multi-table file is archived once at dataset level; each
+    # table's run() then archives the per-table split it actually parsed.
+    source_bytes, source_name = inputs.read_input(storage, source_file)
+    tables = parse_field_dictionary_text(inputs.decode(source_bytes), label=source_file)
+    archive_path = paths.dataset_source_path(
+        lookups.slugify(department), lookups.slugify(dataset), _timestamp(), source_name
+    )
+    inputs.archive(storage, archive_path, source_bytes)
+    logger.info(f"Field dictionary: archived original -> {archive_path}")
     results: dict[str, dict] = {}
 
     with tempfile.TemporaryDirectory() as tmp_dir:

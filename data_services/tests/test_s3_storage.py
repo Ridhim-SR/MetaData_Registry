@@ -74,21 +74,60 @@ def test_prefix_is_applied_to_the_real_key_but_stripped_back_off_for_callers(buc
     assert storage.exists("a/b.csv") is True
 
 
-def test_lock_path_is_stable_and_local(bucket, tmp_path):
-    """Same input -> same lock file (so FileLock actually serializes
-    concurrent access to it), different inputs -> different files, and it's
-    a real local filesystem path, not an S3 key -- see the class docstring
-    for why locking stays local-only for now."""
+def test_lock_is_exclusive_across_storage_instances(bucket):
+    """Two S3ObjectStorage objects stand in for two machines: while one
+    holds the lock, the other can't take it, and gets it once released."""
 
-    storage = _storage(bucket, lock_dir=tmp_path / "locks")
+    machine_a = _storage(bucket, prefix="dev")
+    machine_b = _storage(bucket, prefix="dev", lock_timeout_seconds=0.2, lock_poll_seconds=0.05)
 
-    path1 = storage.lock_path("dept/table/pipeline")
-    path2 = storage.lock_path("dept/table/pipeline")
-    path3 = storage.lock_path("other/table/pipeline")
+    with machine_a.lock("_lookups/tables.csv"):
+        with pytest.raises(TimeoutError, match="held by"):
+            with machine_b.lock("_lookups/tables.csv"):
+                pass
+    with machine_b.lock("_lookups/tables.csv"):
+        pass
+    assert machine_a.list("_locks/") == []  # released, nothing left behind
 
-    assert path1 == path2
-    assert path1 != path3
-    assert path1.startswith(str(tmp_path / "locks"))
+
+def test_expired_lock_is_taken_over(bucket):
+    """A run that died holding the lock mustn't block everyone forever."""
+
+    dead_run = _storage(bucket, lock_ttl_seconds=-1)  # its lock is born expired
+    held = dead_run.lock("dept/table/pipeline")
+    held.__enter__()  # never released
+
+    with _storage(bucket, lock_timeout_seconds=1, lock_poll_seconds=0.05).lock("dept/table/pipeline"):
+        pass
+
+
+def test_different_paths_lock_independently(bucket):
+    storage = _storage(bucket, lock_timeout_seconds=0.2, lock_poll_seconds=0.05)
+    with storage.lock("a"):
+        with storage.lock("b"):
+            pass
+
+
+def test_concurrent_registrations_from_two_machines_lose_no_rows(bucket):
+    """The real risk the cross-machine lock exists for: many writers doing
+    read-modify-write on one shared lookup file in the same bucket."""
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    machines = [_storage(bucket, prefix="dev", lock_poll_seconds=0.01) for _ in range(4)]
+    departments = [f"dept_{i}" for i in range(12)]
+    with ThreadPoolExecutor(max_workers=12) as pool:
+        list(pool.map(lambda i: lookups.register_department(machines[i % 4], departments[i], departments[i]), range(12)))
+
+    rows = machines[0].read_csv(lookups.DEPARTMENTS_PATH)
+    assert sorted(r["department_id"] for r in rows) == sorted(departments)
+
+
+def test_bytes_roundtrip_exactly(bucket):
+    storage = _storage(bucket)
+    data = "\ufeffname,data_type\r\nरजिस्टर,text\r\n".encode("utf-8")
+    storage.write_bytes("inputs/x.csv", data)
+    assert storage.read_bytes("inputs/x.csv") == data
 
 
 def test_full_pipeline_run_works_against_s3_backed_storage(bucket, tmp_path, tmp_path_factory):
@@ -97,7 +136,7 @@ def test_full_pipeline_run_works_against_s3_backed_storage(bucket, tmp_path, tmp
     local filesystem -- same registration, ingest, curate, and column-
     removal-guard behavior either way."""
 
-    storage = _storage(bucket, lock_dir=tmp_path_factory.mktemp("locks"))
+    storage = _storage(bucket)
     lookups.register_department(storage, "pwd", "Public Works Department")
 
     ddl_file = tmp_path / "raw.txt"

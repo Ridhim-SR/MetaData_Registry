@@ -93,3 +93,19 @@ def test_reingesting_dictionary_keeps_answers_set_by_hand(tmp_path):
     column = results["t1"]["columns"][0]
     assert (column["classification"], column["glossary_term"], column["active"]) == ("CAT-2", "Mobile Number", False)
     assert column["business_description"] == "Contact number"
+
+
+def test_dictionary_from_storage_is_archived_once_at_dataset_level(tmp_path):
+    storage = LocalObjectStorage(tmp_path / "storage")
+    lookups.register_department(storage, "welfare", "Social Welfare Department")
+    local = _write_dictionary(tmp_path, [("t1", "bride_name", "Name of the bride", "Text", "Y")])
+    storage.write_bytes("inputs/welfare/dict.csv", open(local, "rb").read())
+
+    results = run_field_dictionary(
+        department="welfare", dataset="cmsvy", source_file="storage:inputs/welfare/dict.csv", storage=storage
+    )
+
+    assert results["t1"]["column_count"] == 1
+    archived = [p for p in storage.list("department/welfare/cmsvy/_source/") if not p.endswith(".sha256")]
+    assert len(archived) == 1 and archived[0].endswith("__dict.csv")
+    assert storage.read_bytes(archived[0]) == open(local, "rb").read()
