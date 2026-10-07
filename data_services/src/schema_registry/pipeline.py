@@ -28,6 +28,24 @@ _PARSERS = {
 }
 
 
+def parse_source(department_id: str, table_name: str, source_format: str, text: str) -> list[dict]:
+    """Pick the parser for this file: a department's own parser if it has
+    one, otherwise the shared parser for the file's format.
+
+    To give a department its own parser: write parsers/<dept>_parser.py with
+    parse_table(text, table_name) -> columns, import it above, and replace
+    that department's `pass` below with
+        return <dept>_parser.parse_table(text, table_name)
+    """
+
+    if department_id == "agriculture_department":
+        pass  # placeholder: agriculture's own parser goes here; uses the shared parser until then
+    # elif department_id == "<next_department>":
+    #     pass
+
+    return _PARSERS[source_format](text)
+
+
 def _timestamp() -> str:
     # microsecond resolution -- second resolution collides on back-to-back
     # runs (e.g. a batch loop) and silently overwrites the previous snapshot
@@ -203,7 +221,7 @@ def run(
     ts = _timestamp()
 
     source_bytes, source_name = inputs.read_input(storage, source_file)
-    parsed_columns = _PARSERS[source_format](inputs.decode(source_bytes))
+    parsed_columns = parse_source(department_id, table_name, source_format, inputs.decode(source_bytes))
     validate_schema(table_id, parsed_columns)
     raw_columns = [{"table_id": table_id, "ingestion_timestamp": ts, **col} for col in parsed_columns]
     logger.info(f"Parsed {len(raw_columns)} column(s) from {source_file}")

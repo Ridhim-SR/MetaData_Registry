@@ -86,7 +86,7 @@ A department sends an **updated file**? Run the same `add` command again. Wasabi
 
 **3. Commit `catalog.yaml` and open a PR.** Get it reviewed and merged. If `add` says "catalog.yaml already up to date", there's nothing to commit.
 
-**4. Run sync**
+**4. Run sync** (by hand, after the PR is merged. Nothing runs it automatically yet)
 ```bash
 ENVIRONMENT=development python3 -m src.schema_registry.sync --dry-run          # see what would happen
 ENVIRONMENT=development python3 -m src.schema_registry.sync                    # all departments
@@ -220,4 +220,99 @@ Columns whose names look like personal data (Aadhaar, PAN, mobile, email, ...) g
 | `src/storage/` | Laptop folder or Wasabi, plus locking |
 | `src/utils/config.py` | Reads `.env` and applies `ENVIRONMENT` |
 
-A department sends a file in a new layout? Write a parser in `parsers/` that returns the same column fields (`name`, `data_type`, `length`, `scale`, `nullable`, `default`), add a test with a real example file, and add it to `_PARSERS` in `pipeline.py`.
+**Which parser reads which file** is decided in one place: `parse_source()` in `pipeline.py`. Today every department uses the shared parser for its `format:` (`postgres_ddl` or `csv`).
+
+**A department sends a file in a new layout?**
+1. Write `parsers/<dept>_parser.py` with `parse_table(text, table_name)` returning the usual column fields (`name`, `data_type`, `length`, `scale`, `nullable`, `default`).
+2. Add a branch for that department in `parse_source()` (there's an example in its docstring).
+3. Add a test with a real example file.
+
+If one file holds several tables, list each table in `catalog.yaml` with the **same** `source:`, and let the parser pick out each table by name.
+
+## Step by step: putting a department's file into OpenMetadata
+
+Follow the steps **in order**. In step 2 you run **only one** of the four commands: the one that matches your file.
+
+**Step 1: Open the project** (every new terminal)
+```bash
+cd data_services
+source .venv/bin/activate
+```
+First time on this machine? Do [First-time setup](#first-time-setup) before this.
+
+**Step 2: Run `add`. Pick the ONE case that fits:**
+
+| Your situation | Use |
+|---|---|
+| Department is already in `catalog.yaml` (e.g. PWD), one file = one table | Case A |
+| Department is **not** in `catalog.yaml` yet | Case B |
+| You also have a file with descriptions/tags for the columns | Case C |
+| One file describes **several tables** (a field dictionary) | Case D |
+
+Replace the file name, department, dataset and table with your own. The ones below are examples.
+
+*Case A: existing department, one table* (also for an **updated** file: same command again)
+```bash
+ENVIRONMENT=development python3 -m src.schema_registry.add samples/pwd_vishwakarma_full_raw_columns.txt \
+    --department pwd --dataset vishwakarma --table vishwakarma_T
+```
+
+*Case B: new department.* Same as A, plus its full name (only needed the first time):
+```bash
+ENVIRONMENT=development python3 -m src.schema_registry.add samples/cmsvy_applications.csv \
+    --department samaj_kalyan --department-name "Department of Social Welfare" \
+    --dataset cmsvy --table cmsvy_application
+```
+
+*Case C: with a descriptions/tags file.* Same as A or B, plus `--metadata`:
+```bash
+ENVIRONMENT=development python3 -m src.schema_registry.add samples/pwd_vishwakarma_full_raw_columns.txt \
+    --department pwd --dataset vishwakarma --table vishwakarma_T \
+    --metadata samples/pwd_vishwakarma_metadata.csv
+```
+
+*Case D: one file, many tables.* Use `--field-dictionary` instead of `--table`:
+```bash
+ENVIRONMENT=development python3 -m src.schema_registry.add samples/kanya_sumangla_field_dictionary.csv \
+    --department samaj_kalyan --department-name "Department of Social Welfare" \
+    --dataset cmsvy --field-dictionary
+```
+
+`add` prints what it did. If it says *"catalog.yaml already up to date"*, skip to step 4.
+
+**Step 3: Fill in the dataset details** (new dataset, or when something changed)
+
+Open `catalog.yaml`, find your dataset, and fill in what you know (leave the rest blank):
+```yaml
+      vishwakarma:
+        category: CAT-3            # CAT-1 | CAT-2 | CAT-3 | CAT-4
+        owner: PWD IT Cell
+        frequency: monthly
+        timeline: 2019-2026
+        api_available: N           # Y or N
+        description: Works and tenders managed by PWD
+```
+
+**Step 4: Check before you commit**
+```bash
+ENVIRONMENT=development python3 -m src.schema_registry.sync --dry-run
+```
+Every table should show `would ingest` or `unchanged`, with `0 failed`. If something shows `failed`, fix it first (see [When something fails](#when-something-fails)).
+
+**Step 5: Commit `catalog.yaml` and open a PR**
+```bash
+git add catalog.yaml
+git commit -m "PWD: new vishwakarma file"
+git push
+```
+Then open the PR on GitHub and get it reviewed and merged.
+
+**Step 6: After the PR is merged, run sync yourself** (nothing runs automatically on merge)
+```bash
+ENVIRONMENT=development python3 -m src.schema_registry.sync
+```
+You should see `ingested` (or `unchanged`) and `published`, with `0 failed`. To publish, you need the office network or VPN for BIPP2. Without it, PUBLISH shows `failed`.
+
+**Step 7: Check in OpenMetadata.** Open http://10.0.96.105:8585 and find your table under the department's service.
+
+For production: repeat **step 2 and step 6** with `ENVIRONMENT=production`.

@@ -63,8 +63,11 @@ def _main(argv: list[str]) -> int:
     from src.storage import storage_from_env
     from src.utils.config import load_env
 
-    load_env()
-    storage = storage_from_env()
+    if argv[:1] in (["-h"], ["--help"]) or not argv:
+        argv = ["--help"] if argv else argv
+    else:
+        load_env()
+        storage = storage_from_env()
     if len(argv) == 3 and argv[0] == "upload":
         local, key = argv[1], argv[2].lstrip("/")
         data = Path(local).read_bytes()
@@ -76,9 +79,10 @@ def _main(argv: list[str]) -> int:
         for key in storage.list(argv[1] if len(argv) == 2 else "inputs/"):
             print(f"{STORAGE_SCHEME}{key}")
         return 0
+    asked_for_help = argv[:1] in (["-h"], ["--help"])
     print("usage: python3 -m src.schema_registry.inputs upload <local file> <storage key>\n"
-          "       python3 -m src.schema_registry.inputs list [prefix]", file=sys.stderr)
-    return 2
+          "       python3 -m src.schema_registry.inputs list [prefix]", file=sys.stdout if asked_for_help else sys.stderr)
+    return 0 if asked_for_help else 2
 
 
 if __name__ == "__main__":

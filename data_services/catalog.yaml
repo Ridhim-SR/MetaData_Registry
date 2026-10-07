@@ -34,12 +34,3 @@ departments:
           vishwakarma_T:
             source: storage:inputs/pwd/vishwakarma/pwd_vishwakarma_full_raw_columns.txt
             format: postgres_ddl
-
-  # Samaj Kalyan / CMSVY: waiting for the original Field Dictionary file to be
-  # uploaded (it isn't on any machine we checked). Then uncomment:
-  #
-  # samaj_kalyan:
-  #   name: Department of Social Welfare
-  #   datasets:
-  #     cmsvy:
-  #       field_dictionary: storage:inputs/samaj_kalyan/kanya_sumangla_field_dictionary.csv
