@@ -74,7 +74,9 @@ def update_catalog_text(
     dataset's field dictionary."""
 
     y = _yaml()
-    data = y.load(text) or CommentedMap()
+    data = y.load(text)
+    if data is None:  # only comments so far -- load them with an empty list so they're kept
+        data = y.load(text.rstrip() + "\n\ndepartments:\n")
     changes: list[str] = []
 
     departments = data.setdefault("departments", CommentedMap())

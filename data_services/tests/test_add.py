@@ -144,3 +144,12 @@ def test_long_source_paths_stay_on_one_line(setup):
     long_file.write_text("sno integer NOT NULL")
     add(storage, catalog, str(long_file), "pwd", "vishwakarma", table="works")
     assert f"source: storage:inputs/pwd/vishwakarma/{long_file.name}\n" in catalog.read_text()
+
+
+def test_header_comments_kept_when_catalog_has_no_departments_yet():
+    from src.schema_registry.add import update_catalog_text
+    from src.schema_registry.catalog import parse_catalog
+
+    new, _ = update_catalog_text("# keep me\n", "pwd", "ds", "storage:inputs/x.txt", department_name="PWD", table="t")
+    assert new.startswith("# keep me")
+    assert parse_catalog(new)[0].id == "pwd"
