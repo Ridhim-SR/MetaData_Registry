@@ -13,6 +13,7 @@ COLUMN_ALIASES: dict[str, list[str]] = {
     "name": ["name", "field_name", "column_name", "column", "field"],
     "data_type": ["data_type", "type", "datatype", "field_type"],
     "length": ["length", "max_length", "size"],
+    "scale": ["scale", "decimal_scale", "precision_scale"],
     "nullable": ["nullable", "is_nullable", "allow_null"],
     "default": ["default", "default_value"],
 }
@@ -68,13 +69,14 @@ def parse_csv_columns(path: str) -> list[dict]:
         columns = []
         for row in reader:
             length = (row.get(header_map.get("length", ""), "") or "").strip()
+            scale = (row.get(header_map.get("scale", ""), "") or "").strip()
 
             columns.append(
                 {
                     "name": row[header_map["name"]].strip(),
                     "data_type": row[header_map["data_type"]].strip(),
                     "length": int(length) if length.isdigit() else None,
-                    "scale": None,
+                    "scale": int(scale) if scale.isdigit() else None,
                     "nullable": _to_bool(row.get(header_map.get("nullable", ""))),
                     "default": (row.get(header_map.get("default", ""), "") or "").strip() or None,
                 }

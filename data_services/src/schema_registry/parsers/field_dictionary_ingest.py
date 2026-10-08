@@ -11,7 +11,7 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-_COLUMN_FIELDS = ["name", "data_type", "length", "nullable", "default"]
+_COLUMN_FIELDS = ["name", "data_type", "length", "scale", "nullable", "default"]
 _METADATA_FIELDS = ["name", "business_description", "tag", "classification", "glossary_term", "active"]
 
 
@@ -59,6 +59,7 @@ def run_field_dictionary(
                             "name": c["name"],
                             "data_type": c["data_type"],
                             "length": c["length"] if c["length"] is not None else "",
+                            "scale": c["scale"] if c.get("scale") is not None else "",
                             "nullable": str(c["nullable"]),
                             "default": c["default"] if c["default"] is not None else "",
                         }
@@ -73,7 +74,7 @@ def run_field_dictionary(
                         {
                             "name": name,
                             "business_description": meta.get("business_description", ""),
-                            "tag": "",
+                            "tag": meta.get("tag", ""),
                             "classification": "",
                             "glossary_term": "",
                             "active": "true",

@@ -148,3 +148,53 @@ def test_publish_failure_is_reported_per_table_and_the_loop_continues(tmp_path):
     assert rows["welfare.cmsvy.cmsvy_application"]["publish_status"] == "published"
     assert rows["welfare.cmsvy.cmsvy_bride_details"]["publish_status"] == "failed"
     assert "server said no" in rows["welfare.cmsvy.cmsvy_bride_details"]["error"]
+
+
+def _write_dictionary_with_personal(tmp_path, rows):
+    import csv as _csv
+
+    path = tmp_path / "field_dictionary_personal.csv"
+    header = ["Dataset Name", "Dataset Field", "Data Description", "Format", "Mandatory (Y/N)", "Personal Data (Y/N)"]
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = _csv.writer(f)
+        writer.writerow(header)
+        writer.writerows(rows)
+    return str(path)
+
+
+def test_personal_data_yes_reaches_the_stored_column_as_a_tag(tmp_path):
+    storage = LocalObjectStorage(tmp_path / "storage")
+    lookups.register_department(storage, "welfare", "Social Welfare Department")
+    source = _write_dictionary_with_personal(
+        tmp_path,
+        [("t1", "bride_aadhaar_no", "Aadhaar of the bride", "Numeric (12 Digits)", "Y", "Y")],
+    )
+
+    results = run_field_dictionary(department="welfare", dataset="cmsvy", source_file=source, storage=storage)
+
+    assert results["t1"]["columns"][0]["tag"] == "PII"
+    assert results["t1"]["columns"][0]["classification"] == "PII"
+
+
+def test_personal_data_no_leaves_auto_tagging_in_charge(tmp_path):
+    storage = LocalObjectStorage(tmp_path / "storage")
+    lookups.register_department(storage, "welfare", "Social Welfare Department")
+    source = _write_dictionary_with_personal(
+        tmp_path,
+        [("t1", "tender_cost", "Cost of the tender", "Numeric (12 Digits)", "N", "N")],
+    )
+
+    results = run_field_dictionary(department="welfare", dataset="cmsvy", source_file=source, storage=storage)
+
+    assert results["t1"]["columns"][0]["tag"] == "Financial"
+
+
+def test_unrecognised_format_row_is_still_ingested(tmp_path):
+    storage = LocalObjectStorage(tmp_path / "storage")
+    lookups.register_department(storage, "welfare", "Social Welfare Department")
+    source = _write_dictionary(tmp_path, [("t1", "weird_col", "Mystery field", "[Aadhaar Redacted]", "N")])
+
+    results = run_field_dictionary(department="welfare", dataset="cmsvy", source_file=source, storage=storage)
+
+    assert results["t1"]["status"] == "ok"
+    assert results["t1"]["columns"][0]["data_type"] == "character varying"
