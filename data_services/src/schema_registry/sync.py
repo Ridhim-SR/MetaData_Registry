@@ -222,6 +222,7 @@ def _main(argv: list[str]) -> int:
     from src.schema_registry.openmetadata.publish import get_client
     from src.schema_registry.openmetadata.setup_custom_properties import setup as setup_custom_properties
     from src.storage import storage_from_env
+    from src.storage.backup import backup_after_run
     from src.utils.config import load_env
 
     parser = argparse.ArgumentParser(prog="python3 -m src.schema_registry.sync", description=__doc__.split("\n\n")[0])
@@ -248,7 +249,9 @@ def _main(argv: list[str]) -> int:
         dry_run=args.dry_run, publish_only=args.publish_only, only_department=args.department,
     )
     print_summary(outcomes)
-    return 1 if any("failed" in (o.ingest, o.publish) for o in outcomes) else 0
+    failed = any("failed" in (o.ingest, o.publish) for o in outcomes)
+    backed_up = args.dry_run or backup_after_run(storage)
+    return 1 if failed or not backed_up else 0
 
 
 if __name__ == "__main__":
