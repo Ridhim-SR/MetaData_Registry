@@ -1,6 +1,11 @@
 import pytest
 
-from src.schema_registry.parsers.csv_schema_parser import parse_csv_columns
+from src.schema_registry.parsers.csv_schema_parser import parse_csv_text
+
+
+def parse_csv_columns(path):
+    with open(path, newline="", encoding="utf-8-sig") as f:
+        return parse_csv_text(f.read(), label=str(path))
 
 
 def _write(tmp_path, name, content):
@@ -54,22 +59,25 @@ def test_required_column_is_not_silently_aliased_to_nullable(tmp_path):
     assert cols[0]["nullable"] is True
 
 
-def test_scale_column_is_parsed_as_an_integer(tmp_path):
+def test_scale_column_present_is_still_carried_as_none(tmp_path):
+    """The CSV schema parser always emits scale=None (see csv_schema_parser):
+    only a Field Dictionary carries a field's scale, so a `scale`/`Decimal
+    Scale` column in a plain schema CSV is ignored rather than guessed at."""
     path = _write(
         tmp_path,
         "dept_scale.csv",
         "name,data_type,length,scale,nullable\ncost,numeric,18,2,No\n",
     )
-    assert parse_csv_columns(path)[0]["scale"] == 2
+    assert parse_csv_columns(path)[0]["scale"] is None
 
 
-def test_scale_column_alias_is_accepted(tmp_path):
+def test_scale_column_alias_is_still_carried_as_none(tmp_path):
     path = _write(
         tmp_path,
         "dept_scale_alias.csv",
         "Field,Type,Decimal Scale\namount,numeric,4\n",
     )
-    assert parse_csv_columns(path)[0]["scale"] == 4
+    assert parse_csv_columns(path)[0]["scale"] is None
 
 
 def test_missing_scale_column_defaults_to_none(tmp_path):

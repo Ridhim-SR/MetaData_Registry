@@ -66,21 +66,21 @@ def _fake_client():
         # a real id, so the follow-up JSON-Patch paths read like
         # /tables/pwd.vishwakarma.t1 instead of a MagicMock repr
         entity.id = fqn
+        # the real server echoes a table's columns back -- _replace_column_tags()
+        # maps names to indexes against this list
+        entity.columns = getattr(request, "columns", None)
         return entity
 
     client.create_or_update.side_effect = _create_or_update
     return client
 
 
-def _patch_body(client, rest_suffix: str) -> dict:
-    """The last JSON-Patch sent for entities under `rest_suffix`, as
-    path -> value. publish_table() now patches the table's column tags too,
-    so client.client.patch.call_args alone no longer says which entity it
-    was for."""
+def _last_patch_body(client, path_prefix: str) -> dict:
+    """{json-pointer path: value} of the most recent JSON-Patch sent to an
+    entity under `path_prefix` (e.g. "/databases/", "/tables/")."""
 
-    calls = [c for c in client.client.patch.call_args_list if c.kwargs["path"].startswith(f"{rest_suffix}/")]
-    assert calls, f"no PATCH request under {rest_suffix}"
-    return {op["path"]: op["value"] for op in json.loads(calls[-1].kwargs["data"])}
+    call = next(c for c in reversed(client.client.patch.call_args_list) if c.kwargs["path"].startswith(path_prefix))
+    return {op["path"]: op["value"] for op in json.loads(call.kwargs["data"])}
 
 
 def test_publish_table_builds_full_entity_chain(tmp_path):
@@ -171,7 +171,7 @@ def test_publish_table_pushes_dataset_category_and_description_to_database(tmp_p
         source_file=_write_ddl(tmp_path),
         storage=storage,
         source_format="postgres_ddl",
-        category="CAT-2",
+        category="CAT-3",
         dataset_description="PWD's master works dataset.",
     )
 
@@ -182,7 +182,7 @@ def test_publish_table_pushes_dataset_category_and_description_to_database(tmp_p
         call.args[0] for call in client.create_or_update.call_args_list if _unwrap(call.args[0].name) == "vishwakarma"
     )
     assert database_request.description.root == "PWD's master works dataset."
-    assert [t.tagFQN.root for t in database_request.tags] == ["DataSensitivity.CAT-2"]
+    assert [t.tagFQN.root for t in database_request.tags] == ["DataSensitivity.CAT-3"]
 
 
 def test_publish_table_clears_stale_category_and_description_on_republish(tmp_path):
@@ -201,16 +201,16 @@ def test_publish_table_clears_stale_category_and_description_on_republish(tmp_pa
         source_file=_write_ddl(tmp_path),
         storage=storage,
         source_format="postgres_ddl",
-        category="CAT-2",
+        category="CAT-3",
         owner="Someone",
     )
     client = _fake_client()
     publish_table(client, storage, "pwd.vishwakarma.t1")
 
-    patch_body = _patch_body(client, "/databases")
+    patch_body = _last_patch_body(client, "/databases/")
     assert patch_body["/tags"] == [
         {
-            "tagFQN": "DataSensitivity.CAT-2",
+            "tagFQN": "DataSensitivity.CAT-3",
             "source": "Classification",
             "labelType": "Automated",
             "state": "Confirmed",
@@ -237,7 +237,7 @@ def test_publish_table_clears_stale_category_and_description_on_republish(tmp_pa
     storage.write_csv(lookups.DATASETS_PATH, rows)
     publish_table(client, storage, "pwd.vishwakarma.t1")
 
-    patch_body = _patch_body(client, "/databases")
+    patch_body = _last_patch_body(client, "/databases/")
     assert patch_body["/tags"] == []
     assert patch_body["/extension"] == {"apiAvailable": "", "datasetOwner": "", "frequency": "", "timeline": ""}
 
@@ -383,7 +383,9 @@ def test_publish_rejects_an_unknown_category_written_before_validation(tmp_path)
         row["category"] = "cat3"
     storage.write_csv(lookups.DATASETS_PATH, rows)
 
-    with pytest.raises(ValueError, match="Unknown category 'cat3'"):
+    # refused before any OpenMetadata call: the dataset-vs-column check runs
+    # first, and _ensure_sensitivity_tag() would refuse it again later
+    with pytest.raises(ValueError, match="isn't a CAT-<n> value"):
         publish_table(_fake_client(), storage, "pwd.vishwakarma.tbd_confirm_with_pwd")
 
 
@@ -545,3 +547,151 @@ def test_get_by_name_retries_on_connection_error():
 
     assert result == "found"
     assert client.get_by_name.call_count == 2
+
+
+def _run_with(tmp_path, storage, ddl: str, metadata_csv: str | None = None, **kwargs):
+    ddl_file = tmp_path / "raw.txt"
+    ddl_file.write_text(ddl)
+    metadata_path = None
+    if metadata_csv is not None:
+        metadata_path = tmp_path / "meta.csv"
+        metadata_path.write_text(metadata_csv)
+    return run(
+        department="pwd",
+        dataset="vishwakarma",
+        table_name="t1",
+        source_file=str(ddl_file),
+        storage=storage,
+        source_format="postgres_ddl",
+        business_metadata_file=str(metadata_path) if metadata_path else None,
+        **kwargs,
+    )
+
+
+def test_publish_table_replaces_column_tags_instead_of_merging(tmp_path):
+    """OpenMetadata's PUT merges column tags, so a column downgraded from
+    PII to Internal would show both labels. publish_table() must follow the
+    PUT with a patch setting each column's tags to exactly this run's list."""
+
+    storage = LocalObjectStorage(tmp_path / "storage")
+    lookups.register_department(storage, "pwd", "Public Works Department")
+    _run_with(tmp_path, storage, "beneficiary_email character varying(100), remarks text", category="CAT-3")
+    client = _fake_client()
+    publish_table(client, storage, "pwd.vishwakarma.t1")
+    assert _last_patch_body(client, "/tables/")["/columns/0/tags"][0]["tagFQN"] == "MDSF.PII"
+
+    _run_with(
+        tmp_path, storage, "beneficiary_email character varying(100), remarks text",
+        metadata_csv="name,classification\nbeneficiary_email,Internal\n",
+    )
+    publish_table(client, storage, "pwd.vishwakarma.t1")
+
+    call = next(c for c in reversed(client.client.patch.call_args_list) if c.kwargs["path"].startswith("/tables/"))
+    ops = json.loads(call.kwargs["data"])
+    assert {op["op"] for op in ops} == {"add"}
+    body = {op["path"]: op["value"] for op in ops}
+    assert [t["tagFQN"] for t in body["/columns/0/tags"]] == ["MDSF.Internal"]
+    # every column carries at least its classification level, and column 0 no
+    # longer shows the PII label from the first publish -- that's the merge
+    # quirk this patch exists for
+    assert [t["tagFQN"] for t in body["/columns/1/tags"]] == ["MDSF.Internal"]
+
+
+def test_publish_table_matches_column_tags_by_name_not_request_order(tmp_path):
+    storage = LocalObjectStorage(tmp_path / "storage")
+    lookups.register_department(storage, "pwd", "Public Works Department")
+    _run_with(tmp_path, storage, "beneficiary_email character varying(100), remarks text", category="CAT-3")
+    client = _fake_client()
+    fake_create = client.create_or_update.side_effect
+
+    def _server_reorders_columns(request):
+        entity = fake_create(request)
+        if entity.columns:
+            entity.columns = list(reversed(entity.columns))
+        return entity
+
+    client.create_or_update.side_effect = _server_reorders_columns
+    publish_table(client, storage, "pwd.vishwakarma.t1")
+
+    body = _last_patch_body(client, "/tables/")
+    assert [t["tagFQN"] for t in body["/columns/0/tags"]] == ["MDSF.Internal"]  # remarks, now first on the server
+    assert body["/columns/1/tags"][0]["tagFQN"] == "MDSF.PII"
+
+
+def test_publish_refuses_dataset_category_below_its_columns(tmp_path):
+    storage = LocalObjectStorage(tmp_path / "storage")
+    lookups.register_department(storage, "pwd", "Public Works Department")
+    _run_with(tmp_path, storage, "beneficiary_email character varying(100), remarks text", category="CAT-1")
+    client = _fake_client()
+
+    with pytest.raises(ValueError, match=r"category is CAT-1 but column\(s\) beneficiary_email are PII"):
+        publish_table(client, storage, "pwd.vishwakarma.t1")
+
+    # refused before touching OpenMetadata at all
+    assert client.create_or_update.call_count == 0
+    assert client.client.patch.call_count == 0
+
+
+def test_publish_allows_category_below_columns_with_explicit_override(tmp_path):
+    storage = LocalObjectStorage(tmp_path / "storage")
+    lookups.register_department(storage, "pwd", "Public Works Department")
+    _run_with(tmp_path, storage, "beneficiary_email character varying(100)", category="CAT-1")
+
+    result = publish_table(_fake_client(), storage, "pwd.vishwakarma.t1", allow_category_below_columns=True)
+
+    assert result["column_count"] == 1
+
+
+def test_publish_allows_category_equal_or_above_columns(tmp_path):
+    storage = LocalObjectStorage(tmp_path / "storage")
+    lookups.register_department(storage, "pwd", "Public Works Department")
+    _run_with(tmp_path, storage, "beneficiary_email character varying(100)", category="CAT-3")
+
+    assert publish_table(_fake_client(), storage, "pwd.vishwakarma.t1")["column_count"] == 1
+
+
+def test_publish_with_blank_category_and_sensitive_columns_only_warns(tmp_path, monkeypatch):
+    storage = LocalObjectStorage(tmp_path / "storage")
+    lookups.register_department(storage, "pwd", "Public Works Department")
+    _run_with(tmp_path, storage, "beneficiary_email character varying(100)")
+    warnings = []
+    # src.utils.logger sets propagate=False, so caplog never sees these
+    monkeypatch.setattr("src.schema_registry.openmetadata.publish.logger.warning", warnings.append)
+
+    publish_table(_fake_client(), storage, "pwd.vishwakarma.t1")
+
+    assert any("has no category yet" in w and "at least CAT-3" in w for w in warnings)
+
+
+def test_publish_refuses_non_cat_dataset_category_when_columns_are_classified(tmp_path):
+    """pipeline.run() rejects a non-CAT `category` at ingest, so it never
+    lands in _lookups/datasets.csv -- and publish_table() keeps the same
+    check for the paths that write that lookup without going through run()
+    (republish, a hand-edited CSV)."""
+
+    storage = LocalObjectStorage(tmp_path / "storage")
+    lookups.register_department(storage, "pwd", "Public Works Department")
+
+    with pytest.raises(ValueError, match="unknown category 'Open'"):
+        _run_with(tmp_path, storage, "beneficiary_email character varying(100)", category="Open")
+
+    _run_with(tmp_path, storage, "beneficiary_email character varying(100)")
+    lookups.set_dataset_fields(storage, "pwd.vishwakarma", "pwd", "vishwakarma", {"category": "Open"})
+    with pytest.raises(ValueError, match="isn't a CAT-<n> value"):
+        publish_table(_fake_client(), storage, "pwd.vishwakarma.t1")
+
+
+def test_run_passes_category_override_through_to_publish(tmp_path):
+    storage = LocalObjectStorage(tmp_path / "storage")
+    lookups.register_department(storage, "pwd", "Public Works Department")
+    with pytest.raises(ValueError, match="Under MDSF the highest category applies"):
+        _run_with(
+            tmp_path, storage, "beneficiary_email character varying(100)",
+            category="CAT-1", openmetadata_client=_fake_client(),
+        )
+
+    result = _run_with(
+        tmp_path, storage, "beneficiary_email character varying(100)",
+        openmetadata_client=_fake_client(), allow_category_below_columns=True,
+    )
+    assert result["openmetadata"]["column_count"] == 1

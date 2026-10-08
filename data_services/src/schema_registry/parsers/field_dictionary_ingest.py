@@ -4,15 +4,22 @@ from pathlib import Path
 
 from metadata.ingestion.ometa.ometa_api import OpenMetadata
 
-from src.schema_registry.parsers.field_dictionary_parser import parse_field_dictionary
-from src.schema_registry.pipeline import run
+from src.schema_registry import inputs
+from src.schema_registry.parsers.field_dictionary_parser import parse_field_dictionary_text
+from src.schema_registry.pipeline import _timestamp, run
+from src.schema_registry.registry import lookups, paths
 from src.storage.base import ObjectStorage
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-_COLUMN_FIELDS = ["name", "data_type", "length", "scale", "nullable", "default"]
-_METADATA_FIELDS = ["name", "business_description", "tag", "classification", "glossary_term", "active"]
+_COLUMN_FIELDS = ["name", "data_type", "length", "nullable", "default"]
+# Only what a Field Dictionary actually answers. Writing blank tag/
+# classification/glossary_term or a hard-coded active=true here would
+# overwrite answers set by hand on an earlier run every time it's re-ingested
+# -- and per the standing directive the ingest step leaves `tag` alone
+# entirely, so curate's auto-tag stays the only thing that sets it.
+_METADATA_FIELDS = ["name", "business_description"]
 
 
 def run_field_dictionary(
@@ -44,7 +51,16 @@ def run_field_dictionary(
     registered, same precondition as run() itself.
     """
 
-    tables = parse_field_dictionary(source_file)
+    # `source_file` may be a local path or a storage:<key> (see inputs.py).
+    # The original multi-table file is archived once at dataset level; each
+    # table's run() then archives the per-table split it actually parsed.
+    source_bytes, source_name = inputs.read_input(storage, source_file)
+    tables = parse_field_dictionary_text(inputs.decode(source_bytes), label=source_file)
+    archive_path = paths.dataset_source_path(
+        lookups.slugify(department), lookups.slugify(dataset), _timestamp(), source_name
+    )
+    inputs.archive(storage, archive_path, source_bytes)
+    logger.info(f"Field dictionary: archived original -> {archive_path}")
     results: dict[str, dict] = {}
 
     with tempfile.TemporaryDirectory() as tmp_dir:
@@ -59,7 +75,6 @@ def run_field_dictionary(
                             "name": c["name"],
                             "data_type": c["data_type"],
                             "length": c["length"] if c["length"] is not None else "",
-                            "scale": c["scale"] if c.get("scale") is not None else "",
                             "nullable": str(c["nullable"]),
                             "default": c["default"] if c["default"] is not None else "",
                         }
@@ -70,16 +85,7 @@ def run_field_dictionary(
                 writer = csv.DictWriter(f, fieldnames=_METADATA_FIELDS)
                 writer.writeheader()
                 for name, meta in table["business_metadata"].items():
-                    writer.writerow(
-                        {
-                            "name": name,
-                            "business_description": meta.get("business_description", ""),
-                            "tag": meta.get("tag", ""),
-                            "classification": "",
-                            "glossary_term": "",
-                            "active": "true",
-                        }
-                    )
+                    writer.writerow({"name": name, "business_description": meta.get("business_description", "")})
 
             logger.info(f"Field dictionary: ingesting table '{table_name}' ({len(table['columns'])} column(s))")
             try:
@@ -111,12 +117,11 @@ if __name__ == "__main__":
     import os
     import sys
 
-    from dotenv import load_dotenv
-
     from src.schema_registry.openmetadata.publish import get_client
     from src.storage import storage_from_env
+    from src.utils.config import load_env
 
-    load_dotenv()
+    load_env()
     _storage = storage_from_env()
 
     _client = None
@@ -136,7 +141,7 @@ if __name__ == "__main__":
     )
     for _table_name, _result in _results.items():
         if _result["status"] == "ok":
-            print(f"{_table_name}: {_result['column_count']} column(s), {_result['warning_count']} warning(s)")
+            print(f"{_table_name}: {_result['column_count']} column(s)")
         else:
             print(f"{_table_name}: FAILED -- {_result['error']}")
     # Non-zero when any table failed: a caller that only checks the exit

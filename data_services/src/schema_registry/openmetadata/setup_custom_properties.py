@@ -12,12 +12,14 @@ separate, run-once-per-OpenMetadata-instance step -- re-running it is safe
 import os
 
 import requests
-from dotenv import load_dotenv
+from src.utils.config import load_env
 
 from src.schema_registry.openmetadata.publish import _CUSTOM_PROPERTY_NAMES
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+_TIMEOUT = 15  # seconds -- an unreachable server fails fast instead of hanging
 
 _DESCRIPTIONS = {
     "apiAvailable": "Whether this dataset is exposed via an API (Y/N).",
@@ -32,26 +34,17 @@ _DESCRIPTIONS = {
 _TIMEOUT = (10, 60)
 
 
-def _get(url: str, auth: dict, **kwargs) -> requests.Response:
-    resp = requests.get(url, headers=auth, timeout=_TIMEOUT, **kwargs)
-    resp.raise_for_status()
-    return resp
-
-
 def setup(host_port: str, jwt_token: str) -> None:
     auth = {"Authorization": f"Bearer {jwt_token}"}
-    type_id = _get(f"{host_port}/v1/metadata/types/name/database", auth).json()["id"]
-    string_type_id = next(
-        t["id"]
-        for t in _get(f"{host_port}/v1/metadata/types?category=field&limit=50", auth).json()["data"]
-        if t["name"] == "string"
-    )
-    existing = {
-        p["name"]
-        for p in _get(f"{host_port}/v1/metadata/types/{type_id}?fields=customProperties", auth)
-        .json()
-        .get("customProperties", [])
-    }
+
+    def get(path: str) -> dict:
+        response = requests.get(f"{host_port}{path}", headers=auth, timeout=_TIMEOUT)
+        response.raise_for_status()  # e.g. 401 -> a clear "token not valid" message, not a KeyError
+        return response.json()
+
+    type_id = get("/v1/metadata/types/name/database")["id"]
+    string_type_id = next(t["id"] for t in get("/v1/metadata/types?category=field&limit=50")["data"] if t["name"] == "string")
+    existing = {p["name"] for p in get(f"/v1/metadata/types/{type_id}?fields=customProperties").get("customProperties", [])}
 
     for property_name in _CUSTOM_PROPERTY_NAMES.values():
         if property_name in existing:
@@ -80,9 +73,20 @@ def setup(host_port: str, jwt_token: str) -> None:
         logger.info(f"Added '{property_name}' to the Database entity type.")
 
 
-if __name__ == "__main__":
-    load_dotenv()
+def _main(argv: list[str]) -> int:
+    """Command line entry point (settings come from .env / the shell)."""
+
+    load_env()
     setup(
         host_port=os.environ.get("OPENMETADATA_HOST_PORT", "http://localhost:8585/api"),
         jwt_token=os.environ["OPENMETADATA_JWT_TOKEN"],
     )
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+
+    from src.utils.cli import run_cli
+
+    sys.exit(run_cli("setup_custom_properties", _main, sys.argv[1:]))

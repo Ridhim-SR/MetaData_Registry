@@ -1,4 +1,5 @@
 import csv
+import io
 import re
 from typing import NamedTuple
 
@@ -106,7 +107,7 @@ def parse_format(format_text: str) -> tuple[str, int | None]:
 _REQUIRED_HEADERS = ("Dataset Name", "Dataset Field")
 
 
-def parse_field_dictionary(path: str) -> dict[str, dict]:
+def parse_field_dictionary_text(text: str, label: str = "<text>") -> dict[str, dict]:
     """Parse a multi-table Field Dictionary CSV (columns: Dataset Name,
     Dataset Field, Data Description, Format, Mandatory (Y/N),
     Personal Data (Y/N), ...) into one entry per distinct "Dataset Name",
@@ -130,60 +131,73 @@ def parse_field_dictionary(path: str) -> dict[str, dict]:
 
     tables: dict[str, dict] = {}
 
-    with open(path, newline="", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f)
-        missing = [header for header in _REQUIRED_HEADERS if header not in (reader.fieldnames or [])]
-        if missing:
-            logger.error(f"field_dictionary_parser: missing required column(s) {missing}")
-            raise ValueError(
-                f"Field dictionary is missing required column(s) {missing}. "
-                f"Headers found: {reader.fieldnames}"
-            )
+    reader = csv.DictReader(io.StringIO(text))
+    missing = [header for header in _REQUIRED_HEADERS if header not in (reader.fieldnames or [])]
+    if missing:
+        logger.error(f"field_dictionary_parser: missing required column(s) {missing}")
+        raise ValueError(
+            f"Field dictionary is missing required column(s) {missing}. "
+            f"Headers found: {reader.fieldnames}"
+        )
 
-        for row in reader:
-            table_name = (row.get("Dataset Name") or "").strip()
-            field_name = (row.get("Dataset Field") or "").strip()
-            if not table_name or not field_name:
-                logger.warning(f"field_dictionary_parser: skipping row without a dataset/field name: {row}")
-                continue
+    for row in reader:
+        table_name = (row.get("Dataset Name") or "").strip()
+        field_name = (row.get("Dataset Field") or "").strip()
+        if not table_name or not field_name:
+            logger.warning(f"field_dictionary_parser: skipping row without a dataset/field name: {row}")
+            continue
 
-            format_text = (row.get("Format") or "").strip()
-            try:
-                spec = parse_format_full(format_text)
-            except ValueError:
-                spec = FormatSpec("character varying", None, None)
-                format_note = f"unrecognized Format '{format_text}' -- treated as character varying"
-                logger.warning(f"field_dictionary_parser: '{table_name}.{field_name}': {format_note}")
-            else:
-                format_note = ""
+        format_text = (row.get("Format") or "").strip()
+        try:
+            spec = parse_format_full(format_text)
+        except ValueError:
+            spec = FormatSpec("character varying", None, None)
+            format_note = f"unrecognized Format '{format_text}' -- treated as character varying"
+            logger.warning(f"field_dictionary_parser: '{table_name}.{field_name}': {format_note}")
+        else:
+            format_note = ""
 
-            mandatory = (row.get("Mandatory (Y/N)") or "").strip().upper()
-            # "Y (Rural)" / "Y (Urban)" are still mandatory: any Y means
-            # NOT NULL, not just a bare one.
-            nullable = not mandatory.startswith("Y")
+        mandatory = (row.get("Mandatory (Y/N)") or "").strip().upper()
+        # "Y (Rural)" / "Y (Urban)" are still mandatory: any Y means
+        # NOT NULL, not just a bare one.
+        nullable = not mandatory.startswith("Y")
 
-            personal = (row.get("Personal Data (Y/N)") or "").strip().upper()
-            metadata: dict = {
-                "business_description": (row.get("Data Description") or "").strip(),
-                "tag": "PII" if personal.startswith("Y") else "",
+        personal = (row.get("Personal Data (Y/N)") or "").strip().upper()
+        metadata: dict = {
+            "business_description": (row.get("Data Description") or "").strip(),
+            # Recorded here as what the department said, but NOT written into
+            # the per-table business-metadata file by field_dictionary_ingest
+            # (that writes name + business_description only) -- tags are set
+            # by curate's auto-tag, per the decision to leave ingest blank.
+            "tag": "PII" if personal.startswith("Y") else "",
+        }
+        if format_note:
+            metadata["format_note"] = format_note
+
+        table = tables.setdefault(table_name, {"columns": [], "business_metadata": {}})
+        table["columns"].append(
+            {
+                "name": field_name,
+                "data_type": spec.data_type,
+                "length": spec.length,
+                "scale": spec.scale,
+                "nullable": nullable,
+                "default": None,
             }
-            if format_note:
-                metadata["format_note"] = format_note
-
-            table = tables.setdefault(table_name, {"columns": [], "business_metadata": {}})
-            table["columns"].append(
-                {
-                    "name": field_name,
-                    "data_type": spec.data_type,
-                    "length": spec.length,
-                    "scale": spec.scale,
-                    "nullable": nullable,
-                    "default": None,
-                }
-            )
-            table["business_metadata"][field_name] = metadata
+        )
+        table["business_metadata"][field_name] = metadata
 
     for table_name, table in tables.items():
         logger.info(f"field_dictionary_parser: '{table_name}' -> {len(table['columns'])} column(s)")
-    logger.info(f"field_dictionary_parser: parsed {len(tables)} table(s) from {path}")
+    logger.info(f"field_dictionary_parser: parsed {len(tables)} table(s) from {label}")
     return tables
+
+
+def parse_field_dictionary(path: str) -> dict[str, dict]:
+    """The file-path view of parse_field_dictionary_text() -- utf-8-sig
+    because spreadsheet exports start with a BOM that would otherwise land
+    in the first header name."""
+
+    with open(path, newline="", encoding="utf-8-sig") as f:
+        return parse_field_dictionary_text(f.read(), label=str(path))
+

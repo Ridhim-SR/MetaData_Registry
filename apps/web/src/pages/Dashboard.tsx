@@ -34,12 +34,12 @@ export function DashboardPage() {
 
   return (
     <div>
-      <h1 className="mb-6 text-2xl font-semibold">Dashboard</h1>
+      <h1 className="mb-6 text-2xl font-semibold" style={{ color: "var(--navy-900)" }}>Dashboard</h1>
 
       <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
         {statCards.map((card) => (
-          <div key={card.key} className="rounded-lg border border-slate-200 p-4">
-            <div className="text-sm text-slate-500">{card.label}</div>
+          <div key={card.key} className="p-4" style={{ border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)" }}>
+            <div className="text-sm" style={{ color: "var(--text-muted)" }}>{card.label}</div>
             <div className="mt-1 text-2xl font-semibold">
               {statsQuery.isPending ? "…" : (statsQuery.data?.[card.key] ?? 0)}
             </div>

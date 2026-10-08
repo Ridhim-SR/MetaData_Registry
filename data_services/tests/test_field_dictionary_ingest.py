@@ -118,6 +118,9 @@ def test_publish_failure_is_reported_per_table_and_the_loop_continues(tmp_path):
                 entity.fullyQualifiedName = f"{parent}.{name}" if parent else str(name)
                 entity.name = name
                 entity.id = "11111111-1111-1111-1111-111111111111"
+                # _replace_column_tags() matches the sent columns against the
+                # ones the "server" echoes back, so it needs a real list here
+                entity.columns = getattr(request, "columns", None)
                 return entity
 
             self.create_or_update = MagicMock(side_effect=_create_or_update)
@@ -150,6 +153,56 @@ def test_publish_failure_is_reported_per_table_and_the_loop_continues(tmp_path):
     assert "server said no" in rows["welfare.cmsvy.cmsvy_bride_details"]["error"]
 
 
+def test_reingesting_dictionary_keeps_answers_set_by_hand(tmp_path):
+    """The dictionary only answers business_description -- re-ingesting it
+    must not blank a classification/glossary term/active flag someone set
+    on this table in between."""
+
+    from src.schema_registry.pipeline import run
+
+    storage = LocalObjectStorage(tmp_path / "storage")
+    lookups.register_department(storage, "welfare", "Social Welfare Department")
+    source = _write_dictionary(tmp_path, [("t1", "bride_mobile_no", "Contact number", "Numeric (10 Digits)", "Y")])
+    run_field_dictionary(department="welfare", dataset="cmsvy", source_file=source, storage=storage)
+
+    columns_file = tmp_path / "cols.csv"
+    columns_file.write_text("name,data_type\nbride_mobile_no,numeric\n")
+    manual = tmp_path / "manual.csv"
+    # `classification` is an MDSF level here (the dataset categories CAT-n are
+    # the dataset-level axis), anything else is auto-classified again.
+    manual.write_text("name,classification,glossary_term,active\nbride_mobile_no,Confidential,Mobile Number,false\n")
+    run(
+        department="welfare", dataset="cmsvy", table_name="t1", source_file=str(columns_file),
+        storage=storage, source_format="csv", business_metadata_file=str(manual),
+    )
+
+    results = run_field_dictionary(department="welfare", dataset="cmsvy", source_file=source, storage=storage)
+
+    column = results["t1"]["columns"][0]
+    assert (column["classification"], column["glossary_term"], column["active"]) == (
+        "Confidential",
+        "Mobile Number",
+        False,
+    )
+    assert column["business_description"] == "Contact number"
+
+
+def test_dictionary_from_storage_is_archived_once_at_dataset_level(tmp_path):
+    storage = LocalObjectStorage(tmp_path / "storage")
+    lookups.register_department(storage, "welfare", "Social Welfare Department")
+    local = _write_dictionary(tmp_path, [("t1", "bride_name", "Name of the bride", "Text", "Y")])
+    storage.write_bytes("inputs/welfare/dict.csv", open(local, "rb").read())
+
+    results = run_field_dictionary(
+        department="welfare", dataset="cmsvy", source_file="storage:inputs/welfare/dict.csv", storage=storage
+    )
+
+    assert results["t1"]["column_count"] == 1
+    archived = [p for p in storage.list("department/welfare/cmsvy/_source/") if not p.endswith(".sha256")]
+    assert len(archived) == 1 and archived[0].endswith("__dict.csv")
+    assert storage.read_bytes(archived[0]) == open(local, "rb").read()
+
+
 def _write_dictionary_with_personal(tmp_path, rows):
     import csv as _csv
 
@@ -162,7 +215,12 @@ def _write_dictionary_with_personal(tmp_path, rows):
     return str(path)
 
 
-def test_personal_data_yes_reaches_the_stored_column_as_a_tag(tmp_path):
+def test_personal_data_column_is_classified_but_not_tagged_by_ingest(tmp_path):
+    """The ingest step writes only name + business_description: the file's
+    `Personal Data (Y/N)` answer must not land as a column tag. Classification
+    still comes from curate.py's own PII rules, and the tag from its auto-tag
+    rules (which have no rule for an aadhaar number)."""
+
     storage = LocalObjectStorage(tmp_path / "storage")
     lookups.register_department(storage, "welfare", "Social Welfare Department")
     source = _write_dictionary_with_personal(
@@ -172,7 +230,7 @@ def test_personal_data_yes_reaches_the_stored_column_as_a_tag(tmp_path):
 
     results = run_field_dictionary(department="welfare", dataset="cmsvy", source_file=source, storage=storage)
 
-    assert results["t1"]["columns"][0]["tag"] == "PII"
+    assert results["t1"]["columns"][0]["tag"] == ""
     assert results["t1"]["columns"][0]["classification"] == "PII"
 
 

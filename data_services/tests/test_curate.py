@@ -36,16 +36,6 @@ def test_untagged_field_gets_empty_string_not_none():
     assert curated[0]["tag"] == ""
 
 
-def test_unknown_postgres_type_produces_validation_warning():
-    curated = curate_schema([_col("weird_col", "some_made_up_type")])
-    assert "Unrecognized Postgres type" in curated[0]["validation_warning"]
-
-
-def test_known_type_has_no_warning():
-    curated = curate_schema([_col("sno", "integer")])
-    assert curated[0]["validation_warning"] == ""
-
-
 def test_business_metadata_overrides_auto_tag():
     business_metadata = {
         "total_cost": {

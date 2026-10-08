@@ -18,13 +18,16 @@ class Visibility(str, enum.Enum):
     """Dataset/table access level for the metadata registry.
 
     public: anyone, no login. department: authenticated users of the owning
-    department (or admins). restricted: discoverable as a teaser, details
-    require authorization / access request.
+    department (or admins); guests see a teaser. restricted: discoverable as
+    a teaser, details require authorization / access request. confidential:
+    invisible to everyone except admins (absent from lists, search, counts
+    and stats; direct access is 404).
     """
 
     public = "public"
     department = "department"
     restricted = "restricted"
+    confidential = "confidential"
 
 
 class AuthProvider(str, enum.Enum):
@@ -93,7 +96,6 @@ class DatasetVisibility(Base):
 
 class AccessRequest(Base):
     """Minimal access-request record for restricted metadata (demo flow)."""
-
     __tablename__ = "access_requests"
     __table_args__ = (
         Index("idx_access_requests_fqn", "fqn"),
@@ -166,3 +168,28 @@ class RegistryColumn(Base):
     glossary_term: Mapped[str | None] = mapped_column(String(200), nullable=True, default=None)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     validation_warning: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+
+
+class TableInfo(Base):
+    """Dataset information tags per OpenMetadata table (sidecar).
+
+    Mirrors the OM Custom Properties panel: whether the dataset is exposed
+    via an API, who owns it (free text), refresh frequency and covered
+    timeline. Stored here (not in OM) so reads work without OM custom
+    property definitions and stay under our access policy. Tables without
+    a row render as "Not set".
+    """
+
+    __tablename__ = "table_info"
+    __table_args__ = (
+        Index("idx_table_info_fqn", "fqn", unique=True),
+        {"schema": "users"},
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    fqn: Mapped[str] = mapped_column(String(500), nullable=False)
+    api_available: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=None)
+    dataset_owner: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None)
+    frequency: Mapped[str | None] = mapped_column(String(100), nullable=True, default=None)
+    timeline: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

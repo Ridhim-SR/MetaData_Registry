@@ -1,8 +1,9 @@
-import { AccessCTA } from "../components/registry/AccessCTA";
-import { DepartmentGrid } from "../components/registry/DepartmentGrid";
 import { Hero } from "../components/registry/Hero";
-import { PublicDataSection } from "../components/registry/PublicDataSection";
 import { StatsBar } from "../components/registry/StatsBar";
+import { DepartmentGrid } from "../components/registry/DepartmentGrid";
+import { PublicDataSection } from "../components/registry/PublicDataSection";
+import { HowItWorks } from "../components/registry/HowItWorks";
+import { AccessCTA } from "../components/registry/AccessCTA";
 
 export function RegistryHomePage() {
   return (
@@ -11,6 +12,7 @@ export function RegistryHomePage() {
       <StatsBar />
       <DepartmentGrid compact />
       <PublicDataSection />
+      <HowItWorks />
       <AccessCTA />
     </div>
   );

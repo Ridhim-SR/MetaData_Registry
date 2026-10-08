@@ -1,12 +1,9 @@
-import os
 import re
+from collections.abc import Callable
 from datetime import datetime, timezone
 
-from dotenv import load_dotenv
-from filelock import FileLock
 
 from src.schema_registry.registry import paths
-from src.storage import storage_from_env
 from src.storage.base import ObjectStorage
 from src.utils.logger import get_logger
 
@@ -61,21 +58,35 @@ def slugify(value: str) -> str:
     return slug
 
 
-def _upsert(storage: ObjectStorage, path: str, key: str, row: dict) -> None:
-    """Insert `row` into the lookup CSV at `path`, or replace the existing
-    row with the same key -- e.g. re-registering a dataset once its Owner/
-    Retention/Lineage are confirmed updates that row instead of being
+def _upsert(
+    storage: ObjectStorage,
+    path: str,
+    key: str,
+    key_value: str,
+    build_row: Callable[[dict | None], dict],
+) -> dict | None:
+    """Insert the row for `key_value` into the lookup CSV at `path`, or
+    replace the existing one -- e.g. re-registering a dataset once its
+    Owner/Retention/Lineage are confirmed updates that row instead of being
     silently ignored.
 
-    Locked per-path so concurrent callers (parallel ingestion runs writing
-    to the same lookup file) can't race on the read-modify-write and lose
-    or corrupt rows."""
+    `build_row(existing)` makes the new row from the current one (None if
+    there isn't one), called while the lock is held -- so a row that
+    carries fields forward from the old one (upsert_dataset) can't be built
+    from a stale read and overwrite a concurrent run's changes. Returns the
+    existing row, or None if this inserted a new one.
 
-    with FileLock(storage.lock_path(path)):
+    Locked per-path (storage.lock -- across machines on Wasabi) so
+    concurrent callers writing to the same lookup file can't race on the
+    read-modify-write and lose or corrupt rows."""
+
+    with storage.lock(path):
         rows = storage.read_csv(path) if storage.exists(path) else []
-        rows = [r for r in rows if r[key] != row[key]]
-        rows.append(row)
+        existing = next((r for r in rows if r[key] == key_value), None)
+        rows = [r for r in rows if r[key] != key_value]
+        rows.append(build_row(existing))
         storage.write_csv(path, rows)
+        return existing
 
 
 def register_department(storage: ObjectStorage, department_id: str, department_name: str) -> None:
@@ -88,14 +99,14 @@ def register_department(storage: ObjectStorage, department_id: str, department_n
     formatting, not synonyms/abbreviations of the same department).
     """
 
-    is_new = not department_exists(storage, department_id)
-    _upsert(
+    existing = _upsert(
         storage,
         DEPARTMENTS_PATH,
         "department_id",
-        {"department_id": department_id, "department_name": department_name},
+        department_id,
+        lambda _: {"department_id": department_id, "department_name": department_name},
     )
-    logger.info(f"Department {'registered' if is_new else 're-registered'}: {department_id} ({department_name})")
+    logger.info(f"Department {'re-registered' if existing else 'registered'}: {department_id} ({department_name})")
 
 
 def department_exists(storage: ObjectStorage, department_id: str) -> bool:
@@ -147,12 +158,9 @@ def upsert_dataset(
     would silently blank them back out. To deliberately clear a field,
     edit `_lookups/datasets.csv` directly."""
 
-    existing = get_dataset(storage, dataset_id) or {}
-    _upsert(
-        storage,
-        DATASETS_PATH,
-        "dataset_id",
-        {
+    def _merged(existing: dict | None) -> dict:
+        existing = existing or {}
+        return {
             "dataset_id": dataset_id,
             "department_id": department_id,
             "dataset_name": dataset_name,
@@ -162,9 +170,32 @@ def upsert_dataset(
             "frequency": frequency or existing.get("frequency", ""),
             "timeline": timeline or existing.get("timeline", ""),
             "dataset_description": dataset_description or existing.get("dataset_description", ""),
-        },
-    )
-    logger.info(f"Dataset {'created' if not existing else 'updated'}: {dataset_id}")
+        }
+
+    # The carry-forward merge runs inside _upsert's lock -- reading the
+    # existing row before taking the lock let two runs for tables in the
+    # same dataset each overwrite the other's owner/category.
+    existing = _upsert(storage, DATASETS_PATH, "dataset_id", dataset_id, _merged)
+    logger.info(f"Dataset {'updated' if existing else 'created'}: {dataset_id}")
+
+
+DATASET_FIELDS = ("category", "api_available", "owner", "frequency", "timeline", "dataset_description")
+
+
+def set_dataset_fields(storage: ObjectStorage, dataset_id: str, department_id: str, dataset_name: str, fields: dict) -> bool:
+    """Set a dataset's fields to exactly `fields` -- a blank value clears
+    it. Unlike upsert_dataset() (which keeps old values for blanks), this
+    is for sync: catalog.yaml is reviewed in git and is the truth, so a
+    field removed there must be removed here too. Returns True if anything
+    changed."""
+
+    new_row = {"dataset_id": dataset_id, "department_id": department_id, "dataset_name": dataset_name}
+    new_row.update({field: (fields.get(field) or "") for field in DATASET_FIELDS})
+    existing = _upsert(storage, DATASETS_PATH, "dataset_id", dataset_id, lambda _: new_row)
+    changed = existing is None or any((existing.get(k) or "") != v for k, v in new_row.items())
+    if changed:
+        logger.info(f"Dataset fields set from catalog: {dataset_id}")
+    return changed
 
 
 def latest_curated_snapshot_path(
@@ -189,17 +220,23 @@ def latest_curated_snapshot_path(
 
 
 def upsert_table(storage: ObjectStorage, table_id: str, dataset_id: str, table_name: str, schema_name: str) -> None:
-    is_new = get_table(storage, table_id) is None
-    _upsert(
+    existing = _upsert(
         storage,
         TABLES_PATH,
         "table_id",
+        table_id,
         # `deleted` reset to "": re-ingesting a table that was previously
         # soft-deleted is an explicit "this table is back" action, so the
         # mark must not survive a fresh run().
-        {"table_id": table_id, "dataset_id": dataset_id, "table_name": table_name, "schema_name": schema_name, "deleted": ""},
+        lambda _: {
+            "table_id": table_id,
+            "dataset_id": dataset_id,
+            "table_name": table_name,
+            "schema_name": schema_name,
+            "deleted": "",
+        },
     )
-    logger.info(f"Table {'registered' if is_new else 're-registered'}: {table_id}")
+    logger.info(f"Table {'re-registered' if existing else 'registered'}: {table_id}")
 
 
 def soft_delete_table(storage: ObjectStorage, table_id: str) -> dict:
@@ -211,7 +248,7 @@ def soft_delete_table(storage: ObjectStorage, table_id: str) -> dict:
     orphaned in OpenMetadata": soft-delete here, then delete the OpenMetadata
     entity (see openmetadata.publish.delete_table)."""
 
-    with FileLock(storage.lock_path(TABLES_PATH)):
+    with storage.lock(TABLES_PATH):
         rows = storage.read_csv(TABLES_PATH) if storage.exists(TABLES_PATH) else []
         row = next((r for r in rows if r["table_id"] == table_id), None)
         if row is None:
@@ -230,7 +267,13 @@ def append_run(storage: ObjectStorage, row: dict) -> None:
     missing field with "" so a partial row (a run that failed early) still
     writes a complete, well-formed line."""
 
-    _upsert(storage, RUNS_PATH, "run_id", {field: str(row.get(field, "")) for field in RUN_FIELDS})
+    _upsert(
+        storage,
+        RUNS_PATH,
+        "run_id",
+        str(row.get("run_id", "")),
+        lambda _: {field: str(row.get(field, "")) for field in RUN_FIELDS},
+    )
 
 
 def update_run(storage: ObjectStorage, run_id: str, **fields) -> None:
@@ -242,7 +285,7 @@ def update_run(storage: ObjectStorage, run_id: str, **fields) -> None:
     if unknown:
         raise ValueError(f"Unknown run field(s) {sorted(unknown)}; allowed: {RUN_FIELDS}")
 
-    with FileLock(storage.lock_path(RUNS_PATH)):
+    with storage.lock(RUNS_PATH):
         rows = storage.read_csv(RUNS_PATH) if storage.exists(RUNS_PATH) else []
         row = next((r for r in rows if r["run_id"] == run_id), None)
         if row is None:
@@ -266,12 +309,3 @@ def unpublished_runs(storage: ObjectStorage) -> dict[str, dict]:
         if row.get("publish_status") != "not_attempted":
             with_snapshot[row["table_id"]] = row
     return {table_id: row for table_id, row in with_snapshot.items() if row.get("publish_status") != "published"}
-
-
-if __name__ == "__main__":
-    load_dotenv()
-    register_department(
-        storage_from_env(),
-        slugify(os.environ["DEPARTMENT_ID"]),
-        os.environ["DEPARTMENT_NAME"],
-    )

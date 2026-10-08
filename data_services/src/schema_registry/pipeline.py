@@ -1,18 +1,17 @@
 import csv
-import hashlib
+import io
 import os
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
 
-from dotenv import load_dotenv
-from filelock import FileLock
+from src.utils.config import load_env
 from metadata.ingestion.ometa.ometa_api import OpenMetadata
 
+from src.schema_registry import inputs
 from src.schema_registry.registry import lookups, paths
-from src.schema_registry.curate import CATEGORY_LEVELS, curate_schema, validate_category
+from src.schema_registry.curate import CATEGORY_LEVELS, curate_schema, validate_category, validate_schema
 from src.schema_registry.openmetadata.publish import get_client, publish_table
-from src.schema_registry.parsers.csv_schema_parser import parse_csv_columns
+from src.schema_registry.parsers.csv_schema_parser import parse_csv_text
 from src.schema_registry.parsers.ddl_parser import parse_postgres_columns
 from src.storage import storage_from_env
 from src.storage.base import ObjectStorage
@@ -22,9 +21,11 @@ logger = get_logger(__name__)
 
 _TRUE_VALUES = {"y", "yes", "true", "1"}
 
+# source_format -> parser over the submission's text (see inputs.read_input
+# for where that text comes from: a local path or a storage:<key>)
 _PARSERS = {
-    "postgres_ddl": lambda path: parse_postgres_columns(Path(path).read_text()),
-    "csv": parse_csv_columns,
+    "postgres_ddl": parse_postgres_columns,
+    "csv": parse_csv_text,
 }
 
 # Fields the per-run diff compares between the previous curated snapshot and
@@ -32,6 +33,24 @@ _PARSERS = {
 # data_type or nullability change used to pass unnoticed on its way to
 # OpenMetadata. The governance ones catch a column being reclassified.
 _DIFF_FIELDS = ("data_type", "nullable", "length", "scale", "classification", "tag", "glossary_term")
+
+
+def parse_source(department_id: str, table_name: str, source_format: str, text: str) -> list[dict]:
+    """Pick the parser for this file: a department's own parser if it has
+    one, otherwise the shared parser for the file's format.
+
+    To give a department its own parser: write parsers/<dept>_parser.py with
+    parse_table(text, table_name) -> columns, import it above, and replace
+    that department's `pass` below with
+        return <dept>_parser.parse_table(text, table_name)
+    """
+
+    if department_id == "agriculture_department":
+        pass  # placeholder: agriculture's own parser goes here; uses the shared parser until then
+    # elif department_id == "<next_department>":
+    #     pass
+
+    return _PARSERS[source_format](text)
 
 
 def _timestamp() -> str:
@@ -113,52 +132,48 @@ def _summarize_diff(diff_rows: list[dict], has_previous: bool) -> tuple[str, int
     return mode, added, removed, changed
 
 
-def _store_submission(
-    storage: ObjectStorage, department_id: str, dataset_slug: str, table_slug: str, source_file: str, source_format: str, ts: str
-) -> tuple[str, str, str]:
-    """Copy the department's submission into raw/source/ verbatim and write
-    its SHA-256 next to it, returning (path, hash_path, hash).
-
-    This happens before parsing on purpose: raw/schemas/ is the parser's
-    *output*, so a parser bug there used to leave nothing behind to compare
-    against. The stored bytes are the evidence, the hash proves they still
-    match what was submitted."""
-
-    data = Path(source_file).read_bytes()
-    digest = hashlib.sha256(data).hexdigest()
-    ext = Path(source_file).suffix or (".csv" if source_format == "csv" else ".txt")
-    source_path = paths.raw_source_path(department_id, dataset_slug, table_slug, ts, ext)
-    hash_path = paths.raw_source_hash_path(department_id, dataset_slug, table_slug, ts)
-    storage.write_bytes(source_path, data)
-    storage.write_bytes(hash_path, f"{digest}\n".encode())
-    logger.info(f"Stored original submission -> {source_path} (sha256 {digest})")
-    return source_path, hash_path, digest
+_METADATA_TEXT_FIELDS = ("business_description", "tag", "classification", "glossary_term")
 
 
 def _business_metadata_from_rows(rows: list[dict]) -> dict[str, dict]:
     """Shape a list of CSV rows (a Field Dictionary export, or a previous
     curated snapshot) into the {name: {business_description, tag,
-    classification, glossary_term, active}} form curate_schema() expects."""
+    classification, glossary_term, active}} form curate_schema() expects.
 
-    return {
-        row["name"]: {
-            "business_description": row.get("business_description", ""),
-            "tag": row.get("tag", ""),
-            "glossary_term": row.get("glossary_term", ""),
-            "active": row.get("active", "").strip().lower() in _TRUE_VALUES,
-            "classification": row.get("classification", "").strip(),
-        }
-        for row in rows
-    }
+    Only fields with a non-blank value are included -- a blank cell (or a
+    column the file doesn't have at all) means "not answered in this file",
+    not "clear this answer". That's what lets _merge_business_metadata()
+    keep a previous answer instead of a blank silently overwriting it, and
+    keeps a file with no `active` column from marking every column it
+    mentions as inactive."""
+
+    metadata: dict[str, dict] = {}
+    for row in rows:
+        meta = {field: row[field].strip() for field in _METADATA_TEXT_FIELDS if (row.get(field) or "").strip()}
+        active = (row.get("active") or "").strip().lower()
+        if active:
+            meta["active"] = active in _TRUE_VALUES
+        metadata[row["name"]] = meta
+    return metadata
 
 
-def _load_business_metadata(path: str) -> dict[str, dict]:
-    """Load a Field Dictionary export (CSV: name, business_description,
-    tag, glossary_term, active) keyed by field name."""
+def _merge_business_metadata(previous: dict[str, dict], new: dict[str, dict]) -> dict[str, dict]:
+    """Field-by-field merge: a value answered in `new` wins, anything it
+    leaves out keeps `previous`'s answer. A whole-dict replace here is what
+    let a description-only Field Dictionary re-run reset a hand-set
+    classification back to the auto one and wipe the glossary term."""
 
-    with open(path, newline="", encoding="utf-8-sig") as f:
-        rows = list(csv.DictReader(f))
-    return _business_metadata_from_rows(rows)
+    merged = {name: dict(meta) for name, meta in previous.items()}
+    for name, meta in new.items():
+        merged.setdefault(name, {}).update(meta)
+    return merged
+
+
+def _parse_business_metadata(text: str) -> dict[str, dict]:
+    """A Field Dictionary export (CSV: name, business_description, tag,
+    classification, glossary_term, active), keyed by field name."""
+
+    return _business_metadata_from_rows(list(csv.DictReader(io.StringIO(text))))
 
 
 def _previous_curated_columns(
@@ -192,6 +207,7 @@ def run(
     openmetadata_client: OpenMetadata | None = None,
     allow_column_removal: bool = False,
     operator: str = "",
+    allow_category_below_columns: bool = False,
 ) -> dict:
     """Parse a department's raw column-definition submission, validate/
     standardize it, and store both the raw and curated schema versions
@@ -228,7 +244,7 @@ def run(
     Storage layout (each table gets its own folder, since tables in the
     same dataset can have unrelated structures) -- defined once in
     paths.py, not repeated as an f-string in every function that needs it:
-        department/<department_id>/<dataset_slug>/<table_slug>/raw/source/<ts><ext>    original submission + <ts>.sha256
+        department/<department_id>/<dataset_slug>/<table_slug>/raw/source/<ts><name>    original submission + <ts><name>.sha256
         department/<department_id>/<dataset_slug>/<table_slug>/raw/schemas/<ts>.csv    parser's output
         department/<department_id>/<dataset_slug>/<table_slug>/curated/schemas/<ts>.csv
         department/<department_id>/<dataset_slug>/<table_slug>/diffs/<ts>.csv          what this run changed
@@ -247,6 +263,10 @@ def run(
     pipeline run instead of two separate manual steps. Omit it to keep
     this call to storage only.
 
+    `allow_category_below_columns`: passed through to publish_table() --
+    see its check that the dataset's category is at least as high as its
+    most sensitive column's classification.
+
     Re-running for a table that's already been curated before diffs the new
     source against the *previous* curated snapshot instead of blindly
     trusting this run's input as the complete truth:
@@ -255,11 +275,13 @@ def run(
         catches a partial/incremental submission (e.g. a department sends
         only its 2 new columns, expecting an "append") before it silently
         drops every other previously-published column from OpenMetadata.
-      - `business_description`/`tag`/`glossary_term`/`active` for any
-        column not mentioned in this run's `business_metadata_file` (or
-        given no file at all) are carried forward from the previous
-        snapshot rather than reset to blank -- so answering one column's
-        Field Dictionary question doesn't erase everyone else's answers.
+      - `business_description`/`tag`/`classification`/`glossary_term`/
+        `active` are merged field by field: any field this run's
+        `business_metadata_file` leaves blank (or doesn't have as a column,
+        or no file at all) is carried forward from the previous snapshot
+        rather than reset -- so a description-only file doesn't erase a
+        hand-set classification or glossary term. To change an answer,
+        send the new value; a blank never clears one.
       - A table's first-ever run has no previous snapshot to diff or carry
         forward against, so it always succeeds (this is "initial load").
     """
@@ -283,8 +305,6 @@ def run(
     table_id = ""
     mode = ""
     added = removed = changed = 0
-    source_path = ""
-    source_hash_path = ""
     source_hash = ""
     publish_status = "not_attempted"
     error = ""
@@ -314,20 +334,28 @@ def run(
 
         logger.info(f"Schema ingestion started: {table_id} (format: {source_format})")
 
-        lookups.upsert_dataset(
-            storage, dataset_id, department_id, dataset,
-            category=category, api_available=api_available, owner=owner,
-            frequency=frequency, timeline=timeline, dataset_description=dataset_description,
-        )
-        lookups.upsert_table(storage, table_id, dataset_id, table_name, schema_name)
-
-        source_path, source_hash_path, source_hash = _store_submission(
-            storage, department_id, dataset_slug, table_slug, source_file, source_format, ts
-        )
-
-        parsed_columns = _PARSERS[source_format](source_file)
+        # Everything that can reject this submission runs before anything is
+        # written -- parse, schema checks, the metadata file, and (inside the
+        # lock) the column-removal guard. The registry (_lookups/) is only
+        # updated once the new snapshots are stored, so a rejected run leaves
+        # tables.csv/datasets.csv exactly as they were.
+        source_bytes, source_name = inputs.read_input(storage, source_file)
+        parsed_columns = parse_source(department_id, table_name, source_format, inputs.decode(source_bytes))
+        validate_schema(table_id, parsed_columns)
         raw_columns = [{"table_id": table_id, "ingestion_timestamp": ts, **col} for col in parsed_columns]
         logger.info(f"Parsed {len(raw_columns)} column(s) from {source_file}")
+
+        metadata_bytes, metadata_name, submitted_metadata = None, None, {}
+        if business_metadata_file:
+            metadata_bytes, metadata_name = inputs.read_input(storage, business_metadata_file)
+            submitted_metadata = _parse_business_metadata(inputs.decode(metadata_bytes))
+        column_names = {col["name"] for col in raw_columns}
+        unmatched_metadata_names = sorted(set(submitted_metadata) - column_names)
+        if unmatched_metadata_names:
+            logger.warning(
+                f"{table_id}: business_metadata_file has {len(unmatched_metadata_names)} name(s) matching no "
+                f"column, ignored -- check for typos: {', '.join(unmatched_metadata_names)}"
+            )
 
         # Locked per table: reading the previous snapshot, deciding whether a
         # removal is allowed, and writing the new raw+curated snapshot must be
@@ -335,16 +363,13 @@ def run(
         # double-triggered CLI call, two batch jobs targeting the same row)
         # could both read the same "previous" state and both proceed on stale
         # information.
-        lock_path = storage.lock_path(paths.pipeline_lock_path(department_id, dataset_slug, table_slug))
-        with FileLock(lock_path):
+        with storage.lock(paths.pipeline_lock_path(department_id, dataset_slug, table_slug)):
             previous_curated = _previous_curated_columns(storage, department_id, dataset_slug, table_slug)
 
             business_metadata = _business_metadata_from_rows(previous_curated) if previous_curated else {}
-            if business_metadata_file:
-                business_metadata.update(_load_business_metadata(business_metadata_file))
+            business_metadata = _merge_business_metadata(business_metadata, submitted_metadata)
 
             curated_columns = curate_schema(raw_columns, business_metadata)
-            warning_count = sum(1 for c in curated_columns if c["validation_warning"])
 
             # Diff (and therefore mode/counts) before the removal guard, so a
             # rejected partial submission still logs what it was missing.
@@ -352,7 +377,7 @@ def run(
             mode, added, removed, changed = _summarize_diff(diff_rows, previous_curated is not None)
 
             if previous_curated is not None:
-                removed_names = {row["name"] for row in previous_curated} - {col["name"] for col in raw_columns}
+                removed_names = {row["name"] for row in previous_curated} - column_names
                 if removed_names and not allow_column_removal:
                     raise ValueError(
                         f"{table_id}: this run is missing {len(removed_names)} column(s) that exist in the "
@@ -360,6 +385,19 @@ def run(
                         f"intentional full refresh, pass allow_column_removal=True; if not, this source "
                         f"file is likely a partial/incremental submission, not the full current schema."
                     )
+
+            # The exact files this run parsed, byte for byte, beside the raw
+            # schema they produced -- evidence for every snapshot, and what lets
+            # a rebuild work from storage alone.
+            source_archive = paths.raw_source_path(department_id, dataset_slug, table_slug, ts, source_name)
+            source_hash = inputs.archive(storage, source_archive, source_bytes)
+            metadata_archive = None
+            if metadata_bytes is not None:
+                metadata_archive = paths.raw_source_path(
+                    department_id, dataset_slug, table_slug, ts, f"metadata__{metadata_name}"
+                )
+                inputs.archive(storage, metadata_archive, metadata_bytes)
+            logger.info(f"Archived source -> {source_archive} (sha256 {source_hash[:12]}...)")
 
             raw_path = paths.raw_schema_path(department_id, dataset_slug, table_slug, ts)
             storage.write_csv(raw_path, raw_columns)
@@ -369,7 +407,7 @@ def run(
             storage.write_csv(curated_path, curated_columns)
             logger.info(
                 f"Stored curated schema -> {curated_path} "
-                f"({len(curated_columns)} column(s), {warning_count} warning(s))"
+                f"({len(curated_columns)} column(s))"
             )
 
             diff_file = paths.diff_path(department_id, dataset_slug, table_slug, ts)
@@ -379,26 +417,41 @@ def run(
             # it for (re)publishing even if the next line blows up.
             publish_status = "unpublished"
 
+        lookups.upsert_dataset(
+            storage, dataset_id, department_id, dataset,
+            category=category, api_available=api_available, owner=owner,
+            frequency=frequency, timeline=timeline, dataset_description=dataset_description,
+        )
+        lookups.upsert_table(storage, table_id, dataset_id, table_name, schema_name)
+
         result = {
             "run_id": run_id,
             "raw_path": raw_path,
             "curated_path": curated_path,
             "diff_path": diff_file,
-            "source_path": source_path,
-            "source_hash_path": source_hash_path,
+            "source_path": source_archive,
+            "source_hash_path": f"{source_archive}.sha256",
             "source_hash": source_hash,
+            "source_archive_path": source_archive,
+            "source_sha256": source_hash,
+            "metadata_archive_path": metadata_archive,
             "mode": mode,
             "added": added,
             "removed": removed,
             "changed": changed,
             "columns": curated_columns,
             "column_count": len(curated_columns),
-            "warning_count": warning_count,
+            "unmatched_metadata_names": unmatched_metadata_names,
         }
 
         if openmetadata_client is not None:
             try:
-                result["openmetadata"] = publish_table(openmetadata_client, storage, table_id)
+                result["openmetadata"] = publish_table(
+                    openmetadata_client,
+                    storage,
+                    table_id,
+                    allow_category_below_columns=allow_category_below_columns,
+                )
             except Exception as exc:  # noqa: BLE001 -- recorded, then re-raised
                 publish_status = "failed"
                 error = f"{type(exc).__name__}: {exc}"
@@ -438,8 +491,10 @@ def run(
             logger.exception(f"Could not write the run-log row for {run_id} ({table_id})")
 
 
-if __name__ == "__main__":
-    load_dotenv()
+def _main(argv: list[str]) -> int:
+    """Command line entry point (settings come from .env / the shell)."""
+
+    load_env()
     _storage = storage_from_env()
 
     # DEPARTMENT_NAME is optional -- set it to register a new department in
@@ -476,4 +531,15 @@ if __name__ == "__main__":
         dataset_description=os.environ.get("DATASET_DESCRIPTION", ""),
         openmetadata_client=_client,
         allow_column_removal=os.environ.get("ALLOW_COLUMN_REMOVAL", "").strip().lower() in _TRUE_VALUES,
+        allow_category_below_columns=os.environ.get("ALLOW_CATEGORY_BELOW_COLUMNS", "").strip().lower()
+        in _TRUE_VALUES,
     )
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+
+    from src.utils.cli import run_cli
+
+    sys.exit(run_cli("pipeline", _main, sys.argv[1:]))

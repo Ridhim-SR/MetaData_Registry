@@ -49,14 +49,17 @@ def test_original_submission_is_stored_with_its_sha256(tmp_path):
     assert result["source_path"].endswith(".txt")
     assert storage.read_bytes(result["source_path"]) == raw_bytes
 
-    # the hash is written next to the bytes, and both agree with each other
+    # the hash is written next to the bytes in `sha256sum` format
+    # ("<hash>  <filename>"), and both agree with each other
     assert storage.exists(result["source_hash_path"])
-    assert storage.read_bytes(result["source_hash_path"]).decode().strip() == digest
+    assert storage.read_bytes(result["source_hash_path"]).decode().split()[0] == digest
     assert result["source_hash"] == digest
 
 
 def test_submission_is_the_original_bytes_not_a_reparse(tmp_path):
-    source = _write(tmp_path, "raw.txt", "col with, \"quotes\", and\ttabs\n")
+    # Odd whitespace throughout: a reparse-and-reprint would normalise it away,
+    # so byte equality is only possible if the original bytes were stored.
+    source = _write(tmp_path, "raw.txt", '\n  col_a character varying(255) NOT NULL ,  col_b integer DEFAULT 0 \t\n')
     storage = _storage_with_department(tmp_path)
 
     result = run(
@@ -220,6 +223,7 @@ def test_published_run_is_marked_published(tmp_path):
         )
         entity.fullyQualifiedName = f"{parent}.{name}" if parent else str(name)
         entity.name = name
+        entity.columns = getattr(request, "columns", None)
         return entity
 
     client.create_or_update.side_effect = _create

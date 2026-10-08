@@ -29,6 +29,7 @@ def _fake_client():
         )
         entity.fullyQualifiedName = f"{parent}.{name}" if parent else str(name)
         entity.name = name
+        entity.columns = getattr(request, "columns", None)
         return entity
 
     client.create_or_update.side_effect = _create_or_update

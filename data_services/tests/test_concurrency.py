@@ -93,3 +93,33 @@ def test_concurrent_runs_block_on_the_same_table_lock(tmp_path):
 
     assert outcome["result"] == "raised", "thread 2 should have detected col_b as missing, not silently succeeded"
     assert "col_b" in outcome["error"]
+
+
+def test_concurrent_dataset_upserts_keep_both_carried_forward_fields(tmp_path):
+    """Two runs for different tables of one dataset, one setting `owner`
+    and the other `category`, at the same time. The carry-forward merge
+    used to read the existing row outside the lock, so both could read the
+    same old row and the second write would drop the first one's field.
+    Reads are slowed down here so that interleaving reliably happens if
+    the read isn't under the lock."""
+
+    import time
+
+    storage = LocalObjectStorage(tmp_path)
+    lookups.upsert_dataset(storage, "pwd.vishwakarma", "pwd", "vishwakarma")
+    original_read = storage.read_csv
+
+    def _slow_read(path):
+        rows = original_read(path)
+        time.sleep(0.2)
+        return rows
+
+    with patch.object(storage, "read_csv", side_effect=_slow_read):
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            list(pool.map(
+                lambda kwargs: lookups.upsert_dataset(storage, "pwd.vishwakarma", "pwd", "vishwakarma", **kwargs),
+                [{"owner": "PWD IT Cell"}, {"category": "CAT-3"}],
+            ))
+
+    row = lookups.get_dataset(storage, "pwd.vishwakarma")
+    assert (row["owner"], row["category"]) == ("PWD IT Cell", "CAT-3")

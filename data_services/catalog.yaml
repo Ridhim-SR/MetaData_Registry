@@ -1,0 +1,36 @@
+# What should be in OpenMetadata. `sync` makes storage and OpenMetadata
+# match this file:   python3 -m src.schema_registry.sync
+#
+# To add or change data: upload the department's file to storage, edit this
+# file, open a PR, and run sync after it's merged. See README.
+#
+# Per dataset (all optional; blank = not set):
+#   category      CAT-1 | CAT-2 | CAT-3 | CAT-4
+#   owner, frequency, timeline, api_available (Y/N), description
+# Per table:
+#   source        storage:<key> of the department's file (required)
+#   format        postgres_ddl (default) | csv
+#   schema        database schema name (default public)
+#   metadata      storage:<key> of a business-metadata CSV (optional)
+#   allow_column_removal: true   only for a deliberate full refresh that drops
+#                                columns -- remove it again after the sync
+# A dataset described by one multi-table Field Dictionary file uses
+#   field_dictionary: storage:<key>   instead of `tables`.
+
+departments:
+
+  pwd:
+    name: Public Works Department
+    datasets:
+      vishwakarma:
+        category:
+        owner:
+        frequency:
+        timeline:
+        api_available:
+        description:
+        tables:
+          # Provisional name: PWD's submission had no CREATE TABLE line.
+          vishwakarma_T:
+            source: storage:inputs/pwd/vishwakarma/pwd_vishwakarma_full_raw_columns.txt
+            format: postgres_ddl

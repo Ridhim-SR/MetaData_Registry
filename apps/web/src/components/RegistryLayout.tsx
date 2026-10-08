@@ -1,36 +1,87 @@
 import { Link, Outlet } from "react-router-dom";
 import { RegistryHeader } from "./registry/RegistryHeader";
+import { TopLoadingBar } from "./registry/TopLoadingBar";
 
 export function RegistryLayout() {
   const year = new Date().getFullYear();
+  const linkStyle: React.CSSProperties = {
+    color: "#fff",
+    fontSize: "0.875rem",
+    textDecoration: "none",
+  };
+
   return (
-    <div className="flex min-h-screen flex-col bg-white text-slate-900">
+    <div
+      className="flex min-h-screen flex-col"
+      style={{ background: "var(--bg)", color: "var(--text)" }}
+    >
       <RegistryHeader />
-      <main className="flex-1">
+      <TopLoadingBar />
+      <main id="main-content" className="flex-1" tabIndex={-1}>
         <Outlet />
       </main>
-      <footer className="border-t border-slate-200 bg-gradient-to-r from-white via-slate-50 to-amber-50">
-        <div className="mx-auto grid w-full max-w-7xl grid-cols-2 items-center gap-6 px-4 py-6 text-sm text-slate-900 sm:px-6 md:grid-cols-4 lg:px-8">
-          <p className="text-xs text-slate-600 sm:text-sm">
-            © {year} SDA Metadata Registry. All rights reserved
-          </p>
-          <div className="flex items-center gap-6">
+      <footer style={{ background: "var(--navy-900)", color: "#fff" }} aria-label="Footer">
+        <div className="mx-auto grid w-full max-w-7xl grid-cols-1 gap-6 px-4 py-8 sm:grid-cols-2 sm:px-6 md:grid-cols-4 lg:px-8">
+          <div>
+            <p className="font-bold" style={{ fontSize: "1rem" }}>
+              SDA Metadata Registry
+            </p>
+            <p style={{ fontSize: "0.875rem", color: "rgba(255,255,255,0.8)" }}>
+              Government of Uttar Pradesh
+            </p>
             <img
               src="/isb-logo.webp"
               alt="ISB Bharti Institute of Public Policy"
-              className="h-10 w-auto"
+              height={40}
+              style={{
+                marginTop: "0.75rem",
+                height: 40,
+                width: "auto",
+                background: "#fff",
+                borderRadius: 6,
+                padding: "0.25rem 0.6rem",
+              }}
               onError={(e) => {
                 e.currentTarget.style.display = "none";
               }}
             />
-            {/* <GatesWordmark /> */}
           </div>
-          <Link to="/privacy" className="hover:underline md:text-center">
-            Data Privacy Policy
-          </Link>
-          <Link to="/copyrights" className="hover:underline md:text-center">
-            Copyrights Policy
-          </Link>
+          <nav aria-label="Footer">
+            <ul className="space-y-2">
+              <li>
+                <Link to="/about" style={linkStyle}>
+                  About
+                </Link>
+              </li>
+              <li>
+                <Link to="/contact" style={linkStyle}>
+                  Contact
+                </Link>
+              </li>
+              <li>
+                <Link to="/privacy" style={linkStyle}>
+                  Accessibility Statement
+                </Link>
+              </li>
+            </ul>
+          </nav>
+          <nav aria-label="Legal">
+            <ul className="space-y-2">
+              <li>
+                <Link to="/copyrights" style={linkStyle}>
+                  Terms
+                </Link>
+              </li>
+              <li>
+                <Link to="/privacy" style={linkStyle}>
+                  Privacy
+                </Link>
+              </li>
+            </ul>
+          </nav>
+          <div style={{ fontSize: "0.875rem", color: "rgba(255,255,255,0.8)" }}>
+            <p>© {year} SDA Metadata Registry. All rights reserved.</p>
+          </div>
         </div>
       </footer>
     </div>

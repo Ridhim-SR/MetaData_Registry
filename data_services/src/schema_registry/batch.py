@@ -1,7 +1,7 @@
 import csv
 import os
 
-from dotenv import load_dotenv
+from src.utils.config import load_env
 from metadata.ingestion.ometa.ometa_api import OpenMetadata
 
 from src.schema_registry.registry import lookups
@@ -82,10 +82,10 @@ def run_batch(manifest_file: str, storage: ObjectStorage, openmetadata_client: O
     return results
 
 
-if __name__ == "__main__":
-    import sys
+def _main(argv: list[str]) -> int:
+    """Command line entry point (settings come from .env / the shell)."""
 
-    load_dotenv()
+    load_env()
     _client = None
     if os.environ.get("OPENMETADATA_JWT_TOKEN"):
         _client = get_client(
@@ -93,14 +93,22 @@ if __name__ == "__main__":
             jwt_token=os.environ["OPENMETADATA_JWT_TOKEN"],
         )
 
-    _results = run_batch(
+    results = run_batch(
         manifest_file=os.environ["MANIFEST_FILE"],
         storage=storage_from_env(),
         openmetadata_client=_client,
     )
     # Any failed row means this invocation didn't do its job -- exiting 0
     # (the old behaviour) let cron/CI call a half-failed batch a success.
-    _failed = [r for r in _results if r["status"] == "failed"]
-    for _row in _failed:
-        print(f"FAILED {_row['table_id']}: {_row['error']}")
-    sys.exit(1 if _failed else 0)
+    failed = [r for r in results if r["status"] == "failed"]
+    for row in failed:
+        print(f"FAILED {row['table_id']}: {row['error']}")
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    import sys
+
+    from src.utils.cli import run_cli
+
+    sys.exit(run_cli("batch", _main, sys.argv[1:]))
