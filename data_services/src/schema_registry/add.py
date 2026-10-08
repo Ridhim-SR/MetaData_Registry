@@ -74,7 +74,9 @@ def update_catalog_text(
     dataset's field dictionary."""
 
     y = _yaml()
-    data = y.load(text) or CommentedMap()
+    data = y.load(text)
+    if data is None:  # only comments so far -- load them with an empty list so they're kept
+        data = y.load(text.rstrip() + "\n\ndepartments:\n")
     changes: list[str] = []
 
     departments = data.setdefault("departments", CommentedMap())
@@ -176,6 +178,7 @@ def add(
 
 def _main(argv: list[str]) -> int:
     from src.storage import storage_from_env
+    from src.storage.backup import backup_after_run
     from src.utils.config import load_env
 
     parser = argparse.ArgumentParser(prog="python3 -m src.schema_registry.add", description=__doc__.split("\n\n")[0])
@@ -193,8 +196,9 @@ def _main(argv: list[str]) -> int:
     args = parser.parse_args(argv)
 
     env = load_env()
+    storage = storage_from_env()
     changes = add(
-        storage_from_env(), args.catalog, args.file, args.department, args.dataset,
+        storage, args.catalog, args.file, args.department, args.dataset,
         table=args.table, department_name=args.department_name, file_format=args.format,
         schema=args.schema, metadata_file=args.metadata,
     )
@@ -204,7 +208,7 @@ def _main(argv: list[str]) -> int:
               f"ENVIRONMENT={env} python3 -m src.schema_registry.sync")
     else:
         print(f"\ncatalog.yaml already up to date -- just run: ENVIRONMENT={env} python3 -m src.schema_registry.sync")
-    return 0
+    return 0 if backup_after_run(storage) else 1
 
 
 if __name__ == "__main__":

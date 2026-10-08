@@ -18,19 +18,17 @@
 #   field_dictionary: storage:<key>   instead of `tables`.
 
 departments:
-
   pwd:
     name: Public Works Department
     datasets:
       vishwakarma:
-        category:
-        owner:
+        category: 
+        owner: 
         frequency:
         timeline:
         api_available:
         description:
         tables:
-          # Provisional name: PWD's submission had no CREATE TABLE line.
           vishwakarma_T:
             source: storage:inputs/pwd/vishwakarma/pwd_vishwakarma_full_raw_columns.txt
             format: postgres_ddl
