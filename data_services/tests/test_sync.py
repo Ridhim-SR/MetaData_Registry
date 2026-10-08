@@ -177,11 +177,10 @@ def test_table_dropped_from_catalog_is_not_published(storage):
     assert _published_tables(client) == ["works"]
 
 
-def test_category_below_columns_fails_that_publish_only(storage):
+def test_category_below_columns_still_publishes(storage):
     catalog = _CATALOG.replace("CAT-3", "CAT-1")  # tenders has firm_pannumber (auto CAT-3)
     outcomes = _by_table(sync(storage, parse_catalog(catalog), client=_fake_client()))
-    assert outcomes["pwd.vishwakarma.tenders"].publish == "failed"
-    assert "Under MDSF" in outcomes["pwd.vishwakarma.tenders"].detail
+    assert outcomes["pwd.vishwakarma.tenders"].publish == "published"
 
 
 def test_field_dictionary_dataset(storage):

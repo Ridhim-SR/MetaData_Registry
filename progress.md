@@ -422,8 +422,72 @@ dictionary stayed put no matter what `_to_column()` sent.
 
 ---
 
+### Scope split + merge of origin/main (2026-10-08)
+
+**Department scope (decided this session):**
+- `agriculture_department` -- worked **locally and globally**.
+- `public_works_department` (vishwakarma) and the Kanya Sumangla datasets --
+  **local only**; someone else owns their global push, so nothing from this
+  branch is ever published to `10.0.96.105` for those departments.
+
+**Merged origin/main** (16 commits, `c12b473`), resolving all 19 conflicts:
+tags -> main's shape (ingest writes only `name`/`business_description`; the
+MDSF 7-level classification and curate's `auto_tag` untouched), `scale` ->
+`None` everywhere, main's `validate_schema()` kept *alongside* our vocab
+guards, main's atomic `_atomic_write`/`rows_to_csv`/`storage.lock` plus our
+soft-delete/append-run lookups, main's by-name `_replace_column_tags` and
+retrying `_patch_entity`. Installed `ruamel.yaml>=0.18` (main's
+`add.py`/`catalog.py` need it). `python -m pytest tests/ -q` -> **397
+passed** (301 before the merge; `reports/` left untracked).
+
+**Dataset CATEGORY is now optional end-to-end.** `_check_category_covers_columns`
+and its `_LEVEL_TO_MIN_CATEGORY` map (the "Under MDSF the highest category
+applies" refusal, the blank-category warning) are gone from
+`openmetadata/publish.py`, together with the whole `allow_category_below_columns`
+knob threaded through `pipeline.run()`, `catalog.py`, `sync.py` and the
+`ALLOW_CATEGORY_BELOW_COLUMNS` env var -- without that, every agriculture
+publish warned (PII/Financial columns, blank CATEGORY). A `category` that
+*is* set must still be CAT-1..CAT-4 (`_ensure_sensitivity_tag()`); blank
+just means the Database entity carries no CAT tag. README bullet rewritten;
+tests replaced with "CAT-1 + PII column publishes", "blank category
+publishes without a warning", "non-CAT value still refused by run() and by
+publish()".
+
+**Agriculture's parser is wired into `pipeline.parse_source()` (2026-10-08).**
+The `pass  # placeholder: agriculture's own parser goes here` in
+`src/schema_registry/pipeline.py` now calls the department's own
+`parsers/agriculture_parser.parse_table(text, table_name)`, which pulls the
+requested table's block out of the multi-table submission (one CSV, several
+tables side by side) by reusing `MultiTableCsvPreprocessor` -- the same code
+preprocessing splits that file with, so the raw file and the preprocessed
+per-table CSV parse to identical columns (locked by a test). Non-multi-table
+input returns `None`, so the single-table CSVs preprocessing wrote and any
+DDL dump still go through the shared parser; unknown table names fail with
+the list of tables the submission does hold. That was the only placeholder
+in the repo (repo-wide grep for placeholder/TODO/`goes here`/NotImplemented):
+the web "hidden for now" nav blocks are deliberate UI scope, not missing
+wiring. `python -m pytest tests/ -q` -> **405 passed** (8 new tests in
+`tests/test_agriculture_parser.py`).
+
+**Agriculture republished (local + global), 2026-10-08:**
+- **Local**: the 3 manifests (`configs/distribution_records_manifest.csv`,
+  `configs/farmer_registration_master_dataset_manifest.csv`,
+  `configs/scheme_physical_financial_progress_dataset_manifest.csv`) ->
+  **9/9 published**, no warnings; 288/288 columns tagged
+  Internal 189 / PII 55 / Financial 41 / Public 2 / Restricted 1.
+- **Global** (`http://10.0.96.105:8585/api`, same 3 manifests) -> **9/9
+  published** with the identical 288-column tag distribution;
+  `agriculture_department` = 9 tables, `public_works_department` still just
+  its pre-existing `vishwakarma_T` (untouched, as scoped); server healthy
+  (`2.0.2`) after the push.
+- No category tag written on either side (CATEGORY left blank, see above).
+
+---
+
 ### Future Work
 - [ ] Add Field Dictionary (business metadata) for remaining tables
 - [ ] Add dataset governance fields (owner, retention_policy, lineage)
 - [ ] Add new tables as they arrive
+- [ ] PWD (vishwakarma) + Kanya Sumangla: ingest/republish **locally
+      only** (their global push belongs to another team)
 - [x] Publish field-level classifications as OpenMetadata tags/taxonomy

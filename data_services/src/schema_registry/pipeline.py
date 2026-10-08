@@ -11,6 +11,7 @@ from src.schema_registry import inputs
 from src.schema_registry.registry import lookups, paths
 from src.schema_registry.curate import CATEGORY_LEVELS, curate_schema, validate_category, validate_schema
 from src.schema_registry.openmetadata.publish import get_client, publish_table
+from src.schema_registry.parsers import agriculture_parser
 from src.schema_registry.parsers.csv_schema_parser import parse_csv_text
 from src.schema_registry.parsers.ddl_parser import parse_postgres_columns
 from src.storage import storage_from_env
@@ -40,13 +41,21 @@ def parse_source(department_id: str, table_name: str, source_format: str, text: 
     one, otherwise the shared parser for the file's format.
 
     To give a department its own parser: write parsers/<dept>_parser.py with
-    parse_table(text, table_name) -> columns, import it above, and replace
-    that department's `pass` below with
+    parse_table(text, table_name) -> columns (or None when the file isn't
+    that department's layout), import it above, and replace that
+    department's `pass` below with
         return <dept>_parser.parse_table(text, table_name)
     """
 
     if department_id == "agriculture_department":
-        pass  # placeholder: agriculture's own parser goes here; uses the shared parser until then
+        # One CSV holding several tables side by side, which the shared
+        # per-format parser can't read -- its own parser picks out this
+        # table's block. None means "not that layout", so the per-table
+        # CSVs preprocessing wrote (and any DDL dump) still go through the
+        # shared parser below.
+        block = agriculture_parser.parse_table(text, table_name)
+        if block is not None:
+            return block
     # elif department_id == "<next_department>":
     #     pass
 
@@ -207,7 +216,6 @@ def run(
     openmetadata_client: OpenMetadata | None = None,
     allow_column_removal: bool = False,
     operator: str = "",
-    allow_category_below_columns: bool = False,
 ) -> dict:
     """Parse a department's raw column-definition submission, validate/
     standardize it, and store both the raw and curated schema versions
@@ -262,10 +270,6 @@ def run(
     the last step of this same call, so ingest -> curate -> publish is one
     pipeline run instead of two separate manual steps. Omit it to keep
     this call to storage only.
-
-    `allow_category_below_columns`: passed through to publish_table() --
-    see its check that the dataset's category is at least as high as its
-    most sensitive column's classification.
 
     Re-running for a table that's already been curated before diffs the new
     source against the *previous* curated snapshot instead of blindly
@@ -450,7 +454,6 @@ def run(
                     openmetadata_client,
                     storage,
                     table_id,
-                    allow_category_below_columns=allow_category_below_columns,
                 )
             except Exception as exc:  # noqa: BLE001 -- recorded, then re-raised
                 publish_status = "failed"
@@ -531,8 +534,6 @@ def _main(argv: list[str]) -> int:
         dataset_description=os.environ.get("DATASET_DESCRIPTION", ""),
         openmetadata_client=_client,
         allow_column_removal=os.environ.get("ALLOW_COLUMN_REMOVAL", "").strip().lower() in _TRUE_VALUES,
-        allow_category_below_columns=os.environ.get("ALLOW_CATEGORY_BELOW_COLUMNS", "").strip().lower()
-        in _TRUE_VALUES,
     )
     return 0
 

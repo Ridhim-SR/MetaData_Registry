@@ -46,7 +46,6 @@ class DatasetEntry:
     fields: dict = field(default_factory=dict)  # datasets.csv field -> value
     tables: list[TableEntry] = field(default_factory=list)
     field_dictionary: str | None = None  # one file describing several tables
-    allow_category_below_columns: bool = False
 
 
 @dataclass
@@ -95,7 +94,7 @@ def parse_catalog(text: str) -> list[DepartmentEntry]:
             ds_where = f"{where}.datasets.{ds_name}"
             ds = _check_keys(
                 ds_where, ds or {},
-                set(_DATASET_FIELD_KEYS) | {"tables", "field_dictionary", "allow_category_below_columns"},
+                set(_DATASET_FIELD_KEYS) | {"tables", "field_dictionary"},
             )
             category = _text(ds.get("category"))
             if category and not _CATEGORY_RE.match(category):
@@ -104,7 +103,6 @@ def parse_catalog(text: str) -> list[DepartmentEntry]:
                 name=str(ds_name),
                 fields={csv_field: _text(ds.get(key)) for key, csv_field in _DATASET_FIELD_KEYS.items()},
                 field_dictionary=_text(ds.get("field_dictionary")) or None,
-                allow_category_below_columns=bool(ds.get("allow_category_below_columns", False)),
             )
 
             seen: dict[str, str] = {}

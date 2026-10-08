@@ -383,9 +383,9 @@ def test_publish_rejects_an_unknown_category_written_before_validation(tmp_path)
         row["category"] = "cat3"
     storage.write_csv(lookups.DATASETS_PATH, rows)
 
-    # refused before any OpenMetadata call: the dataset-vs-column check runs
-    # first, and _ensure_sensitivity_tag() would refuse it again later
-    with pytest.raises(ValueError, match="isn't a CAT-<n> value"):
+    # the dataset `category` is checked against the CAT vocabulary even when
+    # publish runs on its own (republish, a datasets.csv row written by hand)
+    with pytest.raises(ValueError, match="Unknown category 'cat3'"):
         publish_table(_fake_client(), storage, "pwd.vishwakarma.tbd_confirm_with_pwd")
 
 
@@ -618,28 +618,20 @@ def test_publish_table_matches_column_tags_by_name_not_request_order(tmp_path):
     assert body["/columns/1/tags"][0]["tagFQN"] == "MDSF.PII"
 
 
-def test_publish_refuses_dataset_category_below_its_columns(tmp_path):
+def test_publish_does_not_refuse_a_dataset_category_below_its_columns(tmp_path):
+    """Category is optional governance metadata, not a publish gate: a
+    dataset declared CAT-1 still publishes even though one of its columns
+    is classified PII."""
+
     storage = LocalObjectStorage(tmp_path / "storage")
     lookups.register_department(storage, "pwd", "Public Works Department")
     _run_with(tmp_path, storage, "beneficiary_email character varying(100), remarks text", category="CAT-1")
     client = _fake_client()
 
-    with pytest.raises(ValueError, match=r"category is CAT-1 but column\(s\) beneficiary_email are PII"):
-        publish_table(client, storage, "pwd.vishwakarma.t1")
+    result = publish_table(client, storage, "pwd.vishwakarma.t1")
 
-    # refused before touching OpenMetadata at all
-    assert client.create_or_update.call_count == 0
-    assert client.client.patch.call_count == 0
-
-
-def test_publish_allows_category_below_columns_with_explicit_override(tmp_path):
-    storage = LocalObjectStorage(tmp_path / "storage")
-    lookups.register_department(storage, "pwd", "Public Works Department")
-    _run_with(tmp_path, storage, "beneficiary_email character varying(100)", category="CAT-1")
-
-    result = publish_table(_fake_client(), storage, "pwd.vishwakarma.t1", allow_category_below_columns=True)
-
-    assert result["column_count"] == 1
+    assert result["column_count"] == 2
+    assert client.create_or_update.call_count > 0
 
 
 def test_publish_allows_category_equal_or_above_columns(tmp_path):
@@ -650,7 +642,10 @@ def test_publish_allows_category_equal_or_above_columns(tmp_path):
     assert publish_table(_fake_client(), storage, "pwd.vishwakarma.t1")["column_count"] == 1
 
 
-def test_publish_with_blank_category_and_sensitive_columns_only_warns(tmp_path, monkeypatch):
+def test_publish_with_blank_category_publishes_without_complaining(tmp_path, monkeypatch):
+    """Most datasets haven't had their governance meeting yet, so CATEGORY
+    stays blank -- that must be a non-event, not a warning."""
+
     storage = LocalObjectStorage(tmp_path / "storage")
     lookups.register_department(storage, "pwd", "Public Works Department")
     _run_with(tmp_path, storage, "beneficiary_email character varying(100)")
@@ -658,16 +653,17 @@ def test_publish_with_blank_category_and_sensitive_columns_only_warns(tmp_path, 
     # src.utils.logger sets propagate=False, so caplog never sees these
     monkeypatch.setattr("src.schema_registry.openmetadata.publish.logger.warning", warnings.append)
 
-    publish_table(_fake_client(), storage, "pwd.vishwakarma.t1")
+    result = publish_table(_fake_client(), storage, "pwd.vishwakarma.t1")
 
-    assert any("has no category yet" in w and "at least CAT-3" in w for w in warnings)
+    assert result["column_count"] == 1
+    assert warnings == []
 
 
-def test_publish_refuses_non_cat_dataset_category_when_columns_are_classified(tmp_path):
-    """pipeline.run() rejects a non-CAT `category` at ingest, so it never
-    lands in _lookups/datasets.csv -- and publish_table() keeps the same
-    check for the paths that write that lookup without going through run()
-    (republish, a hand-edited CSV)."""
+def test_publish_refuses_a_category_outside_the_vocabulary(tmp_path):
+    """`category` may be blank, but a value that is set must be one of the
+    MDSF CAT levels: pipeline.run() rejects that at ingest, and
+    publish_table() keeps the same check for the paths that write the
+    lookup without going through run() (republish, a hand-edited CSV)."""
 
     storage = LocalObjectStorage(tmp_path / "storage")
     lookups.register_department(storage, "pwd", "Public Works Department")
@@ -677,21 +673,17 @@ def test_publish_refuses_non_cat_dataset_category_when_columns_are_classified(tm
 
     _run_with(tmp_path, storage, "beneficiary_email character varying(100)")
     lookups.set_dataset_fields(storage, "pwd.vishwakarma", "pwd", "vishwakarma", {"category": "Open"})
-    with pytest.raises(ValueError, match="isn't a CAT-<n> value"):
+    with pytest.raises(ValueError, match="Unknown category 'Open'"):
         publish_table(_fake_client(), storage, "pwd.vishwakarma.t1")
 
 
-def test_run_passes_category_override_through_to_publish(tmp_path):
+def test_run_publishes_a_dataset_whose_category_is_below_its_columns(tmp_path):
     storage = LocalObjectStorage(tmp_path / "storage")
     lookups.register_department(storage, "pwd", "Public Works Department")
-    with pytest.raises(ValueError, match="Under MDSF the highest category applies"):
-        _run_with(
-            tmp_path, storage, "beneficiary_email character varying(100)",
-            category="CAT-1", openmetadata_client=_fake_client(),
-        )
 
     result = _run_with(
         tmp_path, storage, "beneficiary_email character varying(100)",
-        openmetadata_client=_fake_client(), allow_category_below_columns=True,
+        category="CAT-1", openmetadata_client=_fake_client(),
     )
+
     assert result["openmetadata"]["column_count"] == 1

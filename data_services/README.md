@@ -172,7 +172,7 @@ these):
 - **Columns missing from the file:** the table stops with an error. This catches a department sending only part of the file. If they really removed columns, add `allow_column_removal: true` to that table in `catalog.yaml` for one sync, then remove it again.
 - **Bad file** (unknown type, duplicate column name, a pasted `CREATE TABLE`): it's rejected and nothing is saved.
 - **Descriptions and tags** come from a metadata file (`metadata:` in the catalog). A blank cell keeps the old answer; it never erases one.
-- **Dataset category lower than its most sensitive column** (e.g. CAT-1 with a CAT-3 phone number column): publishing is refused. Raise the category. Only if those columns are removed before sharing, add `allow_category_below_columns: true` to the dataset.
+- **Dataset `category`** is optional: blank just means the Database entity carries no CAT tag. When it is set, only `CAT-1`..`CAT-4` are accepted.
 - **Column tags** in OpenMetadata are set to exactly what the pipeline decided. Old ones are removed.
 - **Every run also writes** the diff against the previous snapshot (`diffs/<ts>.csv`) and a row in `_lookups/runs.csv`, so "what changed, and did it publish?" is always answerable after the fact.
 
