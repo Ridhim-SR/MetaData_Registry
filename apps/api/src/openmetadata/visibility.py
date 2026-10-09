@@ -204,12 +204,15 @@ def visible_catalog(
 ) -> list[dict]:
     """The single shared catalog computation for every registry endpoint.
 
-    Returns dataset cards (database level). Each card is either FULL (carries
-    a slimmed "tables" list) or a TEASER ("locked": True, no table names,
-    column names, owners, or lineage — only dataset name, department,
-    description, access badge level, and table count). Confidential content
-    is excluded for non-admins. Counts are always len()/sum() over these
-    exact cards, so every count equals its matching list.
+    Departments and datasets (cards) are visible to everyone, including
+    anonymous viewers, as FULL or locked TEASER cards ("locked": True, no
+    table names, column names, owners, or lineage). Tables/columns require
+    sign-in: anonymous viewers never receive table names or column details
+    for non-public data (see visible_tables + table endpoints which return
+    401 for anonymous table access). Missing or invalid visibility
+    classifications normalize to department (non-public). Confidential
+    content is excluded for non-admins. Counts are always len()/sum() over
+    these exact cards, so every count equals its matching list.
     """
     per_dataset: dict[str, dict] = {}
     for table in tables:

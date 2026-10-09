@@ -27,7 +27,7 @@ export function Hero() {
 
   return (
     <section aria-label="Discover government data" style={{ background: "var(--bg)" }}>
-      <div className="mx-auto w-full max-w-3xl px-4 py-12 text-center sm:px-6 sm:py-16">
+      <div className="mx-auto w-full max-w-3xl px-4 py-8 text-center sm:px-6 sm:py-10">
         <h1
           className="font-bold tracking-tight"
           style={{ color: "var(--navy-900)", fontSize: "2rem", lineHeight: 1.25 }}
@@ -115,15 +115,6 @@ export function Hero() {
             ))}
           </div>
         </form>
-
-        <div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row">
-          <button onClick={() => navigate("/explore")} className="btn-primary">
-            Browse Catalog
-          </button>
-          <button onClick={() => navigate("/departments")} className="btn-secondary">
-            Browse Departments
-          </button>
-        </div>
       </div>
     </section>
   );

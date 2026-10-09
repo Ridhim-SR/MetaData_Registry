@@ -45,6 +45,8 @@ export interface RegistryTag {
 
 export interface TableInfo {
   api_available?: boolean | null;
+  /** URL of the API documentation, when the backend exposes one. */
+  api_docs_url?: string | null;
   dataset_owner?: string | null;
   frequency?: string | null;
   timeline?: string | null;
@@ -64,6 +66,8 @@ export interface RegistryTable {
   column_count?: number;
   owners?: RegistryOwner[];
   tags?: RegistryTag[];
+  /** Table-level data classification when the backend provides one. */
+  data_classification?: string | null;
   info?: TableInfo | null;
   facts?: TableFacts | null;
 }
@@ -125,6 +129,8 @@ export interface TableHit {
   matched_columns?: string[];
   tags?: string[];
   updated_at?: number | null;
+  /** Table-level data classification when the search API provides one. */
+  data_classification?: string | null;
 }
 
 export interface ColumnHit {

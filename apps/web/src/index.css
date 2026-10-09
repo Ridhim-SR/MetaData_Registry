@@ -217,10 +217,113 @@ a {
   font-style: italic;
 }
 
+/* Metadata-card labels (Table facts strip): dark navy, semibold, clearly
+   distinct from values and never link-blue. 0.8125rem == 13px at the base
+   font size and still scales with the A+/A- control. Navy on white is
+   ~15:1 contrast (WCAG AA). */
+.metadata-fact-label {
+  display: block;
+  margin: 0 0 2px;
+  color: var(--navy-900);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+/* Search result cards: whole-card hover + focus-within ring for the stretched link */
+.result-card {
+  position: relative;
+}
+.result-card:hover {
+  background: var(--bg-alt);
+}
+.result-card .stretched-link::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+.result-card .stretched-link:focus-visible {
+  outline: none;
+}
+.result-card:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* Hide the browser-native clear button on search inputs: the app renders
+   its own custom ✕ (shown only when the input has text). */
+input[type="search"]::-webkit-search-cancel-button,
+input[type="search"]::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* Standalone "Filters" toggle: hidden on desktop, shown below 1024px where
+   it opens the filters drawer. Explicit query (not a utility class) so the
+   breakpoint is guaranteed regardless of generated CSS. */
+@media (min-width: 1024px) {
+  .filters-toggle {
+    display: none;
+  }
+}
+
+/* Directory search input: clear keyboard focus ring (mirrors the global one) */
+.dept-search-input:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* Completeness info tooltip: shows on hover and keyboard focus */
+.completeness-info {
+  position: relative;
+}
+.completeness-info-tip {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: 220px;
+  background: var(--navy-900);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 400;
+  padding: 0.35rem 0.6rem;
+  border-radius: 6px;
+  z-index: 20;
+}
+.completeness-info:hover .completeness-info-tip,
+.completeness-info:focus-visible .completeness-info-tip {
+  display: block;
+}
+
 /* Clamp dataset descriptions to 2 lines */
 .clamp-2 {
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+/* Large-screen layout (1920px+). Everything here is gated behind
+   min-width queries so screens below 1280px render exactly as before:
+   .page-container has no rules there, and Tailwind governs alone. */
+@media (min-width: 1280px) {
+  /* One shared centered column for header/nav/main/footer content. */
+  .page-container {
+    width: min(100% - 2rem, 1360px);
+    max-width: none;
+    margin-inline: auto;
+  }
+}
+
+/* Table detail sidebar: sticky on two-column layouts, static when stacked. */
+@media (min-width: 1024px) {
+  .table-sidebar {
+    position: sticky;
+    top: 16px;
+    align-self: start;
+  }
 }

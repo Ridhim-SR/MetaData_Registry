@@ -100,34 +100,24 @@ def user_context(user: User | None) -> dict | None:
 
 
 def scoped_service(user: User, requested_service: str | None) -> str | None:
-    """Enforce department scoping: non-admin users are pinned to their department.
+    """Resolve the requested service filter without department pinning.
 
-    Convention: user.department maps 1:1 to an OM database service name
-    (e.g. department 'agriculture' -> service 'gov_agriculture', or the raw
-    service name if it already matches). Admins may query any service.
-    Returns the effective service filter to apply.
+    Authenticated users may discover datasets across departments; the
+    visibility sidecar (public/department/restricted/confidential) is the
+    enforcement point, not the department filter. The ``department`` /
+    ``service`` query parameter remains as an optional Owner filter only.
+    Returns the requested filter unchanged.
     """
-    if user.role.value == "admin":
-        return requested_service
-    if not user.department:
-        # No department assigned: safest is to return the requested filter
-        # unchanged; deployment may choose to deny instead.
-        return requested_service
-    dept = user.department.strip()
-    candidates = {dept, f"gov_{dept}", dept.replace("gov_", "")}
-    if requested_service is None:
-        return None  # filtering happens post-fetch via allowed_services()
-    if requested_service in candidates:
-        return requested_service
-    raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail=f"Access denied for service '{requested_service}'",
-    )
+    return requested_service
 
 
 def allowed_services(user: User) -> set[str] | None:
-    """Set of OM service names a non-admin user may see, or None for admins / unscoped."""
-    if user.role.value == "admin" or not user.department:
-        return None
-    dept = user.department.strip()
-    return {dept, f"gov_{dept}", dept.replace("gov_", "")}
+    """Pre-filter hint for OM fetches. Always None: cross-department.
+
+    Discovery across departments is allowed for authenticated users; the
+    per-table visibility policy (src.openmetadata.visibility) decides full
+    vs teaser vs hidden after the fetch. Returning None disables
+    service-name pre-filtering so authorization happens post-fetch before
+    counts, facets, pagination, or metadata are produced.
+    """
+    return None

@@ -27,7 +27,7 @@ export function TableDetailPage() {
   }, [query.data, navigate]);
 
   return (
-    <div className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+    <div className="page-container mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
       <Link to="/explore" className="mb-4 inline-block text-sm font-medium" style={{ color: "var(--blue-700)" }}>
         ← Back to catalog
       </Link>

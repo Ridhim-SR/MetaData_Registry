@@ -21,7 +21,7 @@ export function RegistryLayout() {
         <Outlet />
       </main>
       <footer style={{ background: "var(--navy-900)", color: "#fff" }} aria-label="Footer">
-        <div className="mx-auto grid w-full max-w-7xl grid-cols-1 gap-6 px-4 py-8 sm:grid-cols-2 sm:px-6 md:grid-cols-4 lg:px-8">
+        <div className="page-container mx-auto grid w-full max-w-7xl grid-cols-1 gap-6 px-4 py-8 sm:grid-cols-2 sm:px-6 md:grid-cols-4 lg:px-8">
           <div>
             <p className="font-bold" style={{ fontSize: "1rem" }}>
               SDA Metadata Registry
