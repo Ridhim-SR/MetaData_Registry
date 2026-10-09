@@ -179,6 +179,7 @@ def add(
 def _main(argv: list[str]) -> int:
     from src.storage import storage_from_env
     from src.storage.backup import backup_after_run
+    from src.utils.cli import confirm_changes
     from src.utils.config import load_env
 
     parser = argparse.ArgumentParser(prog="python3 -m src.schema_registry.add", description=__doc__.split("\n\n")[0])
@@ -197,6 +198,7 @@ def _main(argv: list[str]) -> int:
 
     load_env()
     storage = storage_from_env()
+    confirm_changes(f"upload {args.file} for {args.department}/{args.dataset} and update catalog.yaml")
     changes = add(
         storage, args.catalog, args.file, args.department, args.dataset,
         table=args.table, department_name=args.department_name, file_format=args.format,

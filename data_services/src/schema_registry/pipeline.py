@@ -315,7 +315,10 @@ def run(
 def _main(argv: list[str]) -> int:
     """Command line entry point (settings come from .env / the shell)."""
 
+    from src.utils.cli import confirm_changes
+
     load_env()
+    confirm_changes(f"ingest {os.environ.get('DEPARTMENT')}.{os.environ.get('DATASET')}.{os.environ.get('TABLE_NAME')} from {os.environ.get('SOURCE_FILE')}")
     _storage = storage_from_env()
 
     # DEPARTMENT_NAME is optional -- set it to register a new department in

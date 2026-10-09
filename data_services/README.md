@@ -95,6 +95,7 @@ cp .env.example .env          # then fill in .env -- each setting has a comment
 - Try things on a feature branch first. It writes only to `local/` and your laptop's OpenMetadata.
 - `main` and `production` use the company Wasabi (`WASABI_...` in `.env`). **Feature branches never do:** they use your own Wasabi account from the `LOCAL_WASABI_...` lines (section 3b of `.env`), and stop with an error if those are blank.
 - **Going live:** merge `main` into `production`, check out `production`, then run `add`/`sync` there.
+- **Every command that changes data asks first.** `add`, `sync`, `backup setup/copy/restore`, `inputs upload` and the other writing commands show where they will write (environment, branch, Wasabi folder, OpenMetadata) and ask twice: type `yes`, then the environment's name. Anything else cancels with nothing changed. Read-only commands (`--dry-run`, `verify`, `inputs list`) don't ask. For scripts, add `--yes` to skip the questions.
 
 ---
 

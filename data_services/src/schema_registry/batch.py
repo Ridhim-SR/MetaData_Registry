@@ -76,7 +76,10 @@ def run_batch(manifest_file: str, storage: ObjectStorage, openmetadata_client: O
 def _main(argv: list[str]) -> int:
     """Command line entry point (settings come from .env / the shell)."""
 
+    from src.utils.cli import confirm_changes
+
     load_env()
+    confirm_changes(f"run the batch in {os.environ.get('MANIFEST_FILE')}")
     _client = None
     if os.environ.get("OPENMETADATA_JWT_TOKEN"):
         _client = get_client(

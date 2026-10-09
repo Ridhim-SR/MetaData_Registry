@@ -70,6 +70,8 @@ def _main(argv: list[str]) -> int:
         storage = storage_from_env()
     if len(argv) == 3 and argv[0] == "upload":
         local, key = argv[1], argv[2].lstrip("/")
+        from src.utils.cli import confirm_changes
+        confirm_changes(f"upload {local} to {key}")
         data = Path(local).read_bytes()
         storage.write_bytes(key, data)
         print(f"Uploaded {local} -> {key} ({len(data)} bytes, sha256 {sha256(data)[:12]}...)")
