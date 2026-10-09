@@ -489,7 +489,7 @@ Every run adds new files with the time in the name, so the full history stays. O
 | `src/utils/config.py` | Reads `.env`, applies `ENVIRONMENT` and the branch rule |
 | `src/utils/cli.py` | The error box and log file for every command |
 
-**Which parser reads which file** is decided in one place: `parse_source()` in `pipeline.py`. Most departments use the shared parser for their `format:` (`postgres_ddl` or `csv`); `agriculture_department` has its own (`parsers/agriculture_parser.py`), which picks its table's block out of a one-file-many-tables submission and falls back to the shared parser for anything else.
+**Which parser reads which file** is decided in one place: `parse_source()` in `pipeline.py`. Most departments use the shared parser for their `format:` (`postgres_ddl` or `csv`); `agri_dept` has its own (`parsers/agriculture_parser.py`), which picks its table's block out of a one-file-many-tables submission and falls back to the shared parser for anything else.
 
 **A department sends a file in a new layout?**
 1. Write `parsers/<dept>_parser.py` with `parse_table(text, table_name)` returning the usual column fields (`name`, `data_type`, `length`, `scale`, `nullable`, `default`).

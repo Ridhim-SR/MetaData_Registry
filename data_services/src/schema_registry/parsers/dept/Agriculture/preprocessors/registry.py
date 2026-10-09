@@ -83,7 +83,7 @@ def generate_manifest(dataset_name: str, output_dir: Path, table_results: dict[s
     it, so manifests of datasets without a field dictionary stay byte-identical.
     """
     config = get_dataset_config(dataset_name)
-    department = "agriculture_department"
+    department = "agri_dept"
     dataset_slug = dataset_name
     schema_name = "public"
 

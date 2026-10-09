@@ -46,7 +46,7 @@ def test_unknown_table_lists_what_the_submission_holds():
 
 
 def test_parse_source_routes_agriculture_through_its_own_parser():
-    columns = parse_source("agriculture_department", "current_booking", "csv", MULTI_TABLE)
+    columns = parse_source("agri_dept", "current_booking", "csv", MULTI_TABLE)
 
     assert [c["name"] for c in columns] == ["id", "status"]
 
@@ -54,11 +54,11 @@ def test_parse_source_routes_agriculture_through_its_own_parser():
 def test_parse_source_falls_back_to_the_shared_parser_for_a_single_table_csv():
     text = "column_name,data_type\nid,integer\n"
 
-    assert parse_source("agriculture_department", "crop_sales", "csv", text) == parse_csv_text(text)
+    assert parse_source("agri_dept", "crop_sales", "csv", text) == parse_csv_text(text)
 
 
 def test_parse_source_falls_back_to_the_shared_parser_for_a_ddl_dump():
-    assert parse_source("agriculture_department", "crop_sales", "postgres_ddl", "sno integer NOT NULL") == [
+    assert parse_source("agri_dept", "crop_sales", "postgres_ddl", "sno integer NOT NULL") == [
         {"name": "sno", "data_type": "integer", "length": None, "scale": None, "nullable": False, "default": None}
     ]
 

@@ -36,7 +36,7 @@ def catalog_storage(tmp_path):
     storage = LocalObjectStorage(tmp_path / "storage")
     _seed_table(
         storage,
-        "agriculture_department",
+        "agri_dept",
         "farmers",
         "farmers",
         [
@@ -345,9 +345,9 @@ def test_dictionary_csv_submission_uses_the_given_dataset_over_the_file_stem(tmp
         encoding="utf-8",
     )
 
-    fields = report.read_submission(source, department="agriculture_department", dataset="farmers")
+    fields = report.read_submission(source, department="agri_dept", dataset="farmers")
 
-    assert {(f.department, f.dataset, f.table) for f in fields} == {("agriculture_department", "farmers", "t1")}
+    assert {(f.department, f.dataset, f.table) for f in fields} == {("agri_dept", "farmers", "t1")}
 
 
 def test_workbook_without_a_single_roster_sheet_is_rejected(tmp_path):
@@ -384,7 +384,7 @@ def test_local_catalog_skips_soft_deleted_tables(tmp_path):
 def test_local_catalog_excludes_named_departments(catalog_storage):
     catalog = report.load_local_catalog(catalog_storage, exclude_departments=("public_works_department",))
 
-    assert {f.department for f in catalog} == {"agriculture_department"}
+    assert {f.department for f in catalog} == {"agri_dept"}
 
 
 def test_local_catalog_raises_when_nothing_is_registered(tmp_path):
@@ -411,7 +411,7 @@ def test_main_writes_csv_and_markdown(tmp_path, monkeypatch, capsys):
     from src.storage.local import LocalObjectStorage
 
     storage = LocalObjectStorage(tmp_path / "storage")
-    _seed_table(storage, "agriculture_department", "farmers", "farmers", [_column("district_name")])
+    _seed_table(storage, "agri_dept", "farmers", "farmers", [_column("district_name")])
     monkeypatch.setenv("STORAGE_ROOT", str(tmp_path / "storage"))
 
     source = tmp_path / "schema.txt"
@@ -481,7 +481,7 @@ def test_main_splits_one_report_per_department(tmp_path, monkeypatch, capsys):
     from src.storage.local import LocalObjectStorage
 
     storage = LocalObjectStorage(tmp_path / "storage")
-    _seed_table(storage, "agriculture_department", "farmers", "farmers", [_column("district_name")])
+    _seed_table(storage, "agri_dept", "farmers", "farmers", [_column("district_name")])
     monkeypatch.setenv("STORAGE_ROOT", str(tmp_path / "storage"))
 
     for config in kanya_xlsx.SHEETS[:2]:
@@ -531,7 +531,7 @@ def test_note_flag_is_written_into_the_markdown(tmp_path, monkeypatch, capsys):
     from src.storage.local import LocalObjectStorage
 
     storage = LocalObjectStorage(tmp_path / "storage")
-    _seed_table(storage, "agriculture_department", "farmers", "farmers", [_column("district_name")])
+    _seed_table(storage, "agri_dept", "farmers", "farmers", [_column("district_name")])
     monkeypatch.setenv("STORAGE_ROOT", str(tmp_path / "storage"))
 
     source = tmp_path / "schema.txt"

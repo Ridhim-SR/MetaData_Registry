@@ -1,2 +1,2 @@
 department,dataset,table_name,source_file,source_format,schema_name,business_metadata_file
-agriculture_department,farmer_registration_master_dataset,farmers,source/farmer_registration/farmers.csv,csv,public,configs/field_dictionaries/farmer_registration_field_dictionary.csv
+agri_dept,farmer_registration_master_dataset,farmers,source/farmer_registration/farmers.csv,csv,public,configs/field_dictionaries/farmer_registration_field_dictionary.csv

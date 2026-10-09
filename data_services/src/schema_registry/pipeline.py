@@ -47,7 +47,7 @@ def parse_source(department_id: str, table_name: str, source_format: str, text: 
         return <dept>_parser.parse_table(text, table_name)
     """
 
-    if department_id == "agriculture_department":
+    if department_id == "agri_dept":
         # One CSV holding several tables side by side, which the shared
         # per-format parser can't read -- its own parser picks out this
         # table's block. None means "not that layout", so the per-table
