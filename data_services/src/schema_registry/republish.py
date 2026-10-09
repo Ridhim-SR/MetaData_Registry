@@ -7,7 +7,8 @@ This command finds those runs and re-publishes them through the exact same
 publish_table() path a normal run uses -- re-running it is safe (everything
 is create-or-update).
 
-    OPENMETADATA_JWT_TOKEN=<token> python3 -m src.schema_registry.republish
+    python3 -m src.schema_registry.republish          # .env supplies ENVIRONMENT, host and token
+    OPENMETADATA_JWT_TOKEN=<token> python3 -m src.schema_registry.republish   # or pass one
 
 A table whose run wrote a snapshot but published it as `unpublished` (the
 storage-only workflow: run() without a client) is included too -- that is
@@ -19,8 +20,6 @@ it (same convention as batch.py).
 
 import os
 import sys
-
-from dotenv import load_dotenv
 
 from src.schema_registry.openmetadata.publish import get_client, publish_table
 from src.schema_registry.registry import lookups
@@ -76,9 +75,11 @@ def republish_unpublished(storage: ObjectStorage, client) -> list[dict]:
 
 
 if __name__ == "__main__":
-    load_dotenv()
+    from src.utils.config import load_env
+
+    load_env()  # reads .env: ENVIRONMENT decides the storage and the LOCAL_/DEV_ token+host
     _client = get_client(
-        host_port=os.environ.get("OPENMETADATA_HOST_PORT", "http://localhost:8585/api"),
+        host_port=os.environ.get("OPENMETADATA_HOST_PORT") or "http://localhost:8585/api",
         jwt_token=os.environ["OPENMETADATA_JWT_TOKEN"],
     )
     _results = republish_unpublished(storage_from_env(), _client)

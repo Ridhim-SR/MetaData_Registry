@@ -1,6 +1,7 @@
 import csv
 import os
 import tempfile
+import time
 from pathlib import Path
 
 from filelock import FileLock
@@ -9,6 +10,24 @@ from src.storage.base import ObjectStorage, rows_to_csv
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+# os.replace() on Windows raises PermissionError while something else
+# (antivirus, search indexer) has the destination open for a moment -- purely
+# transient, but it used to fail a whole sync run or test at random. Retry a
+# few times before believing it is a real denial.
+_REPLACE_ATTEMPTS = 5
+_REPLACE_DELAY = 0.1
+
+
+def _replace_with_retry(src: str, dst: str) -> None:
+    for attempt in range(_REPLACE_ATTEMPTS):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if attempt == _REPLACE_ATTEMPTS - 1:
+                raise
+            time.sleep(_REPLACE_DELAY * (attempt + 1))
 
 
 class LocalObjectStorage(ObjectStorage):
@@ -40,7 +59,7 @@ class LocalObjectStorage(ObjectStorage):
                 f.write(data)
                 f.flush()
                 os.fsync(f.fileno())
-            os.replace(tmp_path, full)
+            _replace_with_retry(tmp_path, full)
         except BaseException:
             Path(tmp_path).unlink(missing_ok=True)
             raise
