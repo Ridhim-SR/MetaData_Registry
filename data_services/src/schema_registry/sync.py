@@ -15,7 +15,8 @@ Steps, in order:
      by comparing SHA-256 with the archived copy
   4. set each dataset's fields (category, owner, ...) exactly as written
   5. publish every catalog table to OpenMetadata -- always, even unchanged
-     ones, so a wiped server is refilled
+     ones, so a wiped server is refilled -- and record that outcome on the
+     table's run-log row, so runs.csv matches what actually happened
 
 One table failing never stops the others; the command exits non-zero if
 anything failed, and prints a summary table either way.
@@ -153,6 +154,27 @@ def _tables_to_publish(
     return list(dict.fromkeys(wanted))
 
 
+def _record_publish(storage: ObjectStorage, table_id: str, status: str, error: str = "") -> None:
+    """Record sync's own publish outcome on the run log row.
+
+    sync() ingests through run() *without* an OpenMetadata client (so the row
+    is written as `unpublished`) and publishes afterwards, itself -- without
+    this, every run synced this way stayed `unpublished` in `_lookups/runs.csv`
+    forever and `republish` kept offering snapshots that were in fact live.
+    A broken log row must never fail the sync, so problems are logged only."""
+
+    run = lookups.latest_snapshot_run(storage, table_id)
+    if run is None or not run.get("run_id"):
+        return
+    if run.get("publish_status") == status and (run.get("error") or "") == error:
+        return  # already says this -- don't rewrite runs.csv for nothing
+    try:
+        lookups.update_run(storage, run["run_id"], publish_status=status, error=error)
+    except Exception as exc:  # noqa: BLE001
+        logger.error(f"Could not record publish_status={status} for {table_id} in "
+                     f"{lookups.RUNS_PATH}: {exc}")
+
+
 def sync(
     storage: ObjectStorage,
     departments: list[DepartmentEntry],
@@ -195,9 +217,11 @@ def sync(
             try:
                 publish_table(client, storage, table_id)
                 outcome.publish = "published"
+                _record_publish(storage, table_id, "published")
             except Exception as exc:  # noqa: BLE001
                 outcome.publish = "failed"
                 outcome.detail = f"{outcome.detail}; publish: {exc}".lstrip("; ")
+                _record_publish(storage, table_id, "failed", error=f"{type(exc).__name__}: {exc}")
 
     if not publish_only and not only_department:
         listed = set(targets)

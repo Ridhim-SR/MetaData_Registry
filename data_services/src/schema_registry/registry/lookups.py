@@ -294,6 +294,23 @@ def update_run(storage: ObjectStorage, run_id: str, **fields) -> None:
         storage.write_csv(RUNS_PATH, rows)
 
 
+def latest_snapshot_run(storage: ObjectStorage, table_id: str) -> dict | None:
+    """Newest run row for `table_id` that actually wrote a snapshot
+    (`publish_status` != not_attempted), or None.
+
+    That row is the one a publish outcome belongs to: publish_table() pushes
+    the latest curated snapshot, which is the one that run wrote. Appended
+    order is chronological, so the last matching row wins."""
+
+    if not storage.exists(RUNS_PATH):
+        return None
+    found = None
+    for row in storage.read_csv(RUNS_PATH):
+        if row.get("table_id") == table_id and row.get("publish_status") != "not_attempted":
+            found = row
+    return found
+
+
 def unpublished_runs(storage: ObjectStorage) -> dict[str, dict]:
     """{table_id: newest run row that wrote a snapshot but is not in
     OpenMetadata yet} -- what the republish command iterates over.

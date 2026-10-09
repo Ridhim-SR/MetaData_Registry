@@ -201,3 +201,47 @@ def test_field_dictionary_dataset(storage):
     assert first[0].ingest == "ingested" and "2 table(s)" in first[0].detail
     assert second[0].ingest == "unchanged"
     assert _published_tables(client) == ["cmsvy_bank", "cmsvy_bride"]
+
+
+def test_sync_records_the_publish_outcome_on_the_run_row(storage):
+    """sync() ingests through run() *without* a client -- so the run row is
+    written as `unpublished` -- and publishes afterwards, itself. That publish
+    has to land on the row, or runs.csv forever claims the snapshot never
+    reached OpenMetadata and republish keeps offering a table that is live."""
+
+    sync(storage, parse_catalog(_CATALOG), client=_fake_client())
+
+    runs = {r["table_id"]: r for r in storage.read_csv(lookups.RUNS_PATH)}
+    assert runs["pwd.vishwakarma.works"]["publish_status"] == "published"
+    assert runs["pwd.vishwakarma.works"]["error"] == ""
+    assert runs["pwd.vishwakarma.tenders"]["publish_status"] == "published"
+
+
+def test_sync_records_a_failed_publish_on_the_run_row(storage):
+    """A publish that blows up is recorded as `failed` (with the error), the
+    vocabulary pipeline.run() uses -- so republish picks the snapshot up."""
+
+    client = _fake_client()
+    client.create_or_update.side_effect = RuntimeError("server said no")
+
+    outcomes = _by_table(sync(storage, parse_catalog(_CATALOG), client=client))
+
+    assert outcomes["pwd.vishwakarma.works"].publish == "failed"
+    runs = {r["table_id"]: r for r in storage.read_csv(lookups.RUNS_PATH)}
+    assert runs["pwd.vishwakarma.works"]["publish_status"] == "failed"
+    assert "server said no" in runs["pwd.vishwakarma.works"]["error"]
+    # the snapshot itself survived, so `republish` can still fix it
+    assert lookups.latest_snapshot_run(storage, "pwd.vishwakarma.works")["publish_status"] == "failed"
+
+
+def test_publish_outcome_is_recorded_for_unchanged_tables_too(storage):
+    """An unchanged table is still republished (that is how a wiped server is
+    refilled), so its row -- written by an earlier storage-only run -- must be
+    corrected as well."""
+
+    sync(storage, parse_catalog(_CATALOG))  # storage-only: every row unpublished
+    assert {r["publish_status"] for r in storage.read_csv(lookups.RUNS_PATH)} == {"unpublished"}
+
+    sync(storage, parse_catalog(_CATALOG), client=_fake_client())
+
+    assert {r["publish_status"] for r in storage.read_csv(lookups.RUNS_PATH)} == {"published"}
