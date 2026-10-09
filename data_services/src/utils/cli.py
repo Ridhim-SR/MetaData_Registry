@@ -41,6 +41,10 @@ def _explain(exc: BaseException) -> tuple[str, str] | None:
         return (f"Can't reach Wasabi: {message}", "Check your internet connection and the WASABI_* settings in .env.")
     if isinstance(exc, ClientError):
         code = exc.response.get("Error", {}).get("Code", "?")
+        reason = exc.response.get("Error", {}).get("Message", "")
+        if code == "AccessDenied" and "not authorized" in reason:  # keys work, the permission is missing
+            return (f"Wasabi refused the request: {reason}",
+                    "Ask your Wasabi admin for that permission, or to run this step with their key.")
         return (f"Wasabi refused the request ({code}).",
                 "Check WASABI_ACCESS_KEY_ID / WASABI_SECRET_ACCESS_KEY / WASABI_BUCKET in .env."
                 if code in ("InvalidAccessKeyId", "SignatureDoesNotMatch", "AccessDenied", "NoSuchBucket", "403")

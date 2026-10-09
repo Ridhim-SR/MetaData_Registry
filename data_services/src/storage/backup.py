@@ -18,7 +18,7 @@ date automatically.
 - restore copies files back from the backup (missing ones only, unless
   --overwrite).
 
-copy/verify/restore cover this ENVIRONMENT's folder (dev/ or prod/); --all
+copy/verify/restore cover this ENVIRONMENT's folder (local/, dev/ or prod/); --all
 covers the whole bucket. Wasabi's own bucket replication isn't used because
 trial accounts can't turn it on, and this works on every plan.
 """
@@ -219,12 +219,26 @@ def _keep_old_versions(client, bucket: str, days: int, dry_run: bool) -> str:
     return f"{bucket}: old versions kept {days} days -- set"
 
 
-def _ensure_versioning(client, bucket: str, dry_run: bool) -> str:
-    if client.get_bucket_versioning(Bucket=bucket).get("Status") == "Enabled":
-        return f"{bucket}: versioning -- already on"
+def _ensure_versioning(client, bucket: str, dry_run: bool) -> tuple[str, bool]:
+    """(step, whether the bucket exists after this). A new account has no
+    main bucket yet, so it's created here, in the client's region."""
+
+    try:
+        if client.get_bucket_versioning(Bucket=bucket).get("Status") == "Enabled":
+            return f"{bucket}: versioning -- already on", True
+    except ClientError as exc:
+        if _code(exc) != "NoSuchBucket":
+            raise
+        if dry_run:
+            return f"{bucket}: created in {client.meta.region_name}, with versioning", False
+        region = client.meta.region_name
+        client.create_bucket(Bucket=bucket, **({} if region == "us-east-1" else
+                                                {"CreateBucketConfiguration": {"LocationConstraint": region}}))
+        client.put_bucket_versioning(Bucket=bucket, VersioningConfiguration={"Status": "Enabled"})
+        return f"{bucket}: created in {region}, with versioning", True
     if not dry_run:
         client.put_bucket_versioning(Bucket=bucket, VersioningConfiguration={"Status": "Enabled"})
-    return f"{bucket}: versioning -- turned on"
+    return f"{bucket}: versioning -- turned on", True
 
 
 def _ensure_backup_bucket(client, bucket: str, region: str, dry_run: bool) -> tuple[list[str], bool]:
@@ -337,8 +351,9 @@ def setup(main: Bucket, backup: Bucket, backup_region: str, iam=None, pipeline_u
     """Turn on every protection that's still missing; return what was (or,
     with dry_run, would be) done, one line per step."""
 
-    steps = [_ensure_versioning(main.client, main.name, dry_run),
-             _keep_old_versions(main.client, main.name, MAIN_KEEP_OLD_VERSIONS_DAYS, dry_run)]
+    step, main_exists = _ensure_versioning(main.client, main.name, dry_run)
+    steps = [step, _keep_old_versions(main.client, main.name, MAIN_KEEP_OLD_VERSIONS_DAYS, dry_run) if main_exists
+             else f"{main.name}: old versions kept {MAIN_KEEP_OLD_VERSIONS_DAYS} days -- set"]
     bucket_steps, backup_exists = _ensure_backup_bucket(backup.client, backup.name, backup_region, dry_run)
     steps += bucket_steps
     if backup_exists:
@@ -373,12 +388,7 @@ def _main(argv: list[str]) -> int:
     p_restore.add_argument("--dry-run", action="store_true", help="show what would be restored, change nothing")
     args = parser.parse_args(argv)
 
-    env = load_env()
-    if env == "local":
-        raise ValueError(
-            "Backups are for Wasabi data; ENVIRONMENT=local uses the storage/ folder on this machine -- "
-            "run with ENVIRONMENT=development or ENVIRONMENT=production"
-        )
+    load_env()
     main_storage = storage_from_env()
     main = Bucket(main_storage.client, main_storage.bucket)
     backup = backup_bucket_from_env()

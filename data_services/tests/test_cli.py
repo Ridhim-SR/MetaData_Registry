@@ -65,3 +65,15 @@ def test_success_returns_the_command_exit_code_and_writes_a_log(tmp_path):
 def test_help_writes_no_log_file(tmp_path):
     assert cli.run_cli("sync", lambda argv: 0, ["--help"]) == 0
     assert not (tmp_path / "logs").exists()
+
+
+def test_missing_wasabi_permission_names_it(capsys):
+    from botocore.exceptions import ClientError
+
+    def main(argv):
+        raise ClientError({"Error": {"Code": "AccessDenied", "Message": "User: x is not authorized to perform: s3:CreateBucket"}},
+                          "CreateBucket")
+
+    assert cli.run_cli("backup", main, []) == 1
+    err = capsys.readouterr().err
+    assert "not authorized to perform: s3:CreateBucket" in err and "Wasabi admin" in err

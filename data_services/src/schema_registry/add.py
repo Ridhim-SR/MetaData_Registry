@@ -14,8 +14,8 @@ write its entry into catalog.yaml. No paths to choose or copy.
         --dataset cmsvy --field-dictionary
 
 Files always go to  inputs/<department>/<dataset>/<file name>  in the
-storage ENVIRONMENT points at (Wasabi dev/ or prod/, or local storage/).
-For production, run the same command with ENVIRONMENT=production -- the
+Wasabi folder ENVIRONMENT points at (local/, dev/ or prod/).
+For production, run the same command on the production branch -- the
 catalog entry is already there, so only the upload happens.
 
 Then commit catalog.yaml (open a PR) and run sync.
@@ -195,7 +195,7 @@ def _main(argv: list[str]) -> int:
     parser.add_argument("--catalog", default=str(DEFAULT_CATALOG))
     args = parser.parse_args(argv)
 
-    env = load_env()
+    load_env()
     storage = storage_from_env()
     changes = add(
         storage, args.catalog, args.file, args.department, args.dataset,
@@ -204,10 +204,9 @@ def _main(argv: list[str]) -> int:
     )
     print("\n".join(f"  - {c}" for c in changes))
     if any(not c.startswith("uploaded") for c in changes):
-        print(f"\ncatalog.yaml changed -- commit it and open a PR, then run: "
-              f"ENVIRONMENT={env} python3 -m src.schema_registry.sync")
+        print("\ncatalog.yaml changed -- commit it and open a PR, then run: python3 -m src.schema_registry.sync")
     else:
-        print(f"\ncatalog.yaml already up to date -- just run: ENVIRONMENT={env} python3 -m src.schema_registry.sync")
+        print("\ncatalog.yaml already up to date -- just run: python3 -m src.schema_registry.sync")
     return 0 if backup_after_run(storage) else 1
 
 

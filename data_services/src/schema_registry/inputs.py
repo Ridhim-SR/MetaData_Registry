@@ -5,7 +5,7 @@ given to the pipeline two ways:
     storage:inputs/pwd/pwd_vishwakarma_full_raw_columns.txt  a file in the run's storage
 
 `storage:` resolves against whatever storage ENVIRONMENT points at -- the
-Wasabi dev/ or prod/ folder, or the local storage/ folder -- so a run (or
+Wasabi local/, dev/ or prod/ folder -- so a run (or
 the BIPP2 server) needs no local copy of anything. Upload once with:
 
     python3 -m src.schema_registry.inputs upload samples/x.txt inputs/pwd/x.txt

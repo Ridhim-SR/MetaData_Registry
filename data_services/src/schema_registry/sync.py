@@ -59,13 +59,13 @@ def _table_needs_ingest(storage: ObjectStorage, dept_id: str, ds_slug: str, tabl
     """Why this table must be (re-)ingested, or None if nothing changed."""
 
     table_slug = lookups.slugify(table.name)
+    source_bytes, _ = inputs.read_input(storage, table.source)  # first, so a dry run also catches a missing file
     registered = lookups.get_table(storage, table_id)
     if registered is None:
         return "new table"
     if (registered["table_name"], registered["schema_name"]) != (table.name, table.schema):
         return "table name or schema changed"
     prefix = paths.raw_source_prefix(dept_id, ds_slug, table_slug)
-    source_bytes, _ = inputs.read_input(storage, table.source)
     if inputs.sha256(source_bytes) != _latest_archived_sha(storage, prefix, metadata=False):
         return "source file changed"
     if table.metadata:
