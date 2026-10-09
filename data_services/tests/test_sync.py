@@ -154,6 +154,15 @@ def test_dry_run_writes_nothing(storage):
     assert client.create_or_update.call_count == 0
 
 
+def test_dry_run_reports_a_file_not_uploaded_yet(storage):
+    (storage.root / "inputs/pwd/works.txt").unlink()
+
+    outcomes = _by_table(sync(storage, parse_catalog(_CATALOG), dry_run=True))
+
+    assert outcomes["pwd.vishwakarma.works"].ingest == "failed"
+    assert "upload it first" in outcomes["pwd.vishwakarma.works"].detail
+
+
 def test_publish_only_restores_every_stored_table_without_ingesting(storage):
     sync(storage, parse_catalog(_CATALOG))
     files_before = storage.list("department/")

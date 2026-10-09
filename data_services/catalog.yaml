@@ -22,8 +22,8 @@ departments:
     name: Public Works Department
     datasets:
       vishwakarma:
-        category: 
-        owner: 
+        category:
+        owner:
         frequency:
         timeline:
         api_available:
