@@ -229,6 +229,8 @@ def test_guest_public_dataset_everywhere_full_detail(client):
 
 
 def test_guest_department_restricted_teaser_locked_no_columns(client):
+    # Datasets stay visible to anonymous as locked teasers; tables/columns
+    # require sign-in (no table/column names leak in lists).
     catalog = _get(client, "/registry/datasets")
     body = client.get("/registry/datasets").text
     assert "road_safety" not in body  # no column names of non-public data
@@ -276,6 +278,7 @@ def test_guest_confidential_absent_and_404(client):
 
 
 def test_guest_unclassified_behaves_as_department(client):
+    # Missing/invalid visibility defaults to department (locked teaser for guests).
     catalog = _get(client, "/registry/datasets")
     unc = [c for c in catalog["items"] if c["dataset"] == "unc.db"]
     assert len(unc) == 1 and unc[0]["locked"] is True
@@ -284,6 +287,7 @@ def test_guest_unclassified_behaves_as_department(client):
 
 
 def test_guest_search_roads_returns_pwd_teaser_no_columns(client):
+    # Datasets visible as teasers; tables/columns stay gated behind sign-in.
     resp = _get(client, "/registry/search", q="roads")
     dept_slugs = [d["slug"] for d in resp["departments"]["items"]]
     assert "pwd" in dept_slugs  # matched via OM service description
@@ -409,6 +413,7 @@ def test_user_without_access_crop_strict_tables_no_columns(client):
 
 
 def test_guest_crop_dataset_query_teaser_only(client):
+    # Datasets visible as teasers; tables/columns require sign-in.
     resp = _get(client, "/registry/search", q="distribution")
     assert resp["datasets"]["total"] == 1
     assert resp["datasets"]["items"][0].get("locked") is True
@@ -489,10 +494,15 @@ def test_user_without_access_table_locked_no_column_detail(client):
         app.dependency_overrides.pop(get_optional_user, None)
 
 
-def test_guest_table_locked_200_never_401_403(client):
+def test_guest_table_non_public_401_no_metadata(client):
+    # Anonymous direct table access to non-public data is 401, no metadata.
     resp = client.get("/registry/tables/t-dep")
-    assert resp.status_code == 200, resp.text[:300]
-    assert resp.json()["locked"] is True
+    assert resp.status_code == 401, resp.text[:300]
+    assert "road_safety" not in resp.text and "dep_table" not in resp.text
+    # Public tables remain fully visible.
+    pub = client.get("/registry/tables/t-pub")
+    assert pub.status_code == 200, pub.text[:300]
+    assert [c["name"] for c in pub.json()["columns"]] == ["id", "name"]
 
 
 def test_table_confidential_and_missing_404(client):
@@ -521,7 +531,8 @@ def test_csv_refused_without_full_access(client):
         assert client.get("/registry/tables/t-con/dictionary").status_code == 404
     finally:
         app.dependency_overrides.pop(get_optional_user, None)
-    assert client.get("/registry/tables/t-dep/dictionary").status_code == 403
+    # Anonymous receives 401 (sign-in prompt), never the CSV.
+    assert client.get("/registry/tables/t-dep/dictionary").status_code == 401
 
 
 def test_csv_download_full_access(client):
@@ -529,5 +540,10 @@ def test_csv_download_full_access(client):
     assert resp.status_code == 200, resp.text[:200]
     assert resp.headers["content-type"].startswith("text/csv")
     lines = resp.text.strip().split("\n")
-    assert lines[0] == "column_name,data_type,description,tags"
-    assert any(l.startswith("id,varchar,") for l in lines[1:])
+    # Metadata header lines, then the column header with data_classification.
+    assert lines[0].startswith("# table: pub_table")
+    assert lines[1].startswith("# dataset: pub.db")
+    assert lines[2].startswith("# data_classification: ")
+    assert lines[3].startswith("# api_available: ")
+    assert lines[4] == "column_name,data_type,description,tags,data_classification"
+    assert any(l.startswith("id,varchar,") for l in lines[5:])
