@@ -3,8 +3,10 @@
 ## Status: Complete (Storage + OpenMetadata)
 
 ### Department
-- **Department**: Agriculture Department (agriculture_department)
-- **Branch**: `department/agriculture_department/distribution_record_dataset`
+- **Department**: Agriculture Department — catalog id **`agri_dept`**
+  (renamed from `agriculture_department` on 2026-10-09, see that section;
+  display name unchanged)
+- **Branch**: `department/agriculture_department`
   (all 3 datasets live on this one branch)
 
 ---
@@ -34,11 +36,11 @@
 
 | Table | Columns | OpenMetadata FQN |
 |-------|---------|------------------|
-| crop_sales | 53 | agriculture_department.distribution_record_dataset.public.crop_sales |
-| current_booking | 55 | agriculture_department.distribution_record_dataset.public.current_booking |
-| current_booking_farmer_details | 19 | agriculture_department.distribution_record_dataset.public.current_booking_farmer_details |
-| online_booking | 13 | agriculture_department.distribution_record_dataset.public.online_booking |
-| online_booking_details | 19 | agriculture_department.distribution_record_dataset.public.online_booking_details |
+| crop_sales | 53 | agri_dept.distribution_record_dataset.public.crop_sales |
+| current_booking | 55 | agri_dept.distribution_record_dataset.public.current_booking |
+| current_booking_farmer_details | 19 | agri_dept.distribution_record_dataset.public.current_booking_farmer_details |
+| online_booking | 13 | agri_dept.distribution_record_dataset.public.online_booking |
+| online_booking_details | 19 | agri_dept.distribution_record_dataset.public.online_booking_details |
 
 #### Source Files Added
 - data_services/source/distribution_records/*.csv (5 files)
@@ -74,7 +76,7 @@ python -m data_services.src.schema_registry.parsers.dept.Agriculture.preprocess_
 
 | Table | Columns | OpenMetadata FQN |
 |-------|---------|------------------|
-| farmers | 53 | agriculture_department.farmer_registration_master_dataset.public.farmers |
+| farmers | 53 | agri_dept.farmer_registration_master_dataset.public.farmers |
 
 #### Source Files Added
 - data_services/source/farmer_registration/farmers.csv
@@ -89,9 +91,9 @@ python -m data_services.src.schema_registry.parsers.dept.Agriculture.preprocess_
 
 | Table | Columns | OpenMetadata FQN |
 |-------|---------|------------------|
-| target_allocation_v2 | 22 | agriculture_department.scheme_physical_financial_progress_dataset.public.target_allocation_v2 |
-| financial_budget_allocation | 18 | agriculture_department.scheme_physical_financial_progress_dataset.public.financial_budget_allocation |
-| grant_wise_bill_generation | 36 | agriculture_department.scheme_physical_financial_progress_dataset.public.grant_wise_bill_generation |
+| target_allocation_v2 | 22 | agri_dept.scheme_physical_financial_progress_dataset.public.target_allocation_v2 |
+| financial_budget_allocation | 18 | agri_dept.scheme_physical_financial_progress_dataset.public.financial_budget_allocation |
+| grant_wise_bill_generation | 36 | agri_dept.scheme_physical_financial_progress_dataset.public.grant_wise_bill_generation |
 
 #### Source Files Added
 - data_services/source/scheme_progress/target_allocation_v2.csv
@@ -105,7 +107,7 @@ python -m data_services.src.schema_registry.parsers.dept.Agriculture.preprocess_
 
 Register department:
 ```bash
-DEPARTMENT_ID=agriculture_department DEPARTMENT_NAME="Agriculture Department" python -m src.schema_registry.registry.lookups
+DEPARTMENT_ID=agri_dept DEPARTMENT_NAME="Agriculture Department" python -m src.schema_registry.registry.lookups
 ```
 
 Batch ingest (storage):
@@ -484,6 +486,84 @@ wiring. `python -m pytest tests/ -q` -> **405 passed** (8 new tests in
 
 ---
 
+### Catalog.yaml populated + audit-trail fixes (2026-10-09)
+
+The department moved from manifest/`batch` runs to the documented
+`add` → `sync` flow (README "Adding or updating a department's data"):
+
+- 9 `add` runs (`ENVIRONMENT=local`) registered the 3 datasets in
+  `data_services/catalog.yaml` under the id as it was then,
+  `agriculture_department`: distribution 5 tables, farmers 1 (field
+  dictionary passed as `--metadata`), scheme 3. Dataset details left blank —
+  `category` is optional. The pre-existing `pwd` entry and the file's
+  header comments kept as-is.
+- `sync --department agriculture_department --dry-run`, then the real run:
+  9/9 ingested through the agriculture parser (raw multi-table source) and
+  published; a second run reports `unchanged / published` for all 9,
+  0 failed, no "in storage but not in catalog" warnings for the department.
+- **Audit-trail fix** (commit `dbf5ce9`): `sync()` ingests through
+  `pipeline.run()` without an OpenMetadata client and publishes afterwards
+  itself, so every run row was written `unpublished` and never updated — a
+  successful sync looked unpublished in `runs.csv` and `republish` kept
+  offering live tables. Added `lookups.latest_snapshot_run()` +
+  `sync._record_publish()` (records `published`/`failed` + error on the
+  snapshot-writing row; a broken log row is logged, never fails the sync);
+  3 new tests in `tests/test_sync.py`.
+- **`republish` env fix + Windows write retry** (commit `af7abb4`):
+  `republish` called `load_dotenv()` and read a raw `OPENMETADATA_JWT_TOKEN`
+  → KeyError on this repo's `LOCAL_*`-prefixed `.env`, and its hardcoded
+  localhost default ignored `ENVIRONMENT` — now `load_env()` like every
+  other CLI. `LocalObjectStorage` also retries the transient Windows
+  `os.replace` PermissionError (antivirus/indexer; it was randomly failing
+  `test_lookups`/`test_republish`); 2 new tests in
+  `tests/test_local_storage.py`.
+- `republish` run to align the log: **100 published / 1 not_attempted /
+  0 unpublished** (the 1 = the rejected 2026-10-06 farmers dictionary run,
+  excluded by design).
+- `python -m pytest tests/ -q` → **425 passed**.
+- Committed + pushed to this branch: `dbf5ce9` (sync fix), `af7abb4`
+  (republish/local retry), `65c13a7` (catalog.yaml).
+
+---
+
+### Department id shortened: `agriculture_department` → `agri_dept` (2026-10-09)
+
+Display name stays `Agriculture Department`; only the id changed — the
+catalog key, table ids (`agri_dept.<dataset>.<table>`), storage paths and
+the OpenMetadata service name.
+
+- **Tracked files**: `catalog.yaml` (key + 10 `storage:inputs/...` source
+  keys), the `pipeline.parse_source()` parser gate, agriculture
+  `preprocessors/registry.py` (`department = ...`, drives manifest
+  generation), the 3 `configs/*_manifest.csv`, `README.md`, and the id in
+  `test_agriculture_parser.py` / `test_field_mapping.py` (fixture seeds).
+- **Local storage (gitignored)**: byte-level replace across the tree —
+  202 files / 6575 occurrences, **excluding `raw/source/**`** (212 files:
+  the departments' original submissions must keep the bytes whose sha256
+  runs.csv records) — then folder renames `storage/department/...` and
+  `storage/inputs/...`; `_lookups/*.csv` backed up to temp first. runs.csv
+  kept its 100 published / 1 not_attempted rows, now under `agri_dept.*`.
+- **Local OpenMetadata**: `sync --department agri_dept` → 9 `unchanged` +
+  `published` into the new service `agri_dept` (9 tables / 288 columns);
+  the old `agriculture_department` service then hard-deleted via the SDK
+  (`get_by_name` + `delete(id, recursive=True, hardDelete=True)`) — raw
+  GET/DELETE by name 404s on this build, and the pydantic Uuid must be
+  passed as the object (`str(id)` produces a `root=UUID('...')` URL).
+- **Tag verification**: 9 tables / 288 columns / **365 tag assignments** —
+  MDSF 288 (Internal 189 / PII 55 / Financial 41 / Public 2 / Restricted 1,
+  exactly one per column) + FieldTag 59 (Date/Timestamp 27, PII 12,
+  Financial 15, Status/Workflow 5) + BusinessGlossary 18 from the farmers
+  field dictionary. Read with `?fields=columns,tags`: the `fields=tags`
+  gotcha documented above cost a long detour — the writes had been fine all
+  along (table-level tags do show with `fields=tags` alone, which made it
+  look like only column tags were missing).
+- `python -m pytest tests/ -q` → **425 passed** (twice).
+- Global OpenMetadata untouched: it still holds the 9 tables under the old
+  `agriculture_department` service — see Future Work.
+- The rename edits were left uncommitted pending review.
+
+---
+
 ### Future Work
 - [ ] Add Field Dictionary (business metadata) for remaining tables
 - [ ] Add dataset governance fields (owner, retention_policy, lineage)
@@ -491,3 +571,8 @@ wiring. `python -m pytest tests/ -q` -> **405 passed** (8 new tests in
 - [ ] PWD (vishwakarma) + Kanya Sumangla: ingest/republish **locally
       only** (their global push belongs to another team)
 - [x] Publish field-level classifications as OpenMetadata tags/taxonomy
+- [ ] Global OM: republish the department under `agri_dept` (phase 2) and
+      delete its old `agriculture_department` service there — local is
+      already migrated (2026-10-09), global is not
+- [ ] `catalog.yaml`'s stale `pwd:` entry (storage/OM use
+      `public_works_department`; syncing `pwd` as-is would duplicate it)
