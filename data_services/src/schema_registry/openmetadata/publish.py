@@ -548,7 +548,10 @@ def publish_table(
 def _main(argv: list[str]) -> int:
     """Command line entry point (settings come from .env / the shell)."""
 
+    from src.utils.cli import confirm_changes
+
     load_env()
+    confirm_changes(f"publish table {os.environ.get('TABLE_ID')} to OpenMetadata")
     _storage = storage_from_env()
     _client = get_client(
         host_port=os.environ.get("OPENMETADATA_HOST_PORT", "http://localhost:8585/api"),

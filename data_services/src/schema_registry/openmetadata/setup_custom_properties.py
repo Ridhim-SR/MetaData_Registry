@@ -71,7 +71,10 @@ def setup(host_port: str, jwt_token: str) -> None:
 def _main(argv: list[str]) -> int:
     """Command line entry point (settings come from .env / the shell)."""
 
+    from src.utils.cli import confirm_changes
+
     load_env()
+    confirm_changes("create OpenMetadata custom properties and tags")
     setup(
         host_port=os.environ.get("OPENMETADATA_HOST_PORT", "http://localhost:8585/api"),
         jwt_token=os.environ["OPENMETADATA_JWT_TOKEN"],

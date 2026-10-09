@@ -370,6 +370,7 @@ def setup(main: Bucket, backup: Bucket, backup_region: str, iam=None, pipeline_u
 
 def _main(argv: list[str]) -> int:
     from src.storage import storage_from_env
+    from src.utils.cli import confirm_changes
     from src.utils.config import load_env
 
     parser = argparse.ArgumentParser(prog="python3 -m src.storage.backup", description=__doc__.split("\n\n")[0])
@@ -399,6 +400,12 @@ def _main(argv: list[str]) -> int:
         )
     if backup.name == main.name:
         raise ValueError("WASABI_BACKUP_BUCKET is the same as WASABI_BUCKET -- the backup needs its own bucket")
+
+    if args.command == "setup" and not args.dry_run:
+        confirm_changes("backup setup -- create/change buckets, versioning, Object Lock"
+                        + (f", Wasabi user {args.pipeline_user}" if args.pipeline_user else ""))
+    elif args.command == "copy" or (args.command == "restore" and not args.dry_run):
+        confirm_changes(f"backup {args.command}" + (" (whole bucket)" if args.all else " (this environment's folder)"))
 
     if args.command == "setup":
         if args.create_key and not args.pipeline_user:

@@ -77,3 +77,51 @@ def test_missing_wasabi_permission_names_it(capsys):
     assert cli.run_cli("backup", main, []) == 1
     err = capsys.readouterr().err
     assert "not authorized to perform: s3:CreateBucket" in err and "Wasabi admin" in err
+
+
+@pytest.fixture
+def confirm_env(monkeypatch):
+    for key, value in {"ENVIRONMENT": "development", "WASABI_BUCKET": "bucket", "WASABI_PREFIX": "dev"}.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.delenv("SDA_ASSUME_YES", raising=False)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+
+
+def _changes_data(argv):
+    cli.confirm_changes("change something")
+    return 0
+
+
+@pytest.mark.parametrize("answers, code", [
+    (["yes", "development"], 0),   # both confirmations right -> runs
+    (["no"], 1),                   # first answer no -> cancelled
+    (["yes", "production"], 1),    # wrong environment name -> cancelled
+])
+def test_two_confirmations(confirm_env, monkeypatch, capsys, answers, code):
+    replies = iter(answers)
+    monkeypatch.setattr("builtins.input", lambda prompt: next(replies))
+    assert cli.run_cli("sync", _changes_data, []) == code
+    out = capsys.readouterr()
+    assert "DEVELOPMENT" in out.out and "bucket/dev/" in out.out
+    assert "\033[" not in out.out  # not a terminal -> no colour codes
+    if code:
+        assert "Cancelled -- nothing was changed." in out.err
+
+
+def test_yes_flag_skips_the_questions(confirm_env, monkeypatch, capsys):
+    monkeypatch.setattr("builtins.input", lambda prompt: pytest.fail("asked a question despite --yes"))
+    assert cli.run_cli("sync", _changes_data, ["--yes"]) == 0
+    assert "Confirmed with --yes." in capsys.readouterr().out
+
+
+def test_no_terminal_and_no_yes_refuses(confirm_env, monkeypatch, capsys):
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    assert cli.run_cli("sync", _changes_data, []) == 1
+    assert "needs a confirmation" in capsys.readouterr().err
+
+
+def test_production_is_shown_in_red_on_a_terminal(confirm_env, monkeypatch, capsys):
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    cli.run_cli("sync", _changes_data, ["--yes"])
+    assert "\033[1;97;41m PRODUCTION \033[0m" in capsys.readouterr().out
