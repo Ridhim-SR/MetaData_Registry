@@ -22,8 +22,8 @@ departments:
     name: Public Works Department
     datasets:
       vishwakarma:
-        category: 
-        owner: 
+        category:
+        owner:
         frequency:
         timeline:
         api_available:
@@ -32,3 +32,58 @@ departments:
           vishwakarma_T:
             source: storage:inputs/pwd/vishwakarma/pwd_vishwakarma_full_raw_columns.txt
             format: postgres_ddl
+  agriculture_department:
+    name: Agriculture Department
+    datasets:
+      distribution_record_dataset:
+        category:
+        owner:
+        frequency:
+        timeline:
+        api_available:
+        description:
+        tables:
+          crop_sales:
+            source: storage:inputs/agriculture_department/distribution_record_dataset/Distribution_Records_Dataset-12_13_52.csv
+            format: csv
+          current_booking:
+            source: storage:inputs/agriculture_department/distribution_record_dataset/Distribution_Records_Dataset-12_13_52.csv
+            format: csv
+          current_booking_farmer_details:
+            source: storage:inputs/agriculture_department/distribution_record_dataset/Distribution_Records_Dataset-12_13_52.csv
+            format: csv
+          online_booking:
+            source: storage:inputs/agriculture_department/distribution_record_dataset/Distribution_Records_Dataset-12_13_52.csv
+            format: csv
+          online_booking_details:
+            source: storage:inputs/agriculture_department/distribution_record_dataset/Distribution_Records_Dataset-12_13_52.csv
+            format: csv
+      farmer_registration_master_dataset:
+        category:
+        owner:
+        frequency:
+        timeline:
+        api_available:
+        description:
+        tables:
+          farmers:
+            source: storage:inputs/agriculture_department/farmer_registration_master_dataset/Farmer_Registration_Master_Dataset-12_9_15.csv
+            format: csv
+            metadata: storage:inputs/agriculture_department/farmer_registration_master_dataset/farmer_registration_field_dictionary.csv
+      scheme_physical_financial_progress_dataset:
+        category:
+        owner:
+        frequency:
+        timeline:
+        api_available:
+        description:
+        tables:
+          target_allocation_v2:
+            source: storage:inputs/agriculture_department/scheme_physical_financial_progress_dataset/Scheme_Physical__Financial_Progress_Dataset-12_30_34.csv
+            format: csv
+          financial_budget_allocation:
+            source: storage:inputs/agriculture_department/scheme_physical_financial_progress_dataset/Scheme_Physical__Financial_Progress_Dataset-12_30_34.csv
+            format: csv
+          grant_wise_bill_generation:
+            source: storage:inputs/agriculture_department/scheme_physical_financial_progress_dataset/Scheme_Physical__Financial_Progress_Dataset-12_30_34.csv
+            format: csv
