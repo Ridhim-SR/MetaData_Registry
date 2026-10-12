@@ -1,3 +1,5 @@
+import asyncio
+
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
@@ -201,10 +203,19 @@ async def metadata_stats(
 ) -> dict:
     """Visibility-aware stats: counts derived only from tables the caller may open."""
     async with OpenMetadataClient() as client:
-        raw = await client.metadata_stats(allowed_services=allowed_services(user))
-        # Re-compute table-level numbers from the visible subset so hidden
-        # tables never leak via counts, byService, or recent lists.
-        tables = await client._fetch_all("tables", {"fields": "columns", "limit": 1000})
+        # Single tables scan (previously metadata_stats() + a duplicate
+        # _fetch_all("tables") = 2 full scans). Light entity counts and the
+        # tables payload are fetched concurrently.
+        services, databases, schemas, tables = await asyncio.gather(
+            client._fetch_all("services/databaseServices", {"limit": 100}),
+            client._fetch_all("databases", {"limit": 1000}),
+            client._fetch_all("databaseSchemas", {"limit": 1000}),
+            client._fetch_all("tables", {"fields": "columns", "limit": 1000}),
+        )
+        raw = {"services": len(services), "databases": len(databases), "schemas": len(schemas)}
+        allowed = allowed_services(user)
+        if allowed is not None:
+            tables = [t for t in tables if (t.get("fullyQualifiedName") or "").split(".")[0] in allowed]
     visible = await _visible_full(session, tables, user)
     by_service: dict[str, int] = {}
     for t in visible:
@@ -248,10 +259,12 @@ async def list_databases(
     ``service`` is an Owner filter only.
     """
     async with OpenMetadataClient() as client:
-        data = await client.list_databases(
-            service=scoped_service(user, service), limit=limit, after=after
+        data, tables = await asyncio.gather(
+            client.list_databases(
+                service=scoped_service(user, service), limit=limit, after=after
+            ),
+            client._fetch_all("tables", {"fields": "columns", "limit": 1000}),
         )
-        tables = await client._fetch_all("tables", {"fields": "columns", "limit": 1000})
     visible_keys = await _visible_dataset_keys(session, tables, user)
     items = []
     for d in data.get("data", []):
@@ -271,8 +284,10 @@ async def list_schemas(
 ) -> dict:
     """Schemas filtered to visible datasets (schema is a technical level)."""
     async with OpenMetadataClient() as client:
-        data = await client.list_schemas(database=database, limit=limit, after=after)
-        tables = await client._fetch_all("tables", {"fields": "columns", "limit": 1000})
+        data, tables = await asyncio.gather(
+            client.list_schemas(database=database, limit=limit, after=after),
+            client._fetch_all("tables", {"fields": "columns", "limit": 1000}),
+        )
     visible_keys = await _visible_dataset_keys(session, tables, user)
     # Schema FQNs look like service.database.schema; keep only those whose
     # parent dataset is visible.
@@ -293,8 +308,10 @@ async def get_facets(
 ) -> dict:
     """Filter values derived from visible datasets only (never raw OM)."""
     async with OpenMetadataClient() as client:
-        facets = await client.get_facets()
-        tables = await client._fetch_all("tables", {"fields": "columns", "limit": 1000})
+        facets, tables = await asyncio.gather(
+            client.get_facets(),
+            client._fetch_all("tables", {"fields": "columns", "limit": 1000}),
+        )
     visible = await _visible_full(session, tables, user)
     visible_services = sorted({(t.get("fullyQualifiedName") or "").split(".")[0] for t in visible if t.get("fullyQualifiedName")})
     visible_dbs = sorted({vis.dataset_fqn(t.get("fullyQualifiedName") or "") for t in visible})

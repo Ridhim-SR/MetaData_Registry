@@ -36,6 +36,7 @@ module.exports = {
       script: `${ROOT}/apps/api/.venv/bin/uvicorn`,
       args: `src.main:app --host 0.0.0.0 --port ${API_PORT} --workers 2`,
       interpreter: "none",
+      max_memory_restart: "800M",
       ...common,
     },
     {

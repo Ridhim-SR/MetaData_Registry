@@ -11,6 +11,7 @@ department identity is the OM *service* name. Display names come from the
 local department_profile table, never from formatted service IDs.
 """
 
+import asyncio
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -33,12 +34,24 @@ from src.openmetadata.schemas.dataset import AccessRequestCreate
 
 router = APIRouter(prefix="/registry", tags=["registry"])
 
-CATALOG_TTL_SECONDS = 60
+CATALOG_TTL_SECONDS = 300
 
 # Viewer-class -> (fetched_at, {"tables": [...], "databases": [...]})
 # Raw OpenMetadata payloads only; the visibility map and profiles stay fresh
 # per request so access changes apply immediately while OM polling is cached.
+# Bounded to the 3 viewer classes (guest/admin/user:{dept}); user keys are
+# capped with simple FIFO eviction to avoid unbounded growth.
 _catalog_cache: dict[str, tuple[float, dict]] = {}
+_catalog_locks: dict[str, asyncio.Lock] = {}
+_CATALOG_MAX_USER_KEYS = 50
+
+
+def _catalog_lock(key: str) -> asyncio.Lock:
+    lock = _catalog_locks.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _catalog_locks[key] = lock
+    return lock
 
 
 # ---- sidecar helpers ----
@@ -87,24 +100,40 @@ def _profiles_from_services(services: list[dict]) -> list[dict]:
 
 
 async def _catalog_raw(session: AsyncSession, ctx: dict | None) -> dict:
-    """Raw OM payloads shared by every endpoint (60s cache per viewer class).
+    """Raw OM payloads shared by every endpoint (300s cache per viewer class).
 
-    One tables fetch (with columns, needed for full cards/detail) and one
-    light databases fetch per window; visibility maps and profiles are read
-    fresh on every request.
+    Tables (with columns, needed for full cards/detail), databases and
+    services are fetched concurrently. A per-key lock provides singleflight:
+    N concurrent cache misses collapse into 1 OM fetch. Visibility maps and
+    profiles are read fresh on every request.
     """
     key = vis.viewer_key(ctx)
     now = time.monotonic()
     hit = _catalog_cache.get(key)
     if hit and now - hit[0] < CATALOG_TTL_SECONDS:
         return hit[1]
-    async with OpenMetadataClient() as client:
-        tables = await client._fetch_all("tables", {"fields": "columns,tags,owners", "limit": 1000})
-        databases = await client._fetch_all("databases", {"limit": 1000})
-        services = await client._fetch_all("services/databaseServices", {"limit": 100})
-    payload = {"tables": tables, "databases": databases, "services": services}
-    _catalog_cache[key] = (now, payload)
-    return payload
+    async with _catalog_lock(key):
+        # Re-check after acquiring: a waiter reuses the fresh payload.
+        now = time.monotonic()
+        hit = _catalog_cache.get(key)
+        if hit and now - hit[0] < CATALOG_TTL_SECONDS:
+            return hit[1]
+        async with OpenMetadataClient() as client:
+            tables, databases, services = await asyncio.gather(
+                client._fetch_all("tables", {"fields": "columns,tags,owners", "limit": 1000}),
+                client._fetch_all("databases", {"limit": 1000}),
+                client._fetch_all("services/databaseServices", {"limit": 100}),
+            )
+        payload = {"tables": tables, "databases": databases, "services": services}
+        _catalog_cache[key] = (time.monotonic(), payload)
+        # Bound user-key growth; guest/admin keys are never evicted here.
+        if len(_catalog_cache) > _CATALOG_MAX_USER_KEYS + 2:
+            for k in list(_catalog_cache):
+                if k not in ("guest", "admin"):
+                    del _catalog_cache[k]
+                    if len(_catalog_cache) <= _CATALOG_MAX_USER_KEYS + 2:
+                        break
+        return payload
 
 
 async def _viewer_catalog(session: AsyncSession, ctx: dict | None) -> tuple[list[dict], dict, list[dict], list[dict]]:
@@ -218,13 +247,17 @@ async def public_datasets(
 async def list_datasets(
     department: str | None = None,
     search: str | None = None,
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=500, ge=1, le=1000),
     session: AsyncSession = Depends(db_get_session),
     user: User | None = Depends(get_optional_user),
 ) -> dict:
     """Catalog datasets visible to the caller (full cards + locked teasers).
 
-    Logged-in callers additionally receive table-level restricted teasers
-    (historical shape); guests never receive table names of non-public data.
+    Paged via page/size (default 500 covers current catalogs; total is the
+    full visible count). Logged-in callers additionally receive table-level
+    restricted teasers capped to the same page size; guests never receive
+    table names of non-public data.
     """
     ctx = user_context(user)
     cards, vmap, _databases, services = await _viewer_catalog(session, ctx)
@@ -238,6 +271,9 @@ async def list_datasets(
             c for c in cards
             if needle in (c["name"] or "").lower() or needle in (c["dataset"] or "").lower()
         ]
+    total = len(cards)
+    start = (page - 1) * size
+    items = cards[start:start + size]
     teasers: list[dict] = []
     if user is not None:
         raw = await _catalog_raw(session, ctx)
@@ -248,9 +284,10 @@ async def list_datasets(
                 t for t in table_teasers
                 if (t.get("fullyQualifiedName") or "").split(".")[0] in wanted
             ]
-        teasers = table_teasers
-    _with_dept_display(cards, profiles)
-    return {"items": cards, "teasers": teasers, "total": len(cards)}
+        teasers = table_teasers[:size]
+    _with_dept_display(items, profiles)
+    _with_dept_display(teasers, profiles)
+    return {"items": items, "teasers": teasers, "total": total, "page": page, "size": size}
 
 
 def _dataset_exists(raw_tables: list[dict], databases: list[dict], fqn: str) -> bool:
