@@ -367,7 +367,7 @@ Every run adds new files with the time in the name, so the full history stays. O
 
 | Ours | In OpenMetadata |
 |---|---|
-| Department (`pwd`) | Database service |
+| Department (`pwd`) | Database service. Its name is the id (`pwd`); the full department name from the catalog is shown as its display name |
 | Dataset (`vishwakarma`) | Database: description, category tag, and owner / frequency / timeline / API as custom properties |
 | `schema:` (default `public`) | Schema |
 | Table | Table: columns, types, descriptions |
