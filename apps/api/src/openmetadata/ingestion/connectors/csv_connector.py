@@ -1,9 +1,12 @@
+import asyncio
 import csv
 import os
 from typing import Any
 
 from src.openmetadata.client import OpenMetadataClient
 from src.openmetadata.ingestion.base import BaseConnector
+
+MAX_CSV_ROWS = 50_000
 
 
 class CsvConnector(BaseConnector):
@@ -43,9 +46,11 @@ class CsvConnector(BaseConnector):
         return columns
 
     async def extract_entities(self, client: OpenMetadataClient) -> list[dict]:
-        rows = self._read_csv()
+        rows = await asyncio.to_thread(self._read_csv)
         if not rows:
             return []
+        if len(rows) > MAX_CSV_ROWS + 1:
+            raise ValueError(f"CSV has too many rows (max {MAX_CSV_ROWS})")
 
         header = [h for h in rows[0]] if self.has_header else [f"col_{i}" for i in range(len(rows[0]))]
         data_rows = rows[1:] if self.has_header else rows

@@ -3,7 +3,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.models import AuthProvider, User, UserRole
-from src.middleware.auth import create_access_token, hash_password, verify_password
+from src.middleware.auth import create_access_token, hash_password_async, verify_password_async
 from src.schemas.auth import LoginRequest, RegisterRequest, TokenResponse
 
 
@@ -34,7 +34,7 @@ async def register_user(body: RegisterRequest, session: AsyncSession):
         email=body.email,
         first_name=body.first_name,
         last_name=body.last_name,
-        password_hash=hash_password(body.password),
+        password_hash=await hash_password_async(body.password),
         auth_provider=AuthProvider.local,
         role=UserRole.user,
         department=body.department,
@@ -68,7 +68,7 @@ async def login_user(body: LoginRequest, session: AsyncSession) -> TokenResponse
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"This account uses {user.auth_provider.value} sign-in. Please continue with {user.auth_provider.value}.",
         )
-    if not verify_password(body.password, user.password_hash):
+    if not await verify_password_async(body.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
     token = create_access_token({"sub": user.id, "role": user.role.value, "department": user.department})

@@ -1,72 +1,157 @@
+import asyncio
 import base64
+import time
+
 import httpx
 from typing import Any
 
 from src.openmetadata.config import settings
+
+# Shared HTTP pool: one AsyncClient per worker process, created lazily and
+# reused across requests. Previously every `async with OpenMetadataClient()`
+# built + closed its own client (fresh TCP+TLS per request) and POSTed
+# users/login per request. That added 2 OM round-trips to every API call.
+_shared_client: httpx.AsyncClient | None = None
+_shared_lock = asyncio.Lock()
+
+# Cached OM access token (password-login path). Refreshed under _login_lock
+# with double-checked locking so N concurrent requests = 1 login, not N.
+# Static settings.jwt_token (bot JWT) always wins and is never re-fetched.
+_om_token: str | None = None
+_om_token_expires: float = 0.0
+_login_lock = asyncio.Lock()
+TOKEN_TTL_SECONDS = 50 * 60
+
+
+def _build_timeout() -> httpx.Timeout:
+    # Short connect/pool timeouts so a wedged OM fails fast instead of
+    # hanging the request for settings.request_timeout (30s).
+    read = float(settings.request_timeout or 30)
+    return httpx.Timeout(connect=5.0, read=min(read, 15.0), write=10.0, pool=5.0)
+
+
+async def _get_shared_client() -> httpx.AsyncClient:
+    global _shared_client
+    if _shared_client is not None:
+        return _shared_client
+    async with _shared_lock:
+        if _shared_client is None:
+            _shared_client = httpx.AsyncClient(
+                timeout=_build_timeout(),
+                limits=httpx.Limits(max_connections=50, max_keepalive_connections=20),
+            )
+    return _shared_client
+
+
+async def aclose_shared_client() -> None:
+    """Close the worker-level pool (lifespan shutdown only)."""
+    global _shared_client
+    if _shared_client is not None:
+        try:
+            await _shared_client.aclose()
+        finally:
+            _shared_client = None
+
+
+async def warm_shared_client() -> None:
+    """Pre-connect the pool + token at startup so first request is fast."""
+    client = await _get_shared_client()
+    if settings.jwt_token:
+        return
+    # Best-effort login; failures surface on first real request instead.
+    try:
+        tmp = OpenMetadataClient()
+        tmp._client = client
+        await tmp._login()
+    except Exception:
+        pass
 
 
 class OpenMetadataClient:
     def __init__(self) -> None:
         self._base_url = settings.base_url
         self._token: str | None = None
-        self._client = httpx.AsyncClient(timeout=settings.request_timeout)
+        self._client: httpx.AsyncClient | None = None
 
     async def __aenter__(self) -> "OpenMetadataClient":
-        if settings.jwt_token:
-            self._token = settings.jwt_token
-        else:
-            await self._login()
+        self._base_url = settings.base_url
+        self._client = await _get_shared_client()
+        await self._login()
         return self
 
     async def __aexit__(self, *args: Any) -> None:
-        await self._client.aclose()
+        # Do NOT close: _client is the shared worker pool.
+        self._client = None
 
-    async def _login(self) -> None:
-        encoded = base64.b64encode(settings.password.encode()).decode()
-        resp = await self._client.post(
-            settings.auth_endpoint,
-            json={"email": settings.username, "password": encoded},
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        self._token = data.get("accessToken")
+    async def _login(self, force: bool = False) -> None:
+        # Static bot JWT always wins (no network call, no expiry handling).
+        if settings.jwt_token:
+            self._token = settings.jwt_token
+            return
+        global _om_token, _om_token_expires
+        now = time.monotonic()
+        if not force and _om_token and now < _om_token_expires - 60:
+            self._token = _om_token
+            return
+        async with _login_lock:
+            now = time.monotonic()
+            if not force and _om_token and now < _om_token_expires - 60:
+                self._token = _om_token
+                return
+            client = self._client or await _get_shared_client()
+            encoded = base64.b64encode(settings.password.encode()).decode()
+            resp = await client.post(
+                settings.auth_endpoint,
+                json={"email": settings.username, "password": encoded},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            token = data.get("accessToken")
+            _om_token = token
+            _om_token_expires = time.monotonic() + TOKEN_TTL_SECONDS
+            self._token = token
 
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self._token}"} if self._token else {}
 
-    async def get(self, path: str, params: dict | None = None) -> dict:
-        resp = await self._client.get(
-            f"{self._base_url}/{path.lstrip('/')}",
-            headers=self._headers(),
-            params=params,
-        )
+    def _assert_client(self) -> httpx.AsyncClient:
+        if self._client is None:
+            raise RuntimeError("OpenMetadataClient used outside 'async with'")
+        return self._client
+
+    async def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+        client = self._assert_client()
+        url = f"{self._base_url}/{path.lstrip('/')}"
+        # Tests monkeypatch _login; keep the call inside _request cheap by
+        # only refreshing when we have no token at all.
+        if not self._token:
+            await self._login()
+        resp = await client.request(method, url, headers=self._headers(), **kwargs)
+        if resp.status_code == 401 and not settings.jwt_token:
+            # Token expired server-side: refresh once and retry.
+            try:
+                await self._login(force=True)
+            except Exception:
+                pass
+            else:
+                resp = await client.request(method, url, headers=self._headers(), **kwargs)
         resp.raise_for_status()
+        return resp
+
+    async def get(self, path: str, params: dict | None = None) -> dict:
+        resp = await self._request("GET", path, params=params)
         return resp.json()
 
     async def post(self, path: str, json: dict | None = None) -> dict:
-        resp = await self._client.post(
-            f"{self._base_url}/{path.lstrip('/')}",
-            headers=self._headers(),
-            json=json,
-        )
-        resp.raise_for_status()
+        resp = await self._request("POST", path, json=json)
         return resp.json()
 
     async def put(self, path: str, json: dict | None = None) -> dict:
-        resp = await self._client.put(
-            f"{self._base_url}/{path.lstrip('/')}",
-            headers=self._headers(),
-            json=json,
-        )
-        resp.raise_for_status()
+        resp = await self._request("PUT", path, json=json)
         return resp.json()
 
     async def delete(self, path: str) -> dict:
-        resp = await self._client.delete(
-            f"{self._base_url}/{path.lstrip('/')}",
-            headers=self._headers(),
-        )
-        resp.raise_for_status()
+        resp = await self._request("DELETE", path)
         return resp.json()
 
     # ---- convenience wrappers ----
@@ -193,9 +278,14 @@ class OpenMetadataClient:
 
     async def get_facets(self) -> dict:
         """Lightweight filter values for Explore: service / database / schema names."""
-        services = (await self.get("services/databaseServices", params={"limit": 100})).get("data", [])
-        databases = (await self.get("databases", params={"limit": 1000})).get("data", [])
-        schemas = (await self.get("databaseSchemas", params={"limit": 1000})).get("data", [])
+        services_resp, databases_resp, schemas_resp = await asyncio.gather(
+            self.get("services/databaseServices", params={"limit": 100}),
+            self.get("databases", params={"limit": 1000}),
+            self.get("databaseSchemas", params={"limit": 1000}),
+        )
+        services = services_resp.get("data", [])
+        databases = databases_resp.get("data", [])
+        schemas = schemas_resp.get("data", [])
         return {
             "services": sorted({s.get("name") for s in services if s.get("name")}),
             "databases": sorted({d.get("name") for d in databases if d.get("name")}),
@@ -218,10 +308,12 @@ class OpenMetadataClient:
         return out
 
     async def metadata_stats(self, allowed_services: set[str] | None = None) -> dict:
-        services = await self._fetch_all("services/databaseServices", {"limit": 100})
-        databases = await self._fetch_all("databases", {"limit": 1000})
-        schemas = await self._fetch_all("databaseSchemas", {"limit": 1000})
-        tables = await self._fetch_all("tables", {"fields": "columns", "limit": 1000})
+        services, databases, schemas, tables = await asyncio.gather(
+            self._fetch_all("services/databaseServices", {"limit": 100}),
+            self._fetch_all("databases", {"limit": 1000}),
+            self._fetch_all("databaseSchemas", {"limit": 1000}),
+            self._fetch_all("tables", {"fields": "columns", "limit": 1000}),
+        )
         if allowed_services is not None:
             tables = [t for t in tables if (t.get("fullyQualifiedName") or "").split(".")[0] in allowed_services]
         by_service: dict[str, int] = {}
@@ -283,10 +375,16 @@ class OpenMetadataClient:
     # ---- tags & glossary ----
 
     async def get_tag_catalog(self) -> dict:
-        classifications = (await self.get("classifications", params={"limit": 100})).get("data", [])
-        tags = (await self.get("tags", params={"limit": 100})).get("data", [])
-        glossaries = (await self.get("glossaries", params={"limit": 100})).get("data", [])
-        terms = (await self.get("glossaryTerms", params={"limit": 100})).get("data", [])
+        classifications_resp, tags_resp, glossaries_resp, terms_resp = await asyncio.gather(
+            self.get("classifications", params={"limit": 100}),
+            self.get("tags", params={"limit": 100}),
+            self.get("glossaries", params={"limit": 100}),
+            self.get("glossaryTerms", params={"limit": 100}),
+        )
+        classifications = classifications_resp.get("data", [])
+        tags = tags_resp.get("data", [])
+        glossaries = glossaries_resp.get("data", [])
+        terms = terms_resp.get("data", [])
 
         def slim(item: dict) -> dict:
             return {
@@ -338,9 +436,5 @@ class OpenMetadataClient:
         return await self.put(f"tables/{table_id}/tags", json=labels)
 
     async def health(self) -> dict:
-        resp = await self._client.get(
-            f"{self._base_url}/system/health",
-            headers=self._headers(),
-        )
-        resp.raise_for_status()
+        resp = await self._request("GET", "system/health")
         return {"status": resp.text.strip() or "ok"}

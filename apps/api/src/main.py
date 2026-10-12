@@ -5,6 +5,8 @@ from dotenv import load_dotenv
 
 load_dotenv()  # apps/api/.env (server-only, gitignored) before local imports read env
 
+import time
+
 import httpx
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,7 +18,8 @@ from database.database import async_session, engine
 from database.database import get_session as db_get_session
 from database.models import Base, User, UserRole
 from database.schemas import UserOut
-from src.middleware.auth import get_current_user, require_admin
+from src.middleware.auth import get_current_user, invalidate_user_cache, require_admin
+from src.openmetadata.client import aclose_shared_client, warm_shared_client
 from src.openmetadata.config import settings as om_settings
 from src.routers import app_router
 
@@ -51,7 +54,16 @@ async def lifespan(app: FastAPI):
                 pass
         finally:
             await extra.close()
+    # Warm the shared OM HTTP pool + token so the first request is fast.
+    try:
+        await warm_shared_client()
+    except Exception:
+        pass
     yield
+    try:
+        await aclose_shared_client()
+    except Exception:
+        pass
     await engine.dispose()
 
 
@@ -70,6 +82,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(app_router)
+
+
+@app.middleware("http")
+async def _server_timing(request: Request, call_next):
+    started = time.perf_counter()
+    response = await call_next(request)
+    response.headers["X-Process-Time"] = f"{(time.perf_counter() - started) * 1000:.1f}ms"
+    return response
 
 
 @app.exception_handler(httpx.ConnectError)
@@ -138,4 +158,5 @@ async def update_user(
         user.department = body["department"]
     await session.commit()
     await session.refresh(user)
+    invalidate_user_cache(user_id)
     return user

@@ -1,3 +1,4 @@
+import asyncio
 import shutil
 import uuid
 from pathlib import Path
@@ -21,23 +22,48 @@ router = APIRouter(prefix="/openmetadata/ingestion", tags=["openmetadata"])
 
 UPLOAD_DIR = Path(__file__).resolve().parents[3] / "uploads"
 
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+
+
+def _save_upload(src, dest: Path) -> int:
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    written = 0
+    with dest.open("wb") as out:
+        while True:
+            chunk = src.read(1024 * 1024)
+            if not chunk:
+                break
+            written += len(chunk)
+            if written > MAX_UPLOAD_BYTES:
+                out.close()
+                dest.unlink(missing_ok=True)
+                raise ValueError("too_large")
+            out.write(chunk)
+    return dest.stat().st_size
+
 
 @router.post("/csv/upload", response_model=CsvUploadResponse)
 async def upload_csv(file: UploadFile, _user: User = Depends(get_current_user)) -> CsvUploadResponse:
     if not file.filename or not file.filename.lower().endswith(".csv"):
         raise HTTPException(status_code=400, detail="Only .csv files are allowed")
 
-    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     safe_name = Path(file.filename).name
     dest = UPLOAD_DIR / f"{uuid.uuid4().hex}_{safe_name}"
 
-    with dest.open("wb") as out:
-        shutil.copyfileobj(file.file, out)
+    try:
+        size = await asyncio.to_thread(_save_upload, file.file, dest)
+    except ValueError:
+        raise HTTPException(status_code=413, detail="CSV larger than 50MB is not allowed")
+    finally:
+        try:
+            await asyncio.to_thread(file.file.close)
+        except Exception:
+            pass
 
     return CsvUploadResponse(
         file_path=str(dest),
         filename=safe_name,
-        size=dest.stat().st_size,
+        size=size,
     )
 
 
