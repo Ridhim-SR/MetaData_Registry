@@ -72,6 +72,15 @@ def register_department(storage: ObjectStorage, department_id: str, department_n
     logger.info(f"Department {'re-registered' if existing else 'registered'}: {department_id} ({department_name})")
 
 
+def department_name(storage: ObjectStorage, department_id: str) -> str:
+    """The department's full name from the lists ('' if not registered)."""
+
+    if not storage.exists(DEPARTMENTS_PATH):
+        return ""
+    return next((r["department_name"] for r in storage.read_csv(DEPARTMENTS_PATH)
+                 if r["department_id"] == department_id), "")
+
+
 def department_exists(storage: ObjectStorage, department_id: str) -> bool:
     if not storage.exists(DEPARTMENTS_PATH):
         return False
