@@ -96,6 +96,49 @@ def test_non_pii_field_defaults_to_internal():
     assert curated[0]["classification"] == "Internal"
 
 
+def test_geographic_place_names_are_public_not_pii():
+    """A place is not a person: state/district/block/Gram-Panchayat name
+    columns are reference data, so the generic PII "name" rule must not
+    reach them (the geo rule runs first)."""
+
+    curated = curate_schema(
+        [
+            _col("state_name", "character varying"),
+            _col("district_name", "character varying"),
+            _col("block_name", "character varying"),
+            _col("gp_name", "character varying"),
+            _col("curr_district_name", "character varying"),  # compound prefix
+            _col("project_block_name", "character varying"),
+        ]
+    )
+    assert all(row["classification"] == "Public" for row in curated)
+
+
+def test_personal_names_still_classify_as_pii():
+    curated = curate_schema(
+        [
+            _col("father_name", "character varying"),
+            _col("applicant_first_name", "character varying"),
+            _col("name", "character varying"),
+        ]
+    )
+    assert all(row["classification"] == "PII" for row in curated)
+
+
+def test_geo_rule_only_matches_name_columns():
+    """state_code keeps its existing Internal classification, and a column
+    merely containing a place word stays on the later rules."""
+
+    curated = curate_schema(
+        [
+            _col("state_code", "character varying"),
+            _col("emp_avail_states_persondays", "integer"),
+        ]
+    )
+    assert curated[0]["classification"] == "Internal"
+    assert curated[1]["classification"] == "Public"  # existing geo rule, unchanged
+
+
 def test_business_metadata_overrides_auto_classification():
     business_metadata = {"mobile_number": {"classification": "Confidential"}}
     curated = curate_schema([_col("mobile_number", "character varying")], business_metadata)

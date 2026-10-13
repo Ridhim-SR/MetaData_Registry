@@ -92,6 +92,31 @@ def test_second_sync_changes_nothing_in_storage_but_still_publishes(storage):
     assert _published_tables(client) == ["tenders", "works"]
 
 
+def test_reclassify_reingests_unchanged_files(storage):
+    """--reclassify forces the ingest step even when the source SHA hasn't
+    changed, so pipeline.run's reclassify=True can re-derive stored
+    classifications under the current curate.py rules."""
+
+    sync(storage, parse_catalog(_CATALOG), client=_fake_client())
+
+    outcomes = _by_table(sync(
+        storage, parse_catalog(_CATALOG), client=_fake_client(),
+        only_department="pwd", reclassify=True,
+    ))
+
+    assert {o.ingest for o in outcomes.values()} == {"ingested"}
+    assert all("reclassify requested" in o.detail for o in outcomes.values())
+    assert all(o.publish == "published" for o in outcomes.values())
+
+
+def test_reclassify_requires_a_department(storage):
+    """Re-deriving classifications for every department would rewrite other
+    teams' snapshots, so the scope must be explicit."""
+
+    with pytest.raises(ValueError, match="reclassify needs --department"):
+        sync(storage, parse_catalog(_CATALOG), client=_fake_client(), reclassify=True)
+
+
 def test_only_the_changed_file_is_reingested(storage):
     sync(storage, parse_catalog(_CATALOG))
     storage.write_bytes("inputs/pwd/works.txt", b"work_id integer NOT NULL, total_cost numeric, district text")

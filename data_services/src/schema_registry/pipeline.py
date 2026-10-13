@@ -216,6 +216,7 @@ def run(
     openmetadata_client: OpenMetadata | None = None,
     allow_column_removal: bool = False,
     operator: str = "",
+    reclassify: bool = False,
 ) -> dict:
     """Parse a department's raw column-definition submission, validate/
     standardize it, and store both the raw and curated schema versions
@@ -286,6 +287,16 @@ def run(
         rather than reset -- so a description-only file doesn't erase a
         hand-set classification or glossary term. To change an answer,
         send the new value; a blank never clears one.
+      - `reclassify=True` opts out of that carry-forward for the two
+        auto-derived fields (`classification`, `tag`): they are re-derived
+        from AUTO_CLASSIFICATION_RULES/AUTO_TAG_RULES instead of keeping
+        the previous run's auto value, which would otherwise freeze a
+        rule's first-run answer forever (a place-name column classified
+        PII by an older rule stayed PII no matter how the rules were
+        fixed). Answers in *this* run's `business_metadata_file` still
+        win through the same merge, so hand-set values that are
+        re-submitted are kept -- sync --reclassify re-ingests the file,
+        i.e. the submitted answers always come with the flag.
       - A table's first-ever run has no previous snapshot to diff or carry
         forward against, so it always succeeds (this is "initial load").
     """
@@ -371,6 +382,13 @@ def run(
             previous_curated = _previous_curated_columns(storage, department_id, dataset_slug, table_slug)
 
             business_metadata = _business_metadata_from_rows(previous_curated) if previous_curated else {}
+            if reclassify:
+                # Drop the stored auto-derived answers before the merge, so
+                # the current rules re-derive them; anything this run's
+                # submitted metadata file answers is put back by the merge.
+                for meta in business_metadata.values():
+                    meta.pop("classification", None)
+                    meta.pop("tag", None)
             business_metadata = _merge_business_metadata(business_metadata, submitted_metadata)
 
             curated_columns = curate_schema(raw_columns, business_metadata)

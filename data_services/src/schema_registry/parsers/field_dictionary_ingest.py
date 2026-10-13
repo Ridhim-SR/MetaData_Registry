@@ -30,6 +30,7 @@ def run_field_dictionary(
     schema_name: str = "public",
     openmetadata_client: OpenMetadata | None = None,
     allow_column_removal: bool = False,
+    reclassify: bool = False,
 ) -> dict[str, dict]:
     """Ingest a multi-table Field Dictionary CSV (see field_dictionary_parser.py
     for the expected shape) by splitting it into one temporary per-table
@@ -102,6 +103,7 @@ def run_field_dictionary(
                         business_metadata_file=str(metadata_path),
                         openmetadata_client=openmetadata_client,
                         allow_column_removal=allow_column_removal,
+                        reclassify=reclassify,
                     ),
                 }
             except Exception as exc:  # noqa: BLE001 -- keep going, report this table as failed

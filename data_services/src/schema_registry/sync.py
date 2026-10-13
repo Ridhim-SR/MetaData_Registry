@@ -6,6 +6,11 @@ fill an empty server, and changes nothing when run again.
     python3 -m src.schema_registry.sync --publish-only  # quick restore: republish every
                                                         # table already in storage
     python3 -m src.schema_registry.sync --department pwd   # only one department
+    python3 -m src.schema_registry.sync --reclassify --department pwd
+                                                        # re-ingest even unchanged files so
+                                                        # curate.py's auto classification/tag
+                                                        # rules are re-applied (--department
+                                                        # is required; see pipeline.run)
 
 Steps, in order:
   1. OpenMetadata setup (custom properties) -- safe to repeat
@@ -90,7 +95,7 @@ def _ensure_department(storage: ObjectStorage, dept: DepartmentEntry, dry_run: b
     lookups.register_department(storage, dept.id, dept.name)
 
 
-def _ingest_dataset(storage: ObjectStorage, dept: DepartmentEntry, ds: DatasetEntry, dry_run: bool) -> list[Outcome]:
+def _ingest_dataset(storage: ObjectStorage, dept: DepartmentEntry, ds: DatasetEntry, dry_run: bool, reclassify: bool = False) -> list[Outcome]:
     ds_slug = lookups.slugify(ds.name)
     outcomes: list[Outcome] = []
 
@@ -99,12 +104,13 @@ def _ingest_dataset(storage: ObjectStorage, dept: DepartmentEntry, ds: DatasetEn
         try:
             data, _ = inputs.read_input(storage, ds.field_dictionary)
             previous = _latest_archived_sha(storage, paths.dataset_source_prefix(dept.id, ds_slug), metadata=False)
-            if inputs.sha256(data) == previous:
+            changed = inputs.sha256(data) != previous
+            if not changed and not reclassify:
                 outcomes.append(Outcome(label, "unchanged"))
             elif dry_run:
-                outcomes.append(Outcome(label, "would ingest", detail="field dictionary changed or new"))
+                outcomes.append(Outcome(label, "would ingest", detail="field dictionary changed or new" if changed else "reclassify requested"))
             else:
-                results = run_field_dictionary(department=dept.id, dataset=ds.name, source_file=ds.field_dictionary, storage=storage)
+                results = run_field_dictionary(department=dept.id, dataset=ds.name, source_file=ds.field_dictionary, storage=storage, reclassify=reclassify)
                 outcomes.append(Outcome(label, "ingested", detail=f"{len(results)} table(s)"))
         except Exception as exc:  # noqa: BLE001 -- report and carry on with other tables
             outcomes.append(Outcome(label, "failed", detail=str(exc)))
@@ -113,6 +119,8 @@ def _ingest_dataset(storage: ObjectStorage, dept: DepartmentEntry, ds: DatasetEn
         table_id = f"{dept.id}.{ds_slug}.{lookups.slugify(table.name)}"
         try:
             reason = _table_needs_ingest(storage, dept.id, ds_slug, table, table_id)
+            if reclassify:
+                reason = f"{reason}; reclassify requested" if reason else "reclassify requested"
             if reason is None:
                 outcomes.append(Outcome(table_id, "unchanged"))
                 continue
@@ -123,6 +131,7 @@ def _ingest_dataset(storage: ObjectStorage, dept: DepartmentEntry, ds: DatasetEn
                 department=dept.id, dataset=ds.name, table_name=table.name, source_file=table.source,
                 storage=storage, source_format=table.format, schema_name=table.schema,
                 business_metadata_file=table.metadata, allow_column_removal=table.allow_column_removal,
+                reclassify=reclassify,
             )
             outcomes.append(Outcome(table_id, "ingested", detail=f"{reason}; {result['column_count']} columns"))
         except Exception as exc:  # noqa: BLE001
@@ -183,15 +192,22 @@ def sync(
     dry_run: bool = False,
     publish_only: bool = False,
     only_department: str | None = None,
+    reclassify: bool = False,
 ) -> list[Outcome]:
     """Run the steps in the module docstring. `setup` is the OpenMetadata
     setup callable (custom properties); `client` None = storage only.
-    `only_department` limits every step to that one department."""
+    `only_department` limits every step to that one department.
+    `reclassify` force-re-ingests even unchanged files so pipeline.run's
+    reclassify=True re-derives classification/tag under the current
+    AUTO_* rules (use after fixing curate.py; see pipeline.run)."""
 
     if only_department:
         if not publish_only and not any(d.id == only_department for d in departments):
             raise ValueError(f"Department '{only_department}' isn't in catalog.yaml")
         departments = [d for d in departments if d.id == only_department]
+
+    if reclassify and not only_department:
+        raise ValueError("reclassify needs --department: re-deriving classifications for every department would rewrite other teams' snapshots")
 
     from src.schema_registry.openmetadata.publish import publish_table
 
@@ -203,7 +219,7 @@ def sync(
         for dept in departments:
             _ensure_department(storage, dept, dry_run)
             for ds in dept.datasets:
-                for outcome in _ingest_dataset(storage, dept, ds, dry_run):
+                for outcome in _ingest_dataset(storage, dept, ds, dry_run, reclassify=reclassify):
                     outcomes[outcome.table_id] = outcome
 
     targets = _tables_to_publish(storage, departments, publish_only, only_department)
@@ -253,7 +269,14 @@ def _main(argv: list[str]) -> int:
     parser.add_argument("--dry-run", action="store_true", help="show what would happen, change nothing")
     parser.add_argument("--publish-only", action="store_true", help="republish every table already in storage")
     parser.add_argument("--department", help="only this department (e.g. pwd)")
+    parser.add_argument(
+        "--reclassify", action="store_true",
+        help="force re-ingest of unchanged files so stored auto classification/tag values are "
+             "re-derived from the current curate.py rules (requires --department)",
+    )
     args = parser.parse_args(argv)
+    if args.reclassify and not args.department:
+        parser.error("--reclassify requires --department (it would rewrite every department's snapshots)")
 
     load_env()
     storage = storage_from_env()
@@ -270,6 +293,7 @@ def _main(argv: list[str]) -> int:
     outcomes = sync(
         storage, departments, client=client, setup=setup,
         dry_run=args.dry_run, publish_only=args.publish_only, only_department=args.department,
+        reclassify=args.reclassify,
     )
     print_summary(outcomes)
     failed = any("failed" in (o.ingest, o.publish) for o in outcomes)

@@ -30,6 +30,19 @@ CLASSIFICATION_HIERARCHY = {level: idx for idx, level in enumerate(CLASSIFICATIO
 # Auto-classification rules (field_name pattern -> classification level)
 # Based on MDSF: classify per field by risk of disclosure/re-identification/misuse
 AUTO_CLASSIFICATION_RULES: list[tuple[str, re.Pattern]] = [
+    # Geographic / administrative place names: reference data, not people.
+    # This MUST stay first: the PII "name" rule below matches any column
+    # ending in "_name", so state_name/district_name/block_name/gp_name used
+    # to be tagged PII -- a state or a Gram Panchayat is not a person, and
+    # per MDSF carries no re-identification risk (Public). Compound names
+    # (curr_district_name, bank_district_name, project_block_name) match on
+    # the place token anywhere in the name; bare non-`_name` columns keep
+    # their existing rules further down.
+    ("Public", re.compile(
+        r"(^|_)(state|district|block|gp|gram_panchayat|village|tehsil|taluka|taluk|"
+        r"mandal|town|city|ward|sector|ulb|cluster|hobli|country)(_[a-z]+)*_name$",
+        re.IGNORECASE,
+    )),
     # PII - Direct identifiers (MDSF PII-removal checklist: name, Aadhaar,
     # PAN, voter id, passport, driving licence, mobile, email, address, DOB)
     ("PII", re.compile(r"(aadha+r|pan|passport|voter_?id|ssn|national_id|driving_?licen[sc]e|vehicle_registration)", re.IGNORECASE)),

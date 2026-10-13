@@ -397,6 +397,61 @@ def test_description_only_rerun_keeps_manual_classification_glossary_and_active(
     assert phone["active"] is False  # kept, not flipped by the missing column
 
 
+def test_reclassify_rederives_auto_classification_and_tag(tmp_path):
+    """reclassify=True opts out of the carry-forward for the auto-derived
+    fields: a stored answer from an older ruleset is replaced by what the
+    current AUTO_* rules produce (the whole point of sync --reclassify)."""
+
+    ddl_file = tmp_path / "raw.txt"
+    ddl_file.write_text("phone character varying(10), total_cost numeric")
+    storage = _storage_with_department(tmp_path)
+    common = dict(department="pwd", dataset="vishwakarma", table_name="t1", source_file=str(ddl_file), storage=storage)
+
+    run(**common, business_metadata_file=_write_metadata_csv(
+        tmp_path, "first.csv",
+        "name,classification,tag\nphone,Confidential,Status/Workflow\ntotal_cost,,PII\n",
+    ))
+    result = run(
+        **common,
+        business_metadata_file=_write_metadata_csv(
+            tmp_path, "second.csv", "name,business_description\nphone,Contact number\n",
+        ),
+        reclassify=True,
+    )
+
+    phone = next(c for c in result["columns"] if c["name"] == "phone")
+    assert phone["classification"] == "PII"     # auto (name rule), not the stored Confidential
+    assert phone["tag"] == ""                   # auto-tag for phone is empty
+    cost = next(c for c in result["columns"] if c["name"] == "total_cost")
+    assert cost["tag"] == "Financial"            # auto-tag, not the stored PII
+    assert cost["classification"] == "Financial"  # auto (cost rule), never hand-set here
+
+
+def test_reclassify_still_keeps_answers_resubmitted_this_run(tmp_path):
+    """The merge is unchanged: answers this run's metadata file re-submits
+    win over the re-derived auto values, so a hand-set classification that
+    the department sends again survives a --reclassify."""
+
+    ddl_file = tmp_path / "raw.txt"
+    ddl_file.write_text("phone character varying(10)")
+    storage = _storage_with_department(tmp_path)
+    common = dict(department="pwd", dataset="vishwakarma", table_name="t1", source_file=str(ddl_file), storage=storage)
+
+    run(**common, business_metadata_file=_write_metadata_csv(
+        tmp_path, "first.csv", "name,classification\nphone,Confidential\n",
+    ))
+    result = run(
+        **common,
+        business_metadata_file=_write_metadata_csv(
+            tmp_path, "second.csv", "name,classification\nphone,Confidential\n",
+        ),
+        reclassify=True,
+    )
+
+    phone = next(c for c in result["columns"] if c["name"] == "phone")
+    assert phone["classification"] == "Confidential"
+
+
 def test_blank_cells_in_metadata_file_do_not_erase_previous_answers(tmp_path):
     ddl_file = tmp_path / "raw.txt"
     ddl_file.write_text("remarks text")
