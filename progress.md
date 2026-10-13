@@ -1,6 +1,6 @@
 # Project Progress: Agriculture Department Datasets
 
-## Status: agri_dept — Complete (Storage + OpenMetadata, local **and** global migrated to `agri_dept` 2026-10-13); rural_development_department — local ingest + publish verified 2026-10-13 (global push pending)
+## Status: agri_dept — Complete (Storage + OpenMetadata, local **and** global migrated to `agri_dept` 2026-10-13); rural_development_department — local only; **local OpenMetadata reduced to just these two (13 tables) on 2026-10-13**
 
 ### Department
 - **Department**: Agriculture Department — catalog id **`agri_dept`**
@@ -771,12 +771,57 @@ now mirrors local, which had been on `agri_dept` since 2026-10-09.
 
 ---
 
+### Local cleanup: only Agri + MGNREGA left locally (2026-10-13)
+
+Closing the original task ("add MGNREGA to OpenMetadata, then remove the
+other departments locally so only Agri and MGNREGA remain"). Scope agreed:
+**OM + registry, storage kept** — `storage/department/<other dept>/`
+curated snapshots stay, so those departments can be re-published later;
+`storage/inputs/` never held them anyway (only `agri_dept` + `rural_…`).
+
+- **Local OpenMetadata**: hard-deleted 7 services (`recursive=True,
+  hard_delete=True`, guarded script that refused unless `agri_dept`=9 and
+  `rural_development_department`=4 tables were present):
+  `basic_education_department` (5), `health_department` (4),
+  `public_works_department` (1), `pwd` (1 — an orphan `t1` left by an old
+  test, in no lookup), `revenue_department` (1),
+  `social_welfare_department` (7),
+  `women_and_child_development_department` (22) → **41 tables gone**.
+  - Result: local OM = **`agri_dept` 9 + `rural_development_department` 4
+    = 13 tables / 372 columns, all MDSF-tagged**; ES `table_search_index`
+    = **13** (no orphans).
+- **Registry lookups** (rows dropped, all 4 `_lookups/*.csv` backed up
+  first to `storage/_lookups/backup_20261013/` — gitignored, but the
+  restore point for this cleanup; a copy is also in the session temp
+  folder):
+  `departments.csv` → 2 rows (`agri_dept`,
+  `rural_development_department`); `datasets.csv` → 4 rows (3 agri + the
+  MGNREGA one); `tables.csv` → 13 rows (40 dropped).
+  `runs.csv` deliberately **kept as-is**: it's the audit trail and all 73
+  of those runs are `published`, so `republish` never offers them
+  (verified: `republish` → `0/0 republished`, exit 0).
+- `catalog.yaml` needed no change — it already listed only the two
+  departments (`pwd` commented out on 2026-10-12).
+- **Verified**: bare `sync --dry-run` → the 13 tables of the two
+  departments only, `14 table(s), 0 failed` (14 = 13 tables + the
+  field-dictionary line), no "in storage but not in catalog" noise.
+  Tests: `data_services` **445 passed**, `apps/api` **47 passed**.
+- Note for a reversal: bringing a department back = re-adding its catalog
+  entry and `sync --publish-only` (its curated snapshots are still under
+  `storage/department/`), or restoring `_lookups/*.csv` from the backup.
+
+---
+
 ### Future Work
 - [ ] Add Field Dictionary (business metadata) for remaining tables
 - [ ] Add dataset governance fields (owner, retention_policy, lineage)
 - [ ] Add new tables as they arrive
-- [ ] PWD (vishwakarma) + Kanya Sumangla: ingest/republish **locally
-      only** (their global push belongs to another team)
+- [ ] PWD (vishwakarma) + Kanya Sumangla (and the other 4 departments):
+      their **local** OM services and registry rows were removed
+      2026-10-13 to leave only Agri + MGNREGA locally — re-ingesting them
+      means restoring `_lookups/*.csv` from the backup and
+      `sync --publish-only` (their curated snapshots are still in
+      `storage/department/`); their global push belongs to another team
 - [x] Publish field-level classifications as OpenMetadata tags/taxonomy
 - [x] Global OM: republish the department under `agri_dept` (phase 2) and
       delete its old `agriculture_department` service there — **done
