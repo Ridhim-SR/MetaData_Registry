@@ -884,24 +884,80 @@ curated snapshots stay, so those departments can be re-published later;
 
 ---
 
+### Merge preview (dry-run, 2026-10-13): what `origin/main` (`54679a2`) conflicts on
+
+Ran `git merge-tree` plus a real trial merge in a scratch worktree
+(removed afterwards; the working tree was never touched). Result: **3
+conflicted files, exactly one hunk each**; the other 9 overlapping files
+auto-merge cleanly.
+
+**1. `data_services/catalog.yaml`** (datasets block, ~line 42)
+- Conflict: HEAD starts `agri_dept → distribution_record_dataset:` while
+  main starts `vishwakarma: category: CAT-3` (PR #23 added a `steward:`
+  key, filled `category: CAT-3` and the description on pwd's entry).
+- Resolve: **keep ours** (pwd commented out; agri + mgnrega as-is). The
+  hand-resolved file must NOT let main's pwd lines (`vishwakarma`,
+  `CAT-3`, the long description) attach under our
+  `distribution_record_dataset` -- the raw merge output does exactly that.
+- Adopt from theirs: a blank `steward:` under each of our 4 dataset
+  entries, and `steward` in the header's per-dataset field list.
+- Preserve main's richer pwd metadata inside the commented pwd block
+  (`category: CAT-3`, description, `steward:`) so nothing is lost when
+  pwd is re-enabled.
+
+**2. `data_services/src/schema_registry/openmetadata/publish.py`**
+(insertion point after `_CUSTOM_PROPERTY_NAMES`, ~line 329)
+- Conflict: we inserted `_resolve_owner()` there (ownership → OM
+  User/Team); main inserted `EXTRA_METADATA_PROPERTY` +
+  `_PUBLISHED_ELSEWHERE` + `_extra_metadata_json()` (both new in PR #23).
+- Resolve: **keep both function blocks**, side by side.
+- Already auto-merged, keep as-is: `"steward": "datasetSteward"` in
+  `_CUSTOM_PROPERTY_NAMES`; `"steward": dataset_row.get("steward", "")`
+  in `publish_table`'s dataset properties; the `_replace_entity_fields`
+  call writing `extension.extraMetadata = _extra_metadata_json(...)`.
+  Our extension builder (publish.py:386, iterates
+  `_CUSTOM_PROPERTY_NAMES`) picks steward up automatically, so main's new
+  steward assertions in `test_openmetadata_publish.py` (lines 225-264)
+  pass without edits.
+
+**3. `data_services/src/schema_registry/pipeline.py`** (~line 450)
+- Conflict: HEAD has the expanded `result = {...}` dict (source_hash,
+  archive paths, column_count, unmatched_metadata_names); main has its
+  `lookups.upsert_dataset(... steward=steward ...)` + `upsert_table` at
+  the old indentation.
+- Resolve: **keep our `result` dict**, drop main's duplicate upsert
+  block, and **add `steward=steward` to our `upsert_dataset` call** just
+  above the conflict -- otherwise steward never reaches datasets.csv and
+  `test_sync.py:79` (`assert row["steward"] == "PWD Data Cell"`) fails.
+- Auto-merged already: `steward: str = ""` in `run()` (line 213), the
+  docstring (246), and the `STEWARD` env read in `_main` (563).
+
+**Auto-merging cleanly (review only, no hand-editing expected):**
+`.env.example`, `README.md`, `catalog.py` (dataset `steward` field),
+`setup_custom_properties.py` (creates the `datasetSteward` property),
+`registry/lookups.py` (`upsert_dataset(..., steward=...)`), and the tests
+`test_lookups.py`, `test_openmetadata_publish.py`, `test_sync.py` (new
+steward assertions).
+
+**After resolving:** `pip install -r requirements.txt` (main adds
+`anthropic>=0.40` for the new standalone `ai_metadata.py` CLI -- nothing
+imports it), run the full suites (data_services + apps/api), then
+`sync --dry-run` through MinIO and confirm local OM still shows 2
+services / 13 tables. Steward should then flow catalog → pipeline →
+datasets.csv → the `datasetSteward` custom property end to end.
+
 ### Future Work
 - [ ] **FIRST TASK (2026-10-14): `git pull`, merge `origin/main` locally,
       then raise the PR `department/agriculture_department` -> `main`**
       Main is at `54679a2` (PR #23: dataset `steward` field + AI-drafted
-      column descriptions, 16 files). 12 of those overlap with this
-      branch: `catalog.yaml`, `publish.py`, `lookups.py`, `catalog.py`,
-      `pipeline.py`, `setup_custom_properties.py`, `README.md`,
-      `.env.example`, and the tests `test_lookups`,
-      `test_openmetadata_publish`, `test_sync`,
-      `test_setup_custom_properties`. Merge principles (same as the
-      2026-10-13 merge): `catalog.yaml` keeps our agri + mgnrega entries
-      (`pwd` stays commented out -- the other team's) while adopting the
-      `steward` field shape if the dataset schema gained it; publish/
-      lookups keep our `_dataset_info`, `_columns_for_put` and geo-name
-      work while taking their steward + AI-drafting plumbing; README/
-      `.env.example` = union of both texts; tests = union. Then: full
-      test runs (data_services 470 + apps/api 47), `sync --dry-run` clean
-      through MinIO, local OM untouched (2 services, 13 tables), push,
+      column descriptions). Verified by a dry-run merge on 2026-10-13:
+      **only 3 files conflict, one hunk each -- `catalog.yaml`,
+      `publish.py`, `pipeline.py` -- and the other 9 overlapping files
+      auto-merge cleanly. Exact per-file resolutions are in "Merge
+      preview" above; start from there.** Then: `pip install -r
+      requirements.txt` (main adds `anthropic`), full test runs
+      (data_services + apps/api), `sync --dry-run` clean through MinIO,
+      local OM untouched (2 services, 13 tables), push,
       and raise the PR summarizing the branch (agri 3 datasets, MGNREGA,
       rename to `agri_dept`, MDSF classification, service display name,
       MinIO local storage + `LOCAL_ONLY` rail, docs) and flagging that
