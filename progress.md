@@ -1,6 +1,6 @@
 # Project Progress: Agriculture Department Datasets
 
-## Status: agri_dept — Complete (Storage + OpenMetadata, local **and** global migrated to `agri_dept` 2026-10-13); rural_development_department — local only; **local OpenMetadata reduced to just these two (13 tables) on 2026-10-13**
+## Status: agri_dept — Complete (Storage + OpenMetadata, local **and** global migrated to `agri_dept` 2026-10-13); rural_development_department — local only; **local OpenMetadata reduced to just these two (13 tables) and local storage moved to a local MinIO, both local-only by enforcement (`LOCAL_ONLY=1`), on 2026-10-13**
 
 ### Department
 - **Department**: Agriculture Department — catalog id **`agri_dept`**
@@ -49,6 +49,42 @@
   `WASABI_ACCESS_KEY_ID`/`WASABI_SECRET_ACCESS_KEY`) -- read only when the
   branch is `main` (development) or `production`; feature branches refuse
   them by design.
+- **Company Wasabi checked read-only (2026-10-13); upload paused at a safe
+  point, zero writes**: the section-3 credentials were verified valid
+  against `up-sda-schema-registry` (us-west-1). The bucket holds 8
+  objects, **all PWD's** (the other team): the 3 shared `_lookups/*.csv`
+  (with PWD's registry rows), 4 `department/pwd/...` snapshots, 1
+  `inputs/pwd/...` file; no agri/mgnrega keys exist there. ETag/size
+  snapshot saved so any later change is provable. A prepared one-off
+  script -- `infrastructure/wasabi/push_agri_mgnrega.py`, dry-run by
+  default -- would upload only our 4 namespaces (`dev/inputs/agri_dept/`,
+  `dev/department/agri_dept/`, `dev/inputs/rural_development_department/`,
+  `dev/department/rural_development_department/`), refuse any key that
+  already exists, never touch `dev/_lookups/*` (overwriting those shared
+  CSVs would wipe the other team's registry rows -- the server's own sync
+  adds our rows later, merging them the way the code always has), and
+  prove afterwards that every pre-existing object is unchanged. It was
+  **not run** -- stopped at the user's request; next step is dry-run,
+  review, then `--apply` (see Future Work). Also found: the backup bucket
+  `up-sda-schema-registry-backup` really lives in `us-west-1`, not the
+  `eu-central-1` of the old `.env.example` default -- fix
+  `WASABI_BACKUP_REGION` server-side before any backup copy, or it fails
+  with `AuthorizationHeaderMalformed`.
+- **"Local stays local" is now enforced, not just promised**: new
+  `LOCAL_ONLY=1` in `.env` (documented in `.env.example` 3b) makes
+  `load_env()` refuse, in the local environment, any storage endpoint or
+  OpenMetadata address that isn't this machine
+  (localhost/127.0.0.1/host.docker.internal) -- a `PermissionError`
+  before a single byte is written. Opt-in flag, so other devs' personal
+  Wasabi setups (README 3b) keep working; on this machine it pins local
+  storage to MinIO `localhost:9000` + local OM `localhost:8585`.
+  4 new tests; data_services suite 470 passing.
+- **Docs updated**: new `infrastructure/minio/README.md` (start/stop,
+  ports, buckets, `.env` wiring, git-ignore rule, local-only guarantee);
+  `data_services/README.md` environments/rules/troubleshooting/reference
+  sections updated for MinIO + `LOCAL_ONLY`; root `README.md` repo-layout
+  table fixed (`data_services` no longer "not used yet"; minio row added);
+  the prepared push script committed under `infrastructure/wasabi/`.
 
 ### Merged origin/main (2026-10-05)
 - Merged `origin/main` (PR #11, 23 commits) into this branch; 5 conflicts resolved
@@ -849,6 +885,19 @@ curated snapshots stay, so those departments can be re-published later;
 ---
 
 ### Future Work
+- [ ] **Next: push our 2 departments' files to the company Wasabi** (paused
+      at a safe point 2026-10-13): run
+      `python infrastructure/wasabi/push_agri_mgnrega.py` (dry-run -- it
+      prints the upload set plus the 8 pre-existing PWD objects and checks
+      nothing collides), review the output, then re-run with `--apply`.
+      It writes only new keys under our 4 namespaces (agri_dept +
+      rural_development_department, inputs + department), refuses to
+      overwrite anything, and never touches the shared `dev/_lookups/*`
+      CSVs or any PWD path
+- [ ] Server `.env` fix: `WASABI_BACKUP_REGION` is `eu-central-1` (the old
+      `.env.example` default) but the backup bucket
+      `up-sda-schema-registry-backup` lives in `us-west-1` -- backup
+      copies fail with `AuthorizationHeaderMalformed` until corrected
 - [ ] Add Field Dictionary (business metadata) for remaining tables
 - [ ] Add dataset governance fields (owner, retention_policy, lineage)
 - [ ] Add new tables as they arrive

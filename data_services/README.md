@@ -97,6 +97,7 @@ cp .env.example .env          # then fill in .env -- each setting has a comment
 - If git can't tell the branch, it counts as a feature branch (`local`).
 - Try things on a feature branch first. It writes only to `local/` and your laptop's OpenMetadata.
 - `main` and `production` use the company Wasabi (`WASABI_...` in `.env`). **Feature branches never do:** they use your own Wasabi account from the `LOCAL_WASABI_...` lines (section 3b of `.env`), and stop with an error if those are blank.
+- **In this project that "own account" is a local MinIO server** (`infrastructure/minio/`, buckets `sda-local` / `sda-local-backup`), so feature branches run the real S3 code path with zero company credentials in play — see `infrastructure/minio/README.md`. `LOCAL_ONLY=1` (`.env` section 3b) enforces it: local runs refuse any storage or OpenMetadata address that isn't this machine, so local data can never reach a shared server by a mistyped or copied host.
 - **Going live:** merge `main` into `production`, check out `production`, then run `add`/`sync` there.
 - **Every command that changes data asks first.** `add`, `sync`, `backup setup/copy/restore`, `inputs upload` and the other writing commands show where they will write (environment, branch, Wasabi folder, OpenMetadata) and ask twice: type `yes`, then the environment's name. Anything else cancels with nothing changed. Read-only commands (`--dry-run`, `verify`, `inputs list`) don't ask. For scripts, add `--yes` to skip the questions.
 
@@ -233,7 +234,7 @@ Edit them in `catalog.yaml` → PR → merge → `sync`. No new file or `add` ne
 
 - **Don't edit data in the OpenMetadata UI.** The next `sync` overwrites it. Change the file or `catalog.yaml` instead.
 - **Every change goes through `catalog.yaml` and a PR**, so we know what's on the server and who changed it.
-- **Departments' files stay out of git.** They live in Wasabi.
+- **Departments' files stay out of git.** They live in storage: the company Wasabi on `main`/`production`, your local MinIO on feature branches (`infrastructure/minio/`). The git-ignored `data_services/storage/` folder is only a restore point.
 - Old versions are never lost: Wasabi keeps every snapshot, and OpenMetadata keeps its own version history.
 
 ---
@@ -369,6 +370,7 @@ Log file: logs/sync_20261007_164556.log
 | `name(s) matching no column` (warning) | Typo in the metadata file; those rows were ignored |
 | `Unrecognized Format value` (field dictionary) | Add a rule to `FORMAT_TYPE_RULES` in `field_dictionary_parser.py` |
 | `ENVIRONMENT=... isn't allowed on branch '...'` | Each branch runs one environment: feature → local, `main` → development, `production` → production. Leave `ENVIRONMENT` blank in `.env`, or switch branch |
+| `LOCAL_ONLY=1 refuses ...` | A `LOCAL_WASABI_...` / `LOCAL_OPENMETADATA_...` address points off this machine. Fix the address (local = MinIO on `localhost:9000` + local OpenMetadata), or delete `LOCAL_ONLY=1` from `.env` if you really mean to send local data to a remote server |
 | `Couldn't lock ... held by` | Someone else is running sync. Wait; a dead run's lock frees itself after 15 minutes |
 | `Can't reach the OpenMetadata server` | BIPP2 needs the office network or VPN; local needs `docker compose up -d` |
 | `401` from OpenMetadata | Token expired: put a new one in `.env` |
@@ -412,7 +414,7 @@ these):
 | `TABLE_NAME` | yes | |
 | `SOURCE_FILE` | yes | |
 | `SOURCE_FORMAT` | yes | `postgres_ddl` or `csv` |
-| `WASABI_BUCKET` | no | leave blank for local storage; fill in once Wasabi is confirmed clean (see [Where files are stored](#where-files-are-stored)) |
+| `WASABI_BUCKET` | no | filled automatically: `LOCAL_WASABI_BUCKET` (local MinIO on feature branches), the company bucket on `main`/`production` (which needs it in `.env`) |
 | `CATEGORY`/`API_AVAILABLE`/`OWNER`/`FREQUENCY`/`TIMELINE`/`DATASET_DESCRIPTION` | no | dataset-level fields — type a real value only once you have it; blank/omitted carries forward whatever was last set, so these rarely need touching after the first time |
 ### Where files are stored
 
