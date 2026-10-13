@@ -14,6 +14,42 @@
 
 ---
 
+### Merged origin/main (2026-10-13) + local storage now MinIO
+- Merged `origin/main` (PRs #17-#22: confirm-before-changes, department
+  displayName, Explore/TablePage work, connection-pool + user caching)
+  into this branch; 2 conflicts resolved:
+  - `catalog.yaml` kept ours (main never had the agri/mgnrega work;
+    `pwd` stays commented out)
+  - `registry.py /registry/tables/{id}`: main's anonymous-401 +
+    `data_classification` merged with our `_dataset_info()` (OM custom
+    properties) -- kept inside the client context so the OM lookup still
+    has a client
+- **Service display name**: `agri_dept` now shows **Agriculture Department**
+  in OpenMetadata (local + global, JSON-Patch on `displayName` only --
+  name/FQN/tags/tables untouched). Main's PR #21 does the same thing from
+  `departments.csv` on every publish, so it stays in step from now on.
+- **Local Wasabi stand-in = MinIO** (`infrastructure/minio/`): main's config
+  routes feature branches to S3 (no local-filesystem storage), so
+  `LOCAL_WASABI_*` in `data_services/.env` now point at a local MinIO
+  container (`bitnamilegacy/minio`; Docker Hub's `minio/minio` was removed).
+  The real boto3/S3 code path is exercised locally; validated with a
+  write/read/lock/CSV round-trip. Buckets `sda-local`, `sda-local-backup`
+  (`init_buckets.py`); the 736 existing storage files were copied in
+  (`migrate_local_storage.py`), local `storage/` kept as a restore point.
+  `sync --dry-run` is clean through MinIO (0 failed).
+- **Tests**: 466 data_services + 47 apps/api passing. `test_batch` CLI tests
+  now pass `--yes` (main's confirm prompt) and run against MinIO under a
+  throwaway `WASABI_PREFIX`, so they can't touch real `local/` state; they
+  also no longer publish `pwd.vishwakarma.t1` to live OM (empty token
+  survives `load_env()`'s setdefault).
+- `.gitignore`: MinIO data dirs + `*.tar` image exports can never be
+  committed (the bucket holds registry state).
+- **Where global Wasabi creds go**: `data_services/.env` section 3
+  (`WASABI_BUCKET`/`WASABI_REGION`/`WASABI_ENDPOINT_URL`/
+  `WASABI_ACCESS_KEY_ID`/`WASABI_SECRET_ACCESS_KEY`) -- read only when the
+  branch is `main` (development) or `production`; feature branches refuse
+  them by design.
+
 ### Merged origin/main (2026-10-05)
 - Merged `origin/main` (PR #11, 23 commits) into this branch; 5 conflicts resolved
 - **Classification decision**: field-level `classification` keeps this branch's
