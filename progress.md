@@ -1,6 +1,6 @@
 # Project Progress: Agriculture Department Datasets
 
-## Status: agri_dept — Complete (Storage + OpenMetadata, local **and** global migrated to `agri_dept` 2026-10-13); rural_development_department — local only; **local OpenMetadata reduced to just these two (13 tables) and local storage moved to a local MinIO, both local-only by enforcement (`LOCAL_ONLY=1`), on 2026-10-13**
+## Status: agri_dept — Complete (Storage + OpenMetadata, local **and** global migrated to `agri_dept` 2026-10-13); rural_development_department — local only; **local OpenMetadata reduced to just these two (13 tables) and local storage moved to a local MinIO, both local-only by enforcement (`LOCAL_ONLY=1`), on 2026-10-13** — **NEXT (2026-10-14, first task): `git pull`, merge `origin/main` (now `54679a2`, PR #23) locally, raise the PR `department/agriculture_department` → `main` — merge playbook in Future Work**
 
 ### Department
 - **Department**: Agriculture Department — catalog id **`agri_dept`**
@@ -885,15 +885,39 @@ curated snapshots stay, so those departments can be re-published later;
 ---
 
 ### Future Work
-- [ ] **Next: push our 2 departments' files to the company Wasabi** (paused
-      at a safe point 2026-10-13): run
+- [ ] **FIRST TASK (2026-10-14): `git pull`, merge `origin/main` locally,
+      then raise the PR `department/agriculture_department` -> `main`**
+      Main is at `54679a2` (PR #23: dataset `steward` field + AI-drafted
+      column descriptions, 16 files). 12 of those overlap with this
+      branch: `catalog.yaml`, `publish.py`, `lookups.py`, `catalog.py`,
+      `pipeline.py`, `setup_custom_properties.py`, `README.md`,
+      `.env.example`, and the tests `test_lookups`,
+      `test_openmetadata_publish`, `test_sync`,
+      `test_setup_custom_properties`. Merge principles (same as the
+      2026-10-13 merge): `catalog.yaml` keeps our agri + mgnrega entries
+      (`pwd` stays commented out -- the other team's) while adopting the
+      `steward` field shape if the dataset schema gained it; publish/
+      lookups keep our `_dataset_info`, `_columns_for_put` and geo-name
+      work while taking their steward + AI-drafting plumbing; README/
+      `.env.example` = union of both texts; tests = union. Then: full
+      test runs (data_services 470 + apps/api 47), `sync --dry-run` clean
+      through MinIO, local OM untouched (2 services, 13 tables), push,
+      and raise the PR summarizing the branch (agri 3 datasets, MGNREGA,
+      rename to `agri_dept`, MDSF classification, service display name,
+      MinIO local storage + `LOCAL_ONLY` rail, docs) and flagging that
+      the agri/mgnrega files reach the company bucket afterwards via the
+      next item. Don't merge into `production` -- that's a separate,
+      deliberate step
+- [ ] **After the PR lands: push our 2 departments' files to the company
+      Wasabi** (paused at a safe point 2026-10-13): run
       `python infrastructure/wasabi/push_agri_mgnrega.py` (dry-run -- it
       prints the upload set plus the 8 pre-existing PWD objects and checks
       nothing collides), review the output, then re-run with `--apply`.
       It writes only new keys under our 4 namespaces (agri_dept +
       rural_development_department, inputs + department), refuses to
       overwrite anything, and never touches the shared `dev/_lookups/*`
-      CSVs or any PWD path
+      CSVs or any PWD path. Do it after the merge lands so the dev
+      server's next sync finds both the catalog entries and the files
 - [ ] Server `.env` fix: `WASABI_BACKUP_REGION` is `eu-central-1` (the old
       `.env.example` default) but the backup bucket
       `up-sda-schema-registry-backup` lives in `us-west-1` -- backup
