@@ -53,4 +53,4 @@ def test_shipped_catalog_is_valid():
     from src.schema_registry.catalog import load_catalog
 
     departments = load_catalog("catalog.yaml")
-    assert any(d.id == "pwd" for d in departments)
+    assert [d.id for d in departments] == ["agri_dept", "rural_development_department"]

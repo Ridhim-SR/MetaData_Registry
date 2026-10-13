@@ -18,20 +18,24 @@
 #   field_dictionary: storage:<key>   instead of `tables`.
 
 departments:
-  pwd:
-    name: Public Works Department
-    datasets:
-      vishwakarma:
-        category:
-        owner:
-        frequency:
-        timeline:
-        api_available:
-        description:
-        tables:
-          vishwakarma_T:
-            source: storage:inputs/pwd/vishwakarma/pwd_vishwakarma_full_raw_columns.txt
-            format: postgres_ddl
+  # PWD (vishwakarma) is scoped local-only and owned by another team -- kept
+  # out of the catalog so sync never touches it (2026-10-12). Live depts:
+  # agri_dept (local + global) and rural_development_department (local only,
+  # global push later).
+  # pwd:
+  #   name: Public Works Department
+  #   datasets:
+  #     vishwakarma:
+  #       category:
+  #       owner:
+  #       frequency:
+  #       timeline:
+  #       api_available:
+  #       description:
+  #       tables:
+  #         vishwakarma_T:
+  #           source: storage:inputs/pwd/vishwakarma/pwd_vishwakarma_full_raw_columns.txt
+  #           format: postgres_ddl
   agri_dept:
     name: Agriculture Department
     datasets:
@@ -87,3 +91,20 @@ departments:
           grant_wise_bill_generation:
             source: storage:inputs/agri_dept/scheme_physical_financial_progress_dataset/Scheme_Physical__Financial_Progress_Dataset-12_30_34.csv
             format: csv
+  rural_development_department:
+    name: Rural Development Department
+    datasets:
+      mgnrega:
+        category:
+        owner:
+        frequency: yearly
+        timeline: 2014-15 to 2025-26
+        api_available: N
+        description: >-
+          Gram Panchayat-level MGNREGA implementation data from the Ministry
+          of Rural Development's MIS: job-card registration and workers by
+          social category (category_wise_workers), employment demanded/offered
+          and persondays (employment_generated), women's bank-account coverage
+          (women_joint_accounts), and works, expenditure and persondays by
+          work type (work_structure).
+        field_dictionary: storage:inputs/rural_development_department/mgnrega/mgnrega_field_dictionary.csv
