@@ -154,6 +154,7 @@ For a new dataset, `add` leaves these blank. Fill in what you know in `catalog.y
       vishwakarma:
         category: CAT-3            # CAT-1 | CAT-2 | CAT-3 | CAT-4
         owner: PWD IT Cell
+        steward: PWD data steward
         frequency: monthly
         timeline: 2019-2026
         api_available: N           # Y or N
@@ -220,7 +221,7 @@ They come from a metadata file: `add … --metadata <file>`, then `sync`.
 - A **blank cell keeps** the old value; it never erases one.
 - Column tags in OpenMetadata are set to exactly what the pipeline decided.
 
-### Dataset details (category, owner, frequency, timeline, api_available, description)
+### Dataset details (category, owner, steward, frequency, timeline, api_available, description)
 
 Edit them in `catalog.yaml` → PR → merge → `sync`. No new file or `add` needed.
 - **Deleting a value in `catalog.yaml` clears it** in OpenMetadata. The catalog is the truth.
@@ -368,9 +369,9 @@ Every run adds new files with the time in the name, so the full history stays. O
 | Ours | In OpenMetadata |
 |---|---|
 | Department (`pwd`) | Database service. Its name is the id (`pwd`); the full department name from the catalog is shown as its display name |
-| Dataset (`vishwakarma`) | Database: description, category tag, and owner / frequency / timeline / API as custom properties |
+| Dataset (`vishwakarma`) | Database: description, category tag, and owner / steward / frequency / timeline / API as custom properties |
 | `schema:` (default `public`) | Schema |
-| Table | Table: columns, types, descriptions |
+| Table | Table: columns, types, descriptions, plus an `extraMetadata` custom property: JSON with the column details not shown elsewhere (nullable, default, scale, ...) and the curated file it came from, kept for later use |
 | Column tags | `FieldTag` (Financial, Geospatial, ...), `DataSensitivity` (CAT-1 to CAT-4), `BusinessGlossary` terms |
 
 - Columns whose names look like personal data (Aadhaar, PAN, mobile, email, ...) get CAT-3 automatically, unless the metadata file says otherwise.

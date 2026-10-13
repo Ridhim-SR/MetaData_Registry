@@ -109,6 +109,7 @@ def upsert_dataset(
     category: str = "",
     api_available: str = "",
     owner: str = "",
+    steward: str = "",
     frequency: str = "",
     timeline: str = "",
     dataset_description: str = "",
@@ -139,6 +140,7 @@ def upsert_dataset(
             "category": category or existing.get("category", ""),
             "api_available": api_available or existing.get("api_available", ""),
             "owner": owner or existing.get("owner", ""),
+            "steward": steward or existing.get("steward", ""),
             "frequency": frequency or existing.get("frequency", ""),
             "timeline": timeline or existing.get("timeline", ""),
             "dataset_description": dataset_description or existing.get("dataset_description", ""),
@@ -151,7 +153,7 @@ def upsert_dataset(
     logger.info(f"Dataset {'updated' if existing else 'created'}: {dataset_id}")
 
 
-DATASET_FIELDS = ("category", "api_available", "owner", "frequency", "timeline", "dataset_description")
+DATASET_FIELDS = ("category", "api_available", "owner", "steward", "frequency", "timeline", "dataset_description")
 
 
 def set_dataset_fields(storage: ObjectStorage, dataset_id: str, department_id: str, dataset_name: str, fields: dict) -> bool:

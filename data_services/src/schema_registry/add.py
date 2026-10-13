@@ -38,7 +38,7 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 DEFAULT_CATALOG = Path(__file__).resolve().parents[2] / "catalog.yaml"
-_DATASET_FIELD_KEYS = ("category", "owner", "frequency", "timeline", "api_available", "description")
+_DATASET_FIELD_KEYS = ("category", "owner", "steward", "frequency", "timeline", "api_available", "description")
 
 
 def input_key(department: str, dataset: str, file_name: str) -> str:
@@ -101,7 +101,7 @@ def update_catalog_text(
     ds = datasets.get(dataset)
     if ds is None:
         ds = datasets[dataset] = CommentedMap((key, None) for key in _DATASET_FIELD_KEYS)
-        changes.append(f"added dataset {department}/{dataset} (fill in category, owner, ... when known)")
+        changes.append(f"added dataset {department}/{dataset} (fill in category, owner, steward, ... when known)")
 
     if table is None:
         if ds.get("field_dictionary") != source_ref:

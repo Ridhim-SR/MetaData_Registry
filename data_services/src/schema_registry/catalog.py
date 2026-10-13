@@ -1,5 +1,5 @@
 """catalog.yaml: the reviewed list of what should be in OpenMetadata --
-departments, their datasets (with category/owner/...), and which file in
+departments, their datasets (with category/owner/steward/...), and which file in
 storage each table comes from. `sync` reads it; see README "Adding or
 updating a department's data".
 
@@ -24,6 +24,7 @@ _DATASET_FIELD_KEYS = {
     "category": "category",
     "api_available": "api_available",
     "owner": "owner",
+    "steward": "steward",
     "frequency": "frequency",
     "timeline": "timeline",
     "description": "dataset_description",
