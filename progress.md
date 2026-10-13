@@ -1,6 +1,6 @@
 # Project Progress: Agriculture Department Datasets
 
-## Status: agri_dept — Complete (Storage + OpenMetadata); rural_development_department — local ingest + publish verified 2026-10-13 (global push pending)
+## Status: agri_dept — Complete (Storage + OpenMetadata, local **and** global migrated to `agri_dept` 2026-10-13); rural_development_department — local ingest + publish verified 2026-10-13 (global push pending)
 
 ### Department
 - **Department**: Agriculture Department — catalog id **`agri_dept`**
@@ -732,6 +732,45 @@ split them into 4 logical commits and pushed them, then closed the
 
 ---
 
+### Global OM phase 2: `agri_dept` migrated, old service deleted (2026-10-13)
+
+The last "phase 2" item closed: global (`http://10.0.96.105:8585/api`)
+now mirrors local, which had been on `agri_dept` since 2026-10-09.
+
+- **Pre-flight**: global login is `POST /v1/users/login` with the
+  password **base64-encoded** (`{"password":"YWRtaW4="}` — a plain
+  `admin` gets `400 Password needs to be encoded in Base-64`).
+  Inventory before: `agriculture_department` 9 tables (288 cols), `pwd` 1
+  table (the other team's, untouched), 10 tables total.
+- **Agri was reclassified first** (agreed scope call): the 9 snapshots
+  predated the 2026-10-12 geo rule. Re-deriving under the current rules
+  changes exactly **4 columns** — `current_booking.block_name`,
+  `current_booking.district_name`, `farmers.block_name`,
+  `farmers.bank_district_name`, `MDSF.PII → MDSF.Public` — everything
+  else identical (the farmers field dictionary re-submits its answers,
+  so `application_no`/`registration_no`/`rashan_card_no` keep their
+  dictionary values rather than the auto answer).
+  - `sync --reclassify --department agri_dept` (local) → **9/9 ingested
+    + published, 0 failed**; local now `Internal 189 / PII 51 /
+    Financial 41 / Public 6 / Restricted 1` = 288 (PII 55 → 51,
+    Public 2 → 6), FieldTag 59 + BusinessGlossary 18 = 77 other labels.
+- **Global push**: `OPENMETADATA_HOST_PORT=http://10.0.96.105:8585/api`
+  + `OPENMETADATA_JWT_TOKEN=<login token>` then
+  `sync --department agri_dept` → `unchanged / published` ×9, 0 failed.
+  (`load_env()` uses `setdefault`, so shell-provided OM settings win.)
+  Verified identical to local: 9 tables / 288 columns / 288 MDSF labels,
+  same distribution, the 4 place-name columns `MDSF.Public`.
+- **Old service deleted**: the SDK delete is
+  `client.delete(DatabaseService, service.id, recursive=True,
+  hard_delete=True)` — note the positional `entity_id` and snake_case
+  `hard_delete` (an `id=`/`hardDelete=` call raises `TypeError` on this
+  SDK build). Guard script refused to delete unless the new service
+  already held 9 tables / 288 tagged columns.
+- **After**: global = `agri_dept` 9 + `pwd` 1 = **10 tables**, ES
+  `table_search_index` = **10** (no orphan docs), server healthy 2.0.2.
+
+---
+
 ### Future Work
 - [ ] Add Field Dictionary (business metadata) for remaining tables
 - [ ] Add dataset governance fields (owner, retention_policy, lineage)
@@ -739,9 +778,11 @@ split them into 4 logical commits and pushed them, then closed the
 - [ ] PWD (vishwakarma) + Kanya Sumangla: ingest/republish **locally
       only** (their global push belongs to another team)
 - [x] Publish field-level classifications as OpenMetadata tags/taxonomy
-- [ ] Global OM: republish the department under `agri_dept` (phase 2) and
-      delete its old `agriculture_department` service there — local is
-      already migrated (2026-10-09), global is not
+- [x] Global OM: republish the department under `agri_dept` (phase 2) and
+      delete its old `agriculture_department` service there — **done
+      2026-10-13**: 9/9 published to global under `agri_dept` (after a
+      4-column geo reclassify), old service hard-deleted, global = 10
+      tables (`agri_dept` 9 + `pwd` 1), ES index consistent
 - [x] `catalog.yaml`'s stale `pwd:` entry — commented out 2026-10-12 so
       sync can never touch it (storage/OM use `public_works_department`;
       PWD is the other team's, local-only)
