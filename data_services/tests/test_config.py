@@ -12,6 +12,7 @@ _KEYS = (
     "WASABI_BUCKET", "WASABI_PREFIX", "DEPARTMENT", "WASABI_ACCESS_KEY_ID",
     "WASABI_ENDPOINT_URL", "WASABI_SECRET_ACCESS_KEY", "WASABI_REGION", "WASABI_BACKUP_BUCKET", "WASABI_BACKUP_REGION",
     "LOCAL_WASABI_BUCKET", "LOCAL_WASABI_ACCESS_KEY_ID", "LOCAL_WASABI_ENDPOINT_URL", "LOCAL_WASABI_SECRET_ACCESS_KEY",
+    "LOCAL_ONLY",
 )
 
 
@@ -168,3 +169,44 @@ def test_local_never_falls_back_to_the_company_wasabi(env_file, monkeypatch):
     with pytest.raises(ValueError, match="LOCAL_WASABI_ENDPOINT_URL, LOCAL_WASABI_ACCESS_KEY_ID, "
                                          "LOCAL_WASABI_SECRET_ACCESS_KEY are blank"):
         config.load_env()
+
+
+# LOCAL_ONLY=1: local storage and local OpenMetadata must stay on this machine.
+
+
+def test_local_only_refuses_a_remote_storage_address(env_file, monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "local")
+    monkeypatch.setenv("LOCAL_ONLY", "1")
+    with pytest.raises(PermissionError, match=r"LOCAL_ONLY=1 refuses WASABI_ENDPOINT_URL .*wasabisys\.com"):
+        config.load_env()
+
+
+def test_local_only_refuses_a_shared_openmetadata_server(env_file, monkeypatch):
+    env_file.write_text(
+        env_file.read_text()
+        .replace("LOCAL_WASABI_ENDPOINT_URL=https://s3.us-west-1.wasabisys.com",
+                 "LOCAL_WASABI_ENDPOINT_URL=http://localhost:9000")
+        .replace("LOCAL_OPENMETADATA_HOST_PORT=http://localhost:8585/api",
+                 "LOCAL_OPENMETADATA_HOST_PORT=http://10.0.96.105:8585/api")
+    )
+    monkeypatch.setenv("ENVIRONMENT", "local")
+    monkeypatch.setenv("LOCAL_ONLY", "1")
+    with pytest.raises(PermissionError, match=r"LOCAL_ONLY=1 refuses OPENMETADATA_HOST_PORT .*10\.0\.96\.105"):
+        config.load_env()
+
+
+def test_local_only_happy_path_is_localhost(env_file, monkeypatch):
+    env_file.write_text(env_file.read_text().replace(
+        "LOCAL_WASABI_ENDPOINT_URL=https://s3.us-west-1.wasabisys.com",
+        "LOCAL_WASABI_ENDPOINT_URL=http://localhost:9000"))
+    monkeypatch.setenv("ENVIRONMENT", "local")
+    monkeypatch.setenv("LOCAL_ONLY", "1")
+    assert config.load_env() == "local"
+    assert os.environ["WASABI_ENDPOINT_URL"] == "http://localhost:9000"
+
+
+def test_without_local_only_a_personal_wasabi_account_is_still_allowed(env_file, monkeypatch):
+    # README 3b behaviour is unchanged by default: LOCAL_ONLY is opt-in.
+    monkeypatch.setenv("ENVIRONMENT", "local")
+    assert config.load_env() == "local"
+    assert os.environ["WASABI_ENDPOINT_URL"] == "https://s3.us-west-1.wasabisys.com"

@@ -1,6 +1,7 @@
 import os
 import subprocess
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from dotenv import load_dotenv
 
@@ -27,6 +28,29 @@ _WASABI_SETTINGS = (
 )
 # local must bring its own account: these can't fall back to the company one.
 _LOCAL_REQUIRED = ("WASABI_BUCKET", "WASABI_ENDPOINT_URL", "WASABI_ACCESS_KEY_ID", "WASABI_SECRET_ACCESS_KEY")
+
+# LOCAL_ONLY=1 (optional safety rail, see .env.example 3b): the local
+# environment may talk to nothing but this machine. Local data lives in a
+# local MinIO and a local OpenMetadata; a mistyped host or a copied company
+# address must never send it to a shared server.
+_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1", "host.docker.internal"}
+_TRUTHY = {"1", "true", "yes", "on"}
+
+
+def _local_only() -> bool:
+    return (os.environ.get("LOCAL_ONLY") or "").strip().lower() in _TRUTHY
+
+
+def _refuse_remote(setting: str, url: str) -> None:
+    """LOCAL_ONLY: refuse a local-environment address that leaves this machine."""
+    host = (urlsplit(url).hostname or "").lower() if url else ""
+    if url and host not in _LOOPBACK_HOSTS:
+        raise PermissionError(
+            f"LOCAL_ONLY=1 refuses {setting}={url!r}: it points off this machine "
+            f"(host '{host}'). Local runs use this machine's services only "
+            f"(local MinIO + local OpenMetadata) -- fix the address, or unset "
+            f"LOCAL_ONLY if you really mean to send local data there"
+        )
 
 # Each git branch runs exactly one ENVIRONMENT, so shared data only ever
 # comes from reviewed code: the production branch -> production, main ->
@@ -81,7 +105,9 @@ def load_env() -> str:
     (check_branch_allows). main and production use the company Wasabi
     (WASABI_...); local uses only LOCAL_WASABI_... (your own account) and
     stops if those are blank, so a feature branch never touches company
-    data. Variables
+    data. With LOCAL_ONLY=1, local additionally refuses any address that
+    isn't this machine (localhost/127.0.0.1/host.docker.internal), so local
+    data can't reach a shared server even by a typo. Variables
     already exported in the shell win over .env. Returns the environment used."""
 
     load_dotenv(_ENV_FILE)
@@ -115,6 +141,12 @@ def load_env() -> str:
             f"(see .env.example)"
         )
     os.environ.setdefault("WASABI_PREFIX", wasabi_folder)
+
+    if env == "local" and _local_only():  # local storage + local OM may never leave this machine
+        _refuse_remote("WASABI_ENDPOINT_URL (LOCAL_WASABI_ENDPOINT_URL)",
+                       os.environ.get("WASABI_ENDPOINT_URL", ""))
+        _refuse_remote("OPENMETADATA_HOST_PORT (LOCAL_OPENMETADATA_HOST_PORT)",
+                       os.environ.get("OPENMETADATA_HOST_PORT", ""))
 
     logger.info(
         f"Config: ENVIRONMENT={env} | branch: {branch or 'unknown'} | "
