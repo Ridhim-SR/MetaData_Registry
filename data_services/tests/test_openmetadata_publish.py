@@ -573,3 +573,55 @@ def test_publish_table_stores_unpublished_column_details_as_json_property(tmp_pa
     assert [c["name"] for c in extra["columns"]] == ["sno", "firm_name", "total_cost"]
     sno = extra["columns"][0]
     assert sno["data_type"] == "integer" and "business_description" not in sno and "tag" not in sno
+
+
+_DENIED = Exception("Principal: CatalogPrincipal{name='ingestion-bot'} operation EditDisplayName denied by role "
+                    "IngestionBotRole, policy DefaultBotPolicy, rule DisplayName-Deny")
+
+
+def test_denied_display_name_edit_on_an_existing_service_only_warns(tmp_path):
+    storage = _ingested_storage(tmp_path)
+    client = _fake_client()
+    client.get_by_name.side_effect = None
+    client.get_by_name.return_value = _existing_service(None)
+
+    def patch(path, data):
+        if "databaseServices" in path:
+            raise _DENIED
+
+    client.client.patch.side_effect = patch
+
+    result = publish_table(client, storage, "pwd.vishwakarma.tbd_confirm_with_pwd")
+
+    assert result["column_count"] == 3  # the table was still published
+
+
+def test_denied_display_name_on_create_falls_back_to_creating_without_it(tmp_path):
+    storage = _ingested_storage(tmp_path)
+    client = _fake_client()
+    real = client.create_or_update.side_effect
+
+    def create_or_update(request):
+        if _unwrap(getattr(request, "name", None)) == "pwd" and getattr(request, "displayName", None):
+            raise _DENIED
+        return real(request)
+
+    client.create_or_update.side_effect = create_or_update
+
+    result = publish_table(client, storage, "pwd.vishwakarma.tbd_confirm_with_pwd")
+
+    assert result["column_count"] == 3
+    created = [c.args[0] for c in client.create_or_update.call_args_list
+               if _unwrap(getattr(c.args[0], "name", None)) == "pwd"]
+    assert getattr(created[-1], "displayName", None) is None
+
+
+def test_other_errors_while_setting_the_display_name_are_not_hidden(tmp_path):
+    storage = _ingested_storage(tmp_path)
+    client = _fake_client()
+    client.get_by_name.side_effect = None
+    client.get_by_name.return_value = _existing_service(None)
+    client.client.patch.side_effect = ValueError("something else broke")
+
+    with pytest.raises(ValueError, match="something else broke"):
+        publish_table(client, storage, "pwd.vishwakarma.tbd_confirm_with_pwd")

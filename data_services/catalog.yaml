@@ -33,3 +33,4 @@ departments:
           vishwakarma_T:
             source: storage:inputs/pwd/vishwakarma/pwd_vishwakarma_full_raw_columns.txt
             format: postgres_ddl
+            metadata: storage:inputs/pwd/vishwakarma/pwd_vishwakarma_full_raw_columns_metadata.csv
