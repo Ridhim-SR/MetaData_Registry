@@ -1,6 +1,6 @@
 # Project Progress: Agriculture Department Datasets
 
-## Status: Complete (Storage + OpenMetadata)
+## Status: agri_dept — Complete (Storage + OpenMetadata); rural_development_department — local ingest + publish verified 2026-10-13 (global push pending)
 
 ### Department
 - **Department**: Agriculture Department — catalog id **`agri_dept`**
@@ -8,6 +8,9 @@
   display name unchanged)
 - **Branch**: `department/agriculture_department`
   (all 3 datasets live on this one branch)
+- **Also on this branch**: Rural Development Department — catalog id
+  **`rural_development_department`**, dataset `mgnrega` (started
+  2026-10-12, local-only; see that section)
 
 ---
 
@@ -564,6 +567,171 @@ the OpenMetadata service name.
 
 ---
 
+### Rural Development (MGNREGA) onboarded, geo-name rule, `--reclassify` (2026-10-12)
+
+Second department started on this branch. The catalog now lists two live
+departments — `agri_dept` (local + global) and `rural_development_department`
+(local only, global push later); `pwd` was commented out of it (below).
+Everything today was **local** — no global push — and all code changes were
+left uncommitted at end of day (14 modified + 3 new files; `reports/` still
+untracked from 2026-10-07).
+
+#### New: MGNREGA field dictionary + RuralDevelopment converter
+- **Source**: `Datasets/Manreaga/` (gitignored) — 4 MGNREGA codebook
+  workbooks downloaded 12:41, one per table, each holding a `codebook`
+  sheet plus `metadata information` / `additional information`.
+- **Converter**: new `src/schema_registry/parsers/dept/RuralDevelopment/`
+  package — `mgnrega_codebook.py` (+ `__init__.py`) turns the workbooks
+  into Field Dictionary CSVs, the exact shape `parse_field_dictionary`
+  already consumes: one CSV per workbook (`--out-dir`) and one combined
+  multi-table CSV (`--combined`, the file the catalog's `field_dictionary:`
+  key takes). Table names come from each workbook's own "Resource" label:
+  `category_wise_workers`, `employment_generated`, `women_joint_accounts`,
+  `work_structure`.
+  - Unit of measurement folded into the description ("Applied Job Cards" +
+    "In Lakh" → "Applied Job Cards (In Lakh)"); Variable Type passes
+    through to `FORMAT_TYPE_RULES`; Mandatory/Personal Data stay blank —
+    gram-panchayat aggregates (job cards, workers, persondays,
+    expenditure), never a person's record, so nothing is PII.
+  - Guards: each workbook's metadata dataset name must start with
+    `MGNREGA`, unknown workbook names are refused, a missing codebook
+    fails loudly (a silent three-table ingest would be worse than an
+    error).
+  - CLI run wrote `configs/field_dictionaries/mgnrega/` (`*.csv`
+    gitignored): 4 per-table CSVs + `mgnrega_field_dictionary.csv`.
+- **New tests**: `tests/test_mgnrega_codebook.py` (per-table + combined
+  conversion, guards, metadata/additional-info sheets).
+
+#### Catalog changes (`catalog.yaml`)
+- **New** `rural_development_department.mgnrega` described with the
+  multi-table `field_dictionary:` key (no `tables:`), dataset details
+  filled in: `frequency: yearly`, `timeline: 2014-15 to 2025-26`,
+  `api_available: N`, plus a description of the 4 tables.
+- **`pwd:` commented out** — PWD (vishwakarma) is scoped local-only and
+  owned by another team, so it is kept out of the catalog to guarantee
+  `sync` never touches it. Closes the long-standing "stale `pwd:` entry"
+  Future-Work item (storage/OM use `public_works_department`; syncing
+  `pwd` as-is would have duplicated it).
+- `tests/test_catalog.py`: department list is now
+  `[agri_dept, rural_development_department]`.
+
+#### First ingest (local)
+- `add` 14:19 (combined dictionary → `storage/inputs/
+  rural_development_department/mgnrega/`), then `sync` 14:21–14:23 →
+  **4/4 tables `initial_load` / `published`, 84 columns** (28 / 29 / 13 /
+  14); `_lookups/*` and `storage/department/
+  rural_development_department/mgnrega/` created.
+
+#### Geo place-name classification rule (`curate.py`)
+- New **first** rule in `AUTO_CLASSIFICATION_RULES`: administrative place
+  names (`state|district|block|gp|gram_panchayat|village|tehsil|taluka|
+  taluk|mandal|town|city|ward|sector|ulb|cluster|hobli|country` … `_name`,
+  incl. compounds like `curr_district_name`) → **`Public`**. It must stay
+  first: the PII rule matches any `*_name` column, so
+  `state_name`/`district_name`/`gp_name` used to be tagged PII — a state
+  or a Gram Panchayat is reference data, not a person. Covered in
+  `tests/test_curate.py`.
+
+#### `sync --reclassify` (re-derive auto answers on demand)
+- **`sync.py`**: new `--reclassify` flag, **requires `--department`**
+  (re-deriving classifications for every department would rewrite other
+  teams' snapshots). It skips the "unchanged" short-circuit for both
+  field-dictionary and per-table sources (outcome detail
+  `reclassify requested`) and passes the flag down.
+- **`pipeline.run(reclassify=True)`**: drops the stored auto-derived
+  `classification`/`tag` before the merge so the *current*
+  `AUTO_CLASSIFICATION_RULES`/`AUTO_TAG_RULES` re-derive them — without
+  it a rule's first-run answer was frozen forever (a place-name
+  classified PII under the old rule stayed PII). Answers re-submitted in
+  this run's `business_metadata_file` still win through the same merge;
+  a blank still never clears.
+- **`field_dictionary_ingest.run_field_dictionary(..., reclassify=...)`**
+  passes it through per table.
+- New tests: 2 in `tests/test_sync.py`, 2 in `tests/test_pipeline.py`.
+
+#### Publish fix: MDSF mutually-exclusive 400 (`openmetadata/publish.py`)
+- The 15:51 `--reclassify` run (first run under the geo rule) **failed at
+  publish ×4**: OpenMetadata 2.x's PUT merges the submitted column tags
+  with the stored ones, so old `MDSF.PII` + new `MDSF.Public` arrived
+  together → HTTP 400 `Tag labels MDSF.PII and MDSF.Public are mutually
+  exclusive`; the `republish` at 16:00 failed the same way. A
+  reclassify could therefore never land its new level.
+- **Fix** `_columns_for_put()`: the `CreateTableRequest` now carries only
+  the non-MDSF tags (FieldTag / glossary merge harmlessly); the
+  JSON-Patch `_replace_column_tags()` sends right after the PUT (`add` on
+  the exact `columns/N/tags` member) sets the full list, which *does* swap
+  the old MDSF label for the new one (verified against local
+  OpenMetadata 2.0.2 per the docstring).
+- `tests/test_openmetadata_publish.py` asserts MDSF labels are absent
+  from the PUT but present in the patch.
+- ⚠️ `_lookups/runs.csv` still records those 4 mgnrega rows (15:51) as
+  `failed` — the confirming republish after this 16:47 fix was **not**
+  run today (see Future Work) → **done 2026-10-13**: 4/4 `published`,
+  place-name columns now `MDSF.Public` (see that section).
+
+#### apps/api: dataset docs served from OpenMetadata custom properties
+- **`client.get_database_by_fqn()`** fetches the database with
+  `fields=extension,owners` — the extension holds the dataset-level
+  fields data_services publishes (frequency / timeline / apiAvailable /
+  datasetOwner).
+- **`routers/registry.py`**: `_info_from_extension()` maps extension keys
+  to the sidecar's field names (`apiAvailable` free-text `Y`/`N` → bool,
+  blank → `None`); `_dataset_info()` sources a table's `info` from the OM
+  database extension and lets the local `table_info` sidecar — only ever
+  written by the manual POST flow — override it **field by field**, so an
+  admin edit beats a stale publish. `registry_table` now returns
+  `info`/`facts` from it (lookup body moved inside the try that maps
+  client errors to 404).
+- **Tests**: `tests/test_registry_guest.py` gains fake OM databases with
+  extensions and 2 new tests (docs served from OM extension; sidecar
+  overrides it).
+
+#### Test state at end of day
+- `apps/api` (last run 15:42): 48 tests, `lastfailed` empty — green.
+- `data_services` (last run 15:47): 457 tests collected; `lastfailed`
+  holds 2 failures, both in `test_csv_schema_parser.py` (scale column) —
+  files untouched today, not investigated (out of today's scope).
+
+---
+
+### Review, commits, and the confirming MGNREGA publish (2026-10-13)
+
+Reviewed yesterday's 15 modified + 3 new files line by line (all coherent),
+split them into 4 logical commits and pushed them, then closed the
+⚠️ left open above.
+
+- **Commits**: `4875f18` (MGNREGA converter + catalog entry, incl. the
+  `pwd:` comment-out), `e3eed0d` (geo rule + `sync --reclassify`),
+  `9948b89` (`_columns_for_put` MDSF fix), `a865413` (apps/api dataset
+  docs from the OM database extension). `reports/` deliberately left
+  untracked (field-mapping reports from 2026-10-07).
+- **Docker Desktop was down** at session start, which is what made the 2
+  `test_batch.py` CLI tests fail this morning: `batch`'s `load_env()`
+  re-reads `OPENMETADATA_JWT_TOKEN` from `.env` (the test only unsets it
+  in the subprocess env), so `get_client()` probed
+  `localhost:8585/v1/system/version` → connection refused → exit 1 before
+  any row ran. **Purely environmental** — they pass with the stack up.
+  (`Invoke-WebRequest` to that URL times out on this machine; use
+  `curl.exe` — a proxy setting swallows PowerShell's request.)
+- **Stack up**: `docker compose up -d` → migrate exit 0, all 4 services
+  healthy, server 2.0.2, no wipe.
+- **Confirming sync** (the Future-Work item):
+  `python -m src.schema_registry.sync --department rural_development_department`
+  → field dictionary `unchanged`, **4/4 tables `published`, 0 failed** —
+  the 10:22 `failed` rows in `_lookups/runs.csv` are now recorded
+  `published` (`_record_publish` updates the snapshot-writing row), and a
+  second run is a no-op.
+- **Verified in OM**: all 4 tables (84 columns) carry **exactly one MDSF
+  label per column** — `MDSF.Internal` 67 + `MDSF.Public` 17 = 84, no
+  mutually-exclusive leftovers — and every place-name column
+  (`state_name`, `district_name`, `block_name`, `gp_name` × 4 tables) is
+  now `MDSF.Public`. So `_columns_for_put()` + the JSON-Patch really do
+  swap the old label on a live 2.0.2 server.
+- **Tests**: `data_services` → **445 passed** (was 443 + 2 environmental),
+  `apps/api` → **47 passed**.
+
+---
+
 ### Future Work
 - [ ] Add Field Dictionary (business metadata) for remaining tables
 - [ ] Add dataset governance fields (owner, retention_policy, lineage)
@@ -574,5 +742,14 @@ the OpenMetadata service name.
 - [ ] Global OM: republish the department under `agri_dept` (phase 2) and
       delete its old `agriculture_department` service there — local is
       already migrated (2026-10-09), global is not
-- [ ] `catalog.yaml`'s stale `pwd:` entry (storage/OM use
-      `public_works_department`; syncing `pwd` as-is would duplicate it)
+- [x] `catalog.yaml`'s stale `pwd:` entry — commented out 2026-10-12 so
+      sync can never touch it (storage/OM use `public_works_department`;
+      PWD is the other team's, local-only)
+- [x] Local OM: rerun `sync --department rural_development_department`
+      (or `republish`) to clear the 4 `failed` mgnrega rows in runs.csv —
+      they hit the MDSF mutually-exclusive 400 before `_columns_for_put`
+      landed — and verify the place-name columns now show `MDSF.Public`
+      (done 2026-10-13: 4/4 published, one MDSF label per column,
+      `MDSF.Internal` 67 + `MDSF.Public` 17 = 84)
+- [ ] `rural_development_department`: push to **global** OpenMetadata
+      (the catalog comment scopes it local-only for now)
