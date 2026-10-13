@@ -239,6 +239,33 @@ def _column_tags(row: dict) -> list[TagLabel]:
     return tags
 
 
+def _columns_for_put(columns: list[Column]) -> list[Column]:
+    """Strip the MDSF classification labels from the CreateTableRequest.
+
+    create_or_update()'s PUT merges each column's submitted tags with the
+    ones already on the entity (tag_usage rows the table API GET doesn't
+    even return), and OpenMetadata 2.x rejects that merged list when it
+    holds two labels of the mutuallyExclusive MDSF classification
+    (MDSF.PII + MDSF.Public) with HTTP 400. That made a reclassify
+    deadlock: the PUT that carries the new level could never land because
+    the old one was still stored. Send only the non-MDSF tags (FieldTag /
+    glossary terms merge harmlessly) and let _replace_column_tags()'s
+    JSON-Patch -- an `add` on the exact `columns/N/tags` member, which
+    replaces it -- set the exact list afterwards; that *does* swap the old
+    MDSF label for the new one (verified against local OpenMetadata 2.0.2)."""
+
+    put_columns = []
+    for column in columns:
+        clone = column.model_copy(deep=True)
+        clone.tags = [
+            tag
+            for tag in (column.tags or [])
+            if not str(tag.model_dump(mode="json").get("tagFQN", "")).startswith(_MDSF_CLASSIFICATION + ".")
+        ]
+        put_columns.append(clone)
+    return put_columns
+
+
 def _to_column(row: dict) -> Column:
     raw_type = row["data_type"].strip().lower()
     data_type = _TYPE_MAP.get(raw_type)
@@ -630,7 +657,7 @@ def publish_table(
             name=table_row["table_name"],
             tableType=TableType.Regular,
             databaseSchema=_fqn(schema),
-            columns=columns,
+            columns=_columns_for_put(columns),
         ),
     )
     _replace_column_tags(client, table, columns)

@@ -115,12 +115,23 @@ def test_publish_table_builds_full_entity_chain(tmp_path):
     assert _unwrap(table_request.name) == "TBD_confirm_with_pwd"
     columns = {_unwrap(c.name): c for c in table_request.columns}
     assert list(columns) == ["sno", "firm_name", "total_cost"]
-    assert [t.tagFQN.root for t in columns["sno"].tags] == ["MDSF.Internal"]
+    # The PUT carries only the non-MDSF tags: OpenMetadata merges the
+    # submitted list with the stored one, and two labels of the
+    # mutuallyExclusive MDSF classification in that merge make the server
+    # answer HTTP 400 -- which deadlocked --reclassify (the old MDSF.PII
+    # could never be swapped for MDSF.Public). The MDSF labels travel in
+    # the JSON-Patch that follows, which replaces the stored list exactly.
+    assert [t.tagFQN.root for t in columns["sno"].tags] == []
     assert [t.tagFQN.root for t in columns["firm_name"].tags] == [
         "FieldTag.Firm/Contractor-Identifier",
-        "MDSF.PII",
     ]
-    assert [t.tagFQN.root for t in columns["total_cost"].tags] == ["FieldTag.Financial", "MDSF.Financial"]
+    assert [t.tagFQN.root for t in columns["total_cost"].tags] == ["FieldTag.Financial"]
+    patch_body = _last_patch_body(client, "/tables/")
+    assert [[t["tagFQN"] for t in patch_body[f"/columns/{i}/tags"]] for i in range(3)] == [
+        ["MDSF.Internal"],
+        ["FieldTag.Firm/Contractor-Identifier", "MDSF.PII"],
+        ["FieldTag.Financial", "MDSF.Financial"],
+    ]
 
 
 def test_publish_table_pushes_classification_and_glossary_term(tmp_path):
@@ -148,14 +159,22 @@ def test_publish_table_pushes_classification_and_glossary_term(tmp_path):
 
     table_request = client.create_or_update.call_args_list[-1].args[0]
     columns = {_unwrap(c.name): c for c in table_request.columns}
+    patch_body = _last_patch_body(client, "/tables/")
 
     # beneficiary_email got no business metadata -- auto-classified as
     # PII purely from its name (curate.py's AUTO_CLASSIFICATION_RULES).
-    assert [t.tagFQN.root for t in columns["beneficiary_email"].tags] == ["MDSF.PII"]
+    # The label rides in the post-PUT patch, not the PUT itself (see the
+    # mutuallyExclusive note in test_publish_table_builds_full_entity_chain).
+    assert [t.tagFQN.root for t in columns["beneficiary_email"].tags] == []
+    index = {_unwrap(c.name): i for i, c in enumerate(table_request.columns)}
+    assert [t["tagFQN"] for t in patch_body[f"/columns/{index['beneficiary_email']}/tags"]] == ["MDSF.PII"]
 
     # remarks' classification/glossary_term came from the business metadata
-    # file, not auto-detection.
-    assert sorted(t.tagFQN.root for t in columns["remarks"].tags) == [
+    # file, not auto-detection. The glossary term is not part of the MDSF
+    # exclusivity problem, so the PUT carries it; the classification is
+    # added by the patch.
+    assert [t.tagFQN.root for t in columns["remarks"].tags] == ["BusinessGlossary.Field Note"]
+    assert sorted(t["tagFQN"] for t in patch_body[f"/columns/{index['remarks']}/tags"]) == [
         "BusinessGlossary.Field Note",
         "MDSF.Confidential",
     ]
@@ -241,13 +260,19 @@ def test_publish_table_clears_stale_category_and_description_on_republish(tmp_pa
     assert patch_body["/tags"] == []
     assert patch_body["/extension"] == {"apiAvailable": "", "datasetOwner": "", "frequency": "", "timeline": ""}
 
-    # each column carries its curated classification as an MDSF tag (plus
-    # its auto-tag where AUTO_TAG_RULES matched)
+    # the PUT carries only the non-MDSF tags; the curated MDSF
+    # classifications (plus each column's auto-tag where AUTO_TAG_RULES
+    # matched) land in the JSON-Patch that follows the PUT
     table_request = client.create_or_update.call_args_list[-1].args[0]
     assert [
         [str(_unwrap(t.tagFQN)) for t in (c.tags or [])]
         for c in table_request.columns
     ] == [
+        [],
+        ["FieldTag.Firm/Contractor-Identifier"],
+        ["FieldTag.Financial"],
+    ]
+    assert [[t["tagFQN"] for t in _last_patch_body(client, "/tables/")[f"/columns/{i}/tags"]] for i in range(3)] == [
         ["MDSF.Internal"],
         ["FieldTag.Firm/Contractor-Identifier", "MDSF.PII"],
         ["FieldTag.Financial", "MDSF.Financial"],
