@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { listDatasets, listPublicDatasets } from "../../api/registry";
+import { hasValidUpdatedAt } from "../../utils/format";
 import { DatasetCard } from "./DatasetCard";
 import { EmptyBlock, ErrorBlock, Skeleton } from "./StateBlocks";
 
@@ -28,30 +29,41 @@ export function PublicDataSection() {
     pub.isFetching ||
     (showFallback && (fallback.isPending || fallback.isFetching));
   const error = pub.error ?? (showFallback ? fallback.error : null);
+  // Without any valid dates there is nothing "recent" to show.
+  const hasAnyDates = shown.some((card) => hasValidUpdatedAt(card.updated_at));
+  const heading = hasAnyDates ? "Recently Updated Datasets" : "Latest Datasets";
 
   return (
     <section
-      aria-label="Recently updated datasets"
+      aria-label={heading}
       style={{ background: "var(--bg)", borderTop: "1px solid var(--border)" }}
     >
-      <div className="mx-auto w-full max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
+      <div className="page-container mx-auto w-full max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
+        <div>
+          <div
+            className="gap-3"
+            style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}
+          >
             <h2 className="font-semibold" style={{ color: "var(--navy-900)", fontSize: "1.375rem" }}>
-              Recently Updated Datasets
+              {heading}
             </h2>
-            <p className="mt-1 text-sm" style={{ color: "var(--text-muted)", fontSize: "0.9375rem" }}>
-              Latest datasets published across departments.
-            </p>
+            <Link
+              to="/explore"
+              className="font-semibold"
+              style={{ color: "var(--blue-700)", fontSize: "1rem", whiteSpace: "nowrap" }}
+            >
+              Browse all →
+            </Link>
           </div>
-          <Link to="/explore" className="font-semibold" style={{ color: "var(--blue-700)", fontSize: "1rem" }}>
-            Browse full catalog →
-          </Link>
+          <p className="mt-1 text-sm" style={{ color: "var(--text-muted)", fontSize: "0.9375rem" }}>
+            Latest datasets published across departments.
+          </p>
         </div>
 
         {isPending && (
           <div
-            className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3"
+            className="mt-4"
+            style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: "16px" }}
             role="status"
             aria-label="Loading datasets"
           >
@@ -85,9 +97,12 @@ export function PublicDataSection() {
         )}
 
         {!isPending && !error && shown.length > 0 && (
-          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div
+            className="mt-4"
+            style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: "16px" }}
+          >
             {shown.map((card) => (
-              <DatasetCard key={card.dataset} card={card} />
+              <DatasetCard key={card.dataset} card={card} hideEmptyFields />
             ))}
           </div>
         )}

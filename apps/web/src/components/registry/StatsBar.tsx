@@ -12,7 +12,7 @@ export function StatsBar() {
       aria-label="Catalog statistics"
       style={{ background: "var(--bg-alt)", borderTop: "1px solid var(--border)", borderBottom: "1px solid var(--border)" }}
     >
-      <div className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+      <div className="page-container mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
         {loading && (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3" role="status" aria-label="Loading statistics">
             {[0, 1, 2].map((i) => (

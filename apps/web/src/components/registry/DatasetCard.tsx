@@ -2,15 +2,16 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import type { DatasetCard as Card, RegistryTable } from "../../api/registry";
 import { requestAccess } from "../../api/registry";
-import { humanizeRaw, orNotProvided } from "../../utils/format";
+import { formatUpdatedAt, humanizeRaw, orNotProvided } from "../../utils/format";
 import { useAuth } from "../../contexts/AuthContext";
 import { AccessBadge } from "./AccessBadge";
 
-export function DatasetCard({ card }: { card: Card }) {
+export function DatasetCard({ card, hideEmptyFields = false }: { card: Card; hideEmptyFields?: boolean }) {
   const dept = card.department_display ?? card.department ?? "Not provided";
   const description = (card.tables ?? []).map((t) => t.description?.trim()).find(Boolean)
     ?? card.description?.trim()
     ?? "";
+  const updatedLabel = formatUpdatedAt(card.updated_at);
 
   return (
     <article
@@ -29,9 +30,6 @@ export function DatasetCard({ card }: { card: Card }) {
             {humanizeRaw(card.name)}
           </Link>
         </h3>
-        <span style={{ flexShrink: 0 }}>
-          <AccessBadge level={card.access_level} />
-        </span>
       </div>
       <p className="mt-1 text-sm" style={{ color: "var(--text-muted)", fontSize: "0.875rem" }}>
         {humanizeRaw(dept === "Not provided" ? null : dept)}
@@ -40,7 +38,7 @@ export function DatasetCard({ card }: { card: Card }) {
         <p className="clamp-2 mt-2 text-sm" style={{ color: "var(--text)", fontSize: "0.9375rem" }}>
           {description}
         </p>
-      ) : (
+      ) : hideEmptyFields ? null : (
         <p className="not-provided mt-2 text-sm" style={{ fontSize: "0.9375rem" }}>
           No description
         </p>
@@ -51,10 +49,18 @@ export function DatasetCard({ card }: { card: Card }) {
         </span>
       </div>
       <div className="mt-2 flex-1" />
-      <p className="mt-2 text-sm" style={{ color: "var(--text-muted)", fontSize: "0.8125rem" }}>
-        Last updated:{" "}
-        <span className="not-provided">{orNotProvided(undefined)}</span>
-      </p>
+      {hideEmptyFields ? (
+        updatedLabel ? (
+          <p className="mt-2 text-sm" style={{ color: "var(--text-muted)", fontSize: "0.8125rem" }}>
+            Last updated: {updatedLabel}
+          </p>
+        ) : null
+      ) : (
+        <p className="mt-2 text-sm" style={{ color: "var(--text-muted)", fontSize: "0.8125rem" }}>
+          Last updated:{" "}
+          <span className="not-provided">{orNotProvided(undefined)}</span>
+        </p>
+      )}
       <Link
         to={`/datasets/${encodeURIComponent(card.dataset)}`}
         className="btn-secondary mt-3 w-fit"

@@ -181,3 +181,12 @@ def test_pipeline_policy_denies_permanent_deletes_on_both_buckets():
     deny = next(s for s in policy["Statement"] if s["Effect"] == "Deny")
     assert "s3:DeleteObjectVersion" in deny["Action"] and "s3:DeleteBucket" in deny["Action"]
     assert set(deny["Resource"]) == {"arn:aws:s3:::main", "arn:aws:s3:::main/*", "arn:aws:s3:::bak", "arn:aws:s3:::bak/*"}
+
+
+def test_setup_creates_a_missing_main_bucket(account):
+    _, bak, _ = account
+    new_main = Bucket(bak.client, "brand-new-main")
+    assert any("created" in s for s in setup(new_main, bak, "us-east-1", dry_run=True))
+    assert "brand-new-main" not in [b["Name"] for b in bak.client.list_buckets()["Buckets"]]
+    setup(new_main, bak, "us-east-1")
+    assert bak.client.get_bucket_versioning(Bucket="brand-new-main")["Status"] == "Enabled"

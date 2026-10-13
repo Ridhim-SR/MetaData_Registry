@@ -289,14 +289,23 @@ def _to_column(row: dict) -> Column:
     return Column(**kwargs)
 
 
-def _ensure_service(client: OpenMetadata, service_name: str) -> DatabaseService:
+def _ensure_service(client: OpenMetadata, service_name: str, display_name: str = "") -> DatabaseService:
+    """Get or create the department's service. `service_name` (the id, e.g.
+    pwd) is what identifies it; `display_name` (the full department name) is
+    only the label people see, and is kept in step with the catalog."""
+
     existing = _get_or_none(client, DatabaseService, service_name)
     if existing:
+        current = _unwrap(getattr(existing, "displayName", None)) or ""
+        if display_name and current != display_name:
+            _replace_entity_fields(client, "/services/databaseServices", _unwrap(existing.id),
+                                   {"displayName": display_name}, op="add")
         return existing
     return _create_or_update(
         client,
         CreateDatabaseServiceRequest(
             name=service_name,
+            displayName=display_name or None,
             serviceType=DatabaseServiceType.CustomDatabase,
             connection=DatabaseConnection(
                 config=CustomDatabaseConnection(type="CustomDatabase", sourcePythonClass="custom")
@@ -627,7 +636,7 @@ def publish_table(
     # refuses a value that isn't in the CAT-1..CAT-4 vocabulary.
     category = dataset_row.get("category", "")
 
-    service = _ensure_service(client, service_name or department_id)
+    service = _ensure_service(client, service_name or department_id, lookups.department_name(storage, department_id))
     if category:
         _ensure_sensitivity_tag(client, category)
     database = _ensure_database(
@@ -708,7 +717,10 @@ def delete_table(client: OpenMetadata, storage: ObjectStorage, table_id: str) ->
 def _main(argv: list[str]) -> int:
     """Command line entry point (settings come from .env / the shell)."""
 
+    from src.utils.cli import confirm_changes
+
     load_env()
+    confirm_changes(f"publish table {os.environ.get('TABLE_ID')} to OpenMetadata")
     _storage = storage_from_env()
     _client = get_client(
         host_port=os.environ.get("OPENMETADATA_HOST_PORT", "http://localhost:8585/api"),

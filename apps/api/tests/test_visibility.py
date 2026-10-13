@@ -146,6 +146,8 @@ def test_confidential_logged_in_non_admin_hidden_admin_full():
 
 
 def test_visible_catalog_guest_teaser_fields_only():
+    # Departments/datasets stay visible to anonymous as locked teasers;
+    # tables/columns require sign-in (enforced at the table endpoints).
     tables = [_table("pwd.db.s.t", "t")]
     vmap = {"pwd.db.s.t": {"visibility": "department", "department": "pwd"}}
     cards = visible_catalog(tables, [], vmap, None)
@@ -190,3 +192,6 @@ def test_viewer_key_classes():
     assert viewer_key(None) == "guest"
     assert viewer_key({"role": "admin", "department": "x"}) == "admin"
     assert viewer_key({"role": "user", "department": "Pwd"}) == "user:pwd"
+
+
+

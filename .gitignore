@@ -196,6 +196,15 @@ data_services/NOTES_MDSF.md
 
 docker-compose.override.yml
 
+# MinIO (local S3 stand-in for Wasabi). The image itself lives in Docker's
+# own storage; its DATA and any saved image export must never enter git --
+# the bucket holds department snapshots + _lookups, i.e. real registry state.
+infrastructure/minio/data/
+minio-data/
+*.minio*
+minio*.tar
+*.tar
+
 
 # ============================================================
 # Airflow

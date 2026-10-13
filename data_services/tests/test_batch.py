@@ -1,7 +1,11 @@
 import os
+import socket
 import subprocess
 import sys
+import uuid
 from pathlib import Path
+
+import pytest
 
 from src.schema_registry.registry import lookups
 from src.schema_registry.batch import run_batch
@@ -178,8 +182,37 @@ def test_manifest_row_can_set_the_dataset_level_fields(tmp_path):
     assert row["dataset_description"] == "PWD's master works dataset."
 
 
+_MINIO_ENDPOINT = "http://localhost:9000"
+
+
+def _minio_up() -> bool:
+    try:
+        with socket.create_connection(("localhost", 9000), timeout=2):
+            return True
+    except OSError:
+        return False
+
+
+requires_minio = pytest.mark.skipif(
+    not _minio_up(),
+    reason="MinIO not running -- docker compose -f infrastructure/minio/docker-compose.yml up -d",
+)
+
+
 def _run_cli(tmp_path, manifest) -> "subprocess.CompletedProcess":
-    env = {**os.environ, "MANIFEST_FILE": str(manifest), "STORAGE_ROOT": str(tmp_path / "storage")}
+    env = {**os.environ, "MANIFEST_FILE": str(manifest)}
+    # Main's config routes feature-branch runs to S3 (no local-filesystem
+    # storage anymore), so point the CLI at the local MinIO stand-in
+    # (infrastructure/minio) under a throwaway prefix: the run exercises the
+    # real S3 code path but can never touch the real local/ registry state.
+    env.update({
+        "LOCAL_WASABI_ENDPOINT_URL": _MINIO_ENDPOINT,
+        "LOCAL_WASABI_REGION": "us-east-1",
+        "LOCAL_WASABI_BUCKET": "sda-local",
+        "LOCAL_WASABI_ACCESS_KEY_ID": "minioadmin",
+        "LOCAL_WASABI_SECRET_ACCESS_KEY": "minioadmin",
+        "WASABI_PREFIX": f"tests/{uuid.uuid4().hex}",
+    })
     # Storage-only run. Popping the token is NOT enough: load_env() re-reads
     # it from .env, so the CLI would build a real client and this test would
     # publish `pwd.vishwakarma.t1` into whatever local OpenMetadata is up
@@ -187,8 +220,9 @@ def _run_cli(tmp_path, manifest) -> "subprocess.CompletedProcess":
     # run). An empty value survives load_env()'s setdefault and keeps the
     # client None.
     env["OPENMETADATA_JWT_TOKEN"] = ""
+    # Main's confirm_changes() refuses a non-tty run without --yes.
     return subprocess.run(
-        [sys.executable, "-m", "src.schema_registry.batch"],
+        [sys.executable, "-m", "src.schema_registry.batch", "--yes"],
         cwd=Path(__file__).resolve().parents[1],
         env=env,
         capture_output=True,
@@ -197,6 +231,7 @@ def _run_cli(tmp_path, manifest) -> "subprocess.CompletedProcess":
     )
 
 
+@requires_minio
 def test_batch_cli_exits_non_zero_when_a_row_fails(tmp_path):
     """cron/CI used to see exit 0 for a half-failed batch."""
 
@@ -215,6 +250,7 @@ def test_batch_cli_exits_non_zero_when_a_row_fails(tmp_path):
     assert "Unknown department" in proc.stdout
 
 
+@requires_minio
 def test_batch_cli_exits_zero_when_every_row_succeeds(tmp_path):
     csv_file = tmp_path / "x.csv"
     csv_file.write_text("Field Name,Data Type\ncol_a,integer\n")

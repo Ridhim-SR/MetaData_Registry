@@ -49,7 +49,11 @@ async def search(
         ).scalars().all() if candidates else []
         vmap = {r.fqn: {"visibility": r.visibility.value, "department": r.department} for r in rows}
         full, teasers = vis.visible_tables(candidates, vmap, user_context(user))
-        return {"data": full, "teasers": teasers, "total": total, "page": page, "fallback": fallback}
+        # Authorization before counts/pagination: total reflects the visible
+        # subset only, never the raw index total (which would leak hidden
+        # tables via counts). ``service`` is an Owner filter only.
+        visible_total = len(full) + len(teasers)
+        return {"data": full, "teasers": teasers, "total": visible_total, "page": page, "fallback": fallback}
 
 
 @router.post("/reindex")

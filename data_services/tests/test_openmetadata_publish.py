@@ -712,3 +712,48 @@ def test_run_publishes_a_dataset_whose_category_is_below_its_columns(tmp_path):
     )
 
     assert result["openmetadata"]["column_count"] == 1
+
+
+def test_new_service_gets_the_department_name_as_display_name(tmp_path):
+    storage = _ingested_storage(tmp_path)
+    client = _fake_client()
+
+    publish_table(client, storage, "pwd.vishwakarma.tbd_confirm_with_pwd")
+
+    service_request = client.create_or_update.call_args_list[0].args[0]
+    assert _unwrap(service_request.name) == "pwd"  # the id still identifies it
+    assert _unwrap(service_request.displayName) == "Public Works Department"
+
+
+def _existing_service(display_name):
+    service = MagicMock(fullyQualifiedName="pwd")
+    service.id = "service-id"
+    service.displayName = display_name
+    return service
+
+
+def test_existing_service_without_a_display_name_gets_one_without_being_recreated(tmp_path):
+    storage = _ingested_storage(tmp_path)
+    client = _fake_client()
+    client.get_by_name.side_effect = None
+    client.get_by_name.return_value = _existing_service(None)
+
+    publish_table(client, storage, "pwd.vishwakarma.tbd_confirm_with_pwd")
+
+    service_patches = [c for c in client.client.patch.call_args_list if "databaseServices" in c.kwargs["path"]]
+    assert len(service_patches) == 1
+    assert json.loads(service_patches[0].kwargs["data"]) == [
+        {"op": "add", "path": "/displayName", "value": "Public Works Department"}
+    ]
+    assert all("databaseServices" not in str(c) for c in client.create_or_update.call_args_list)
+
+
+def test_existing_service_with_the_right_display_name_is_left_alone(tmp_path):
+    storage = _ingested_storage(tmp_path)
+    client = _fake_client()
+    client.get_by_name.side_effect = None
+    client.get_by_name.return_value = _existing_service("Public Works Department")
+
+    publish_table(client, storage, "pwd.vishwakarma.tbd_confirm_with_pwd")
+
+    assert not [c for c in client.client.patch.call_args_list if "databaseServices" in c.kwargs["path"]]

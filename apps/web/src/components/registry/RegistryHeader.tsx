@@ -60,7 +60,6 @@ export function RegistryHeader() {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const [headerQuery, setHeaderQuery] = useState("");
   const userMenuRef = useRef<HTMLDivElement>(null);
   const { idx, set } = useTextSize();
   const { lang, toggle } = useLanguage();
@@ -90,19 +89,12 @@ export function RegistryHeader() {
     navigate("/");
   };
 
-  const submitHeaderSearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    const q = headerQuery.trim();
-    setOpen(false);
-    navigate(q ? `/explore?q=${encodeURIComponent(q)}` : "/explore");
-  };
-
   return (
     <>
       {/* 1. Utility bar */}
       <div style={{ background: "var(--bg-alt)", borderBottom: "1px solid var(--border)" }}>
         <div
-          className="mx-auto flex w-full max-w-7xl flex-wrap items-center gap-2 px-4 py-1 sm:px-6 lg:px-8"
+          className="page-container mx-auto flex w-full max-w-7xl flex-wrap items-center gap-2 px-4 py-1 sm:px-6 lg:px-8"
           style={{ fontSize: "0.8125rem" }}
         >
           <a href="#main-content" className="skip-link">
@@ -186,7 +178,7 @@ export function RegistryHeader() {
 
       {/* 3. Header (white) */}
       <header style={{ background: "var(--bg)" }}>
-        <div className="mx-auto flex w-full max-w-7xl items-center gap-3 px-4 py-3 sm:px-6 lg:px-8">
+        <div className="page-container mx-auto flex w-full max-w-7xl items-center gap-3 px-4 py-3 sm:px-6 lg:px-8">
           <Link
             to="/"
             className="flex items-center gap-3"
@@ -214,44 +206,12 @@ export function RegistryHeader() {
               </span>
             </span>
           </Link>
-          <form
-            onSubmit={submitHeaderSearch}
-            role="search"
-            aria-label="Site search"
-            className="ml-auto hidden min-w-0 flex-1 items-center gap-2 md:flex"
-            style={{ maxWidth: 420 }}
-          >
-            <label htmlFor="header-search" className="sr-only">
-              Search datasets and departments
-            </label>
-            <input
-              id="header-search"
-              type="search"
-              value={headerQuery}
-              onChange={(e) => setHeaderQuery(e.target.value)}
-              placeholder="Search datasets, departments…"
-              autoComplete="off"
-              style={{
-                flex: 1,
-                minWidth: 0,
-                border: "1px solid var(--border)",
-                borderRadius: 6,
-                padding: "0.45rem 0.75rem",
-                fontSize: "0.9375rem",
-                color: "var(--text)",
-                background: "var(--bg)",
-              }}
-            />
-            <button type="submit" className="btn-primary" style={{ padding: "0.45rem 1rem", fontSize: "0.9375rem" }}>
-              Search
-            </button>
-          </form>
         </div>
       </header>
 
       {/* 4. Navy nav bar */}
       <div style={{ background: "var(--navy-900)" }}>
-        <div className="mx-auto flex w-full max-w-7xl items-center px-4 sm:px-6 lg:px-8">
+        <div className="page-container mx-auto flex w-full max-w-7xl items-center px-4 sm:px-6 lg:px-8">
           <nav aria-label="Primary" className="hidden items-center md:flex">
             <NavLink to="/" end style={navLinkStyle}>
               Home
@@ -380,32 +340,6 @@ export function RegistryHeader() {
                 {l.label}
               </NavLink>
             ))}
-            <form onSubmit={submitHeaderSearch} role="search" aria-label="Site search" className="mt-2 flex gap-2">
-              <label htmlFor="header-search-mobile" className="sr-only">
-                Search datasets and departments
-              </label>
-              <input
-                id="header-search-mobile"
-                type="search"
-                value={headerQuery}
-                onChange={(e) => setHeaderQuery(e.target.value)}
-                placeholder="Search datasets, departments…"
-                autoComplete="off"
-                style={{
-                  flex: 1,
-                  minWidth: 0,
-                  border: "1px solid rgba(255,255,255,0.4)",
-                  borderRadius: 6,
-                  padding: "0.45rem 0.75rem",
-                  fontSize: "1rem",
-                  color: "#fff",
-                  background: "rgba(255,255,255,0.12)",
-                }}
-              />
-              <button type="submit" className="btn-nav-outline">
-                Search
-              </button>
-            </form>
             {isAuthenticated ? (
               <button onClick={handleLogout} className="btn-nav-outline mt-2">
                 Logout ({displayName(user)})

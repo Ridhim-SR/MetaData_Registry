@@ -4,7 +4,6 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { getDataset, requestAccess } from "../api/registry";
 import { humanizeRaw } from "../utils/format";
 import { ApiError } from "../api/client";
-import { AccessBadge } from "../components/registry/AccessBadge";
 import { EmptyBlock, ErrorBlock, LoadingBlock } from "../components/registry/StateBlocks";
 import { useAuth } from "../contexts/AuthContext";
 
@@ -79,7 +78,7 @@ export function DatasetDetailPage() {
   const loading = query.isPending || query.isFetching;
 
   return (
-    <div className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+    <div className="page-container mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
       <Link
         to="/explore"
         className="mb-4 inline-block text-sm font-medium"
@@ -89,6 +88,18 @@ export function DatasetDetailPage() {
       </Link>
 
       {loading && <LoadingBlock lines={5} />}
+
+      {!loading && query.error && query.error instanceof ApiError && query.error.status === 401 && (
+        <EmptyBlock
+          title="Sign in to view this dataset."
+          body="This metadata is not public. Sign in with your department account to view it."
+          action={
+            <Link to="/login" className="btn-primary" style={{ fontSize: "0.875rem" }}>
+              Sign In
+            </Link>
+          }
+        />
+      )}
 
       {!loading && query.error && query.error instanceof ApiError && query.error.status === 404 && (
         <EmptyBlock
@@ -114,7 +125,7 @@ export function DatasetDetailPage() {
         />
       )}
 
-      {!loading && query.error && !(query.error instanceof ApiError && (query.error.status === 403 || query.error.status === 404)) && (
+      {!loading && query.error && !(query.error instanceof ApiError && (query.error.status === 401 || query.error.status === 403 || query.error.status === 404)) && (
         <ErrorBlock message="Unable to load this dataset. Please try again." onRetry={() => query.refetch()} />
       )}
 
@@ -134,7 +145,6 @@ export function DatasetDetailPage() {
                 </h1>
               </div>
               <div className="flex items-center gap-2">
-                <AccessBadge level={query.data.access_level} />
                 <span className="badge badge-neutral">
                   {query.data.table_count} {query.data.table_count === 1 ? "table" : "tables"}
                 </span>

@@ -9,9 +9,16 @@ import {
   requestAccess,
 } from "../api/registry";
 import { ApiError } from "../api/client";
-import { AccessBadge } from "../components/registry/AccessBadge";
+import { displayName } from "../api/auth";
 import { EmptyBlock, ErrorBlock, LoadingBlock } from "../components/registry/StateBlocks";
-import { humanizeRaw, isSensitiveTag, readableTag } from "../utils/format";
+import { t } from "../i18n";
+import {
+  humanizeRaw,
+  isSensitiveTag,
+  normalizeClassification,
+  readableTag,
+  type DataClassification,
+} from "../utils/format";
 import { useAuth } from "../contexts/AuthContext";
 
 type Tab = "schema" | "about" | "docs" | "lineage";
@@ -79,6 +86,7 @@ function AccessStateButton({ datasetFqn, tableName }: { datasetFqn: string; tabl
 }
 
 export function TablePage() {
+  const { user, isAuthenticated } = useAuth();
   const { datasetFqn = "", tableName = "" } = useParams<{ datasetFqn: string; tableName: string }>();
   const [urlParams] = useSearchParams();
   const highlightColumn = urlParams.get("column") ?? "";
@@ -142,6 +150,38 @@ export function TablePage() {
     [table],
   );
 
+  // Data classification comes only from an explicit backend/OM value
+  // (e.g. CAT levels once exposed). Tags are never guessed from — missing
+  // or unrecognized values render as "Not provided".
+  const classification = useMemo<DataClassification | null>(() => {
+    if (!isFull || !table) return null;
+    return normalizeClassification(table.data_classification);
+  }, [table, isFull]);
+
+  const displayTableName = humanizeRaw(isFull ? table?.name : tname);
+
+  // Card visibility: admin, or the signed-in table owner/steward (matched
+  // against username, email, or display name). Only these viewers get the
+  // completeness card; it is not rendered at all for anyone else.
+  const owners = table && !table.locked ? (table.owners ?? []) : [];
+  const canEdit = useMemo(() => {
+    if (!isAuthenticated || !user) return false;
+    if (user.role === "admin") return true;
+    const tokens = [user.username, user.email, displayName(user)]
+      .filter(Boolean)
+      .map((s) => s.toLowerCase());
+    const steward = table && !table.locked ? table.facts?.steward : null;
+    const candidates = [
+      ...owners.flatMap((o) => [o.name, o.displayName, o.fullyQualifiedName]),
+      steward,
+    ];
+    return candidates.some(
+      (c) => typeof c === "string" && c.trim() !== "" && tokens.includes(c.toLowerCase()),
+    );
+  }, [isAuthenticated, user, owners, table, isFull]);
+
+
+
   useEffect(() => {
     setColPage(1);
   }, [colQuery, colSort, tname, fqn]);
@@ -172,8 +212,27 @@ export function TablePage() {
     }
   };
 
-  const deptDisplay = card?.department_display ?? card?.department ?? "";
-  const otherTables = (card?.tables ?? []).filter((t) => t.name !== tname && t.id !== tname);
+  // Sidebar table rows: current table pinned first and highlighted, then
+  // others in dataset order, at most 5. The current row is never a link.
+  const sidebarTables = useMemo(() => {
+    if (!card) return [];
+    const all = card.tables ?? [];
+    const current = all.find((tb) => tb.name === tname || tb.id === tname) ?? null;
+    const rows: Array<{ key: string; name: string; to: string | null; current: boolean }> = [];
+    const tableUrl = (name: string) =>
+      `/datasets/${encodeURIComponent(card.dataset)}/tables/${encodeURIComponent(name)}`;
+    if (current) {
+      rows.push({ key: current.id, name: current.name, to: null, current: true });
+    } else if (tname) {
+      rows.push({ key: `current:${tname}`, name: tname, to: null, current: true });
+    }
+    for (const tb of all) {
+      if (rows.length >= 5) break;
+      if (current && tb.id === current.id) continue;
+      rows.push({ key: tb.id, name: tb.name, to: tableUrl(tb.name), current: false });
+    }
+    return rows;
+  }, [card, tname]);
   // Loaders on every fetch so stale content never flashes as current.
   // NOTE: the table query is disabled until its parent dataset resolves;
   // a disabled query is perpetually "pending", so only treat it as loading
@@ -184,8 +243,15 @@ export function TablePage() {
     datasetQuery.isFetching ||
     (tableEnabled && (tableQuery.isPending || tableQuery.isFetching));
   const info = table && !table.locked ? table.info ?? null : null;
+  const apiAvailable: boolean | null = isFull ? (info?.api_available ?? null) : null;
+  const apiDocsUrl = useMemo(() => {
+    if (!isFull || !info) return null;
+    const extra = info as unknown as Record<string, unknown>;
+    const raw = info.api_docs_url ?? extra.apiDocsUrl ?? extra.api_url ?? extra.apiUrl;
+    const url = typeof raw === "string" ? raw.trim() : "";
+    return url ? url : null;
+  }, [info, isFull]);
   const facts = table && !table.locked ? table.facts ?? null : null;
-  const owners = table && !table.locked ? (table.owners ?? []) : [];
   const tableTags = table && !table.locked ? (table.tags ?? []) : [];
   const datasetTagNames: string[] = !isFull && card ? ((card as { tags?: string[] }).tags ?? []) : [];
 
@@ -216,10 +282,36 @@ export function TablePage() {
 
   const describedCols = (table?.columns ?? []).filter((c) => (c.description ?? "").trim()).length;
   const totalCols = table?.columns?.length ?? 0;
-  const colDescPct = totalCols === 0 ? 0 : Math.round((describedCols / totalCols) * 100);
+
+  // Completeness is computed from 4 strict items: a column-descriptions
+  // item counts as done only when every column has a description.
+  const completenessItems = useMemo(
+    () => [
+      { key: "description", label: "Description", done: Boolean(table?.description), count: null as string | null },
+      { key: "owner", label: "Owner", done: owners.length > 0, count: null as string | null },
+      { key: "steward", label: "Steward", done: Boolean(facts?.steward), count: null as string | null },
+      {
+        key: "columns",
+        label: "Column descriptions",
+        done: totalCols > 0 && describedCols === totalCols,
+        count: `${describedCols} / ${totalCols}`,
+      },
+    ],
+    [table, owners.length, facts, describedCols, totalCols],
+  );
+  const completenessDone = completenessItems.filter((i) => i.done).length;
+  const completenessPct = Math.round((completenessDone / completenessItems.length) * 100);
+  const completenessColor =
+    completenessPct < 40
+      ? "var(--confid-fg)"
+      : completenessPct < 80
+        ? "var(--restricted-fg)"
+        : "var(--public-fg)";
+
+
 
   return (
-    <div className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+    <div className="page-container mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
       <nav aria-label="Breadcrumb" className="mb-4 text-sm" style={{ color: "var(--text-muted)" }}>
         <Link to="/" style={{ color: "var(--blue-700)" }}>Home</Link>
         {" / "}
@@ -238,7 +330,19 @@ export function TablePage() {
 
       {pageLoading && <LoadingBlock lines={6} />}
 
-      {!pageLoading && datasetQuery.error && !(datasetQuery.error instanceof ApiError && datasetQuery.error.status === 404) && (
+      {!pageLoading && datasetQuery.error instanceof ApiError && datasetQuery.error.status === 401 && (
+        <EmptyBlock
+          title="Sign in to view this table."
+          body="This metadata is not public. Sign in with your department account to view it."
+          action={
+            <Link to="/login" className="btn-primary" style={{ fontSize: "0.875rem" }}>
+              Sign In
+            </Link>
+          }
+        />
+      )}
+
+      {!pageLoading && datasetQuery.error && !(datasetQuery.error instanceof ApiError && (datasetQuery.error.status === 401 || datasetQuery.error.status === 404)) && (
         <ErrorBlock message="Unable to load this table. Please try again." onRetry={() => datasetQuery.refetch()} />
       )}
 
@@ -274,26 +378,18 @@ export function TablePage() {
         <div className="flex flex-col gap-6 lg:flex-row">
           <div className="min-w-0 flex-1">
             {/* HEADER */}
-            <p className="text-sm" style={{ color: "var(--text-muted)", fontSize: "0.875rem" }}>
-              {humanizeRaw(deptDisplay || null)} &gt; {humanizeRaw(card?.name)}
-            </p>
             <div className="mt-1 flex flex-wrap items-center gap-2">
               <h1 className="font-bold" style={{ color: "var(--navy-900)", fontSize: "1.5rem" }}>
                 {humanizeRaw(isFull ? table?.name : tname)}
               </h1>
-              <AccessBadge level={isFull ? table?.access_level : card.access_level} />
               {isFull && (
                 <span className="badge badge-neutral">
                   {totalCols} {totalCols === 1 ? "column" : "columns"}
                 </span>
               )}
-              {isFull && (
-                <span
-                  className="badge badge-neutral"
-                  title="Share of key metadata fields filled in"
-                  style={{ fontSize: "0.8125rem" }}
-                >
-                  Metadata {colDescPct}%
+              {isFull && classification && (
+                <span className={`badge ${classificationBadgeClass(classification)}`}>
+                  {classificationLabel(classification)}
                 </span>
               )}
             </div>
@@ -305,27 +401,48 @@ export function TablePage() {
             >
               <Fact label="Owner" value={owners[0] ? owners[0].displayName || owners[0].name : null} />
               <Fact label="Data steward" value={facts?.steward ?? null} />
-              <Fact label="Department contact" value={facts?.department_contact ?? null} />
               <Fact label="Last updated" value={facts?.updated_at ? formatDate(facts.updated_at) : null} />
               <Fact label="Update frequency" value={facts?.frequency ?? info?.frequency ?? null} />
-              <Fact label="Source" value={facts?.source ?? null} />
+              <ClassificationFact level={classification} />
+              <ApiAvailableFact available={apiAvailable} docsUrl={apiDocsUrl} tableName={displayTableName} />
             </dl>
 
-            {/* TABS */}
-            <div className="mt-6 flex gap-2" role="tablist" aria-label="Table sections">
-              {tabs.filter((t) => t.show).map((t) => (
-                <button
-                  key={t.id}
-                  role="tab"
-                  aria-selected={tab === t.id}
-                  onClick={() => setTab(t.id)}
-                  className={tab === t.id ? "btn-primary" : "btn-secondary"}
-                  style={{ padding: "0.4rem 1rem", fontSize: "0.875rem" }}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
+            {/* TABS / SECTION HEADING */}
+            {(() => {
+              const visibleTabs = tabs.filter((t) => t.show);
+              if (visibleTabs.length === 1) {
+                return (
+                  <h2 className="mt-6 font-semibold" style={{ color: "var(--navy-900)", fontSize: "1.125rem" }}>
+                    {visibleTabs[0].label}
+                  </h2>
+                );
+              }
+              return (
+                <div className="mt-6 flex gap-6" role="tablist" aria-label="Table sections"
+                  style={{ borderBottom: "1px solid var(--border)" }}>
+                  {visibleTabs.map((t) => (
+                    <button
+                      key={t.id}
+                      role="tab"
+                      aria-selected={tab === t.id}
+                      onClick={() => setTab(t.id)}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        borderBottom: tab === t.id ? "3px solid var(--blue-700)" : "3px solid transparent",
+                        padding: "0.5rem 0.25rem",
+                        fontSize: "1.125rem",
+                        fontWeight: 600,
+                        color: tab === t.id ? "var(--navy-900)" : "var(--text-muted)",
+                        cursor: "pointer",
+                      }}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+              );
+            })()}
 
             {tab === "schema" && (
               <div className="mt-4" role="tabpanel" aria-label="Schema">
@@ -520,51 +637,211 @@ export function TablePage() {
           </div>
 
           {/* RIGHT PANEL */}
-          <aside aria-label="Details" className="w-full shrink-0 lg:w-80" style={{ maxWidth: 320 }}>
-            <div className="space-y-4">
-              <div className="p-4" style={{ border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)" }}>
-                <h2 className="font-semibold" style={{ color: "var(--navy-900)", fontSize: "1rem" }}>Access</h2>
-                <div className="mt-2">
-                  <AccessBadge level={isFull ? table?.access_level : card.access_level} />
+          <aside aria-label="Details" className="table-sidebar w-full shrink-0 lg:w-80" style={{ maxWidth: 320 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              <div style={{ border: "0.5px solid var(--border)", borderRadius: 12, background: "var(--bg)", overflow: "hidden" }}>
+                <div style={{ background: "var(--bg-alt)", borderBottom: "1px solid var(--border)", padding: "12px 16px" }}>
+                  <p style={{ color: "var(--text-muted)", fontSize: "12px" }}>{t("parentDataset")}</p>
+                  <Link
+                    to={`/datasets/${encodeURIComponent(card.dataset)}`}
+                    className="mt-1"
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "0.4rem",
+                      color: "var(--blue-700)",
+                      fontSize: "0.9375rem",
+                      fontWeight: 500,
+                    }}
+                  >
+                    <DatabaseIcon />
+                    {humanizeRaw(card.name)}
+                  </Link>
                 </div>
-                <div className="mt-3">
-                  {isFull ? (
-                    <p className="text-sm font-medium" style={{ color: "var(--public-fg)" }}>You have access</p>
-                  ) : (
-                    <AccessStateButton datasetFqn={card.dataset} tableName={tname} />
+                <div style={{ padding: "12px 16px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.5rem" }}>
+                    <span style={{ color: "var(--text-muted)", fontSize: "12px" }}>{t("tablesInDataset")}</span>
+                    <span style={{ color: "var(--text-muted)", fontSize: "12px" }}>{card.table_count}</span>
+                  </div>
+                  {sidebarTables.length > 0 && (
+                    <ul className="mt-2" style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                      {sidebarTables.map((row) =>
+                        row.current || row.to === null ? (
+                          <li
+                            key={row.key}
+                            aria-current="page"
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "0.5rem",
+                              padding: "8px 10px",
+                              borderRadius: 6,
+                              background: "var(--blue-50)",
+                              color: "var(--blue-700)",
+                              fontSize: "0.875rem",
+                              fontWeight: 500,
+                            }}
+                          >
+                            <TableIcon />
+                            <span className="min-w-0 flex-1" style={{ overflowWrap: "anywhere" }}>
+                              {humanizeRaw(row.name)}
+                            </span>
+                            <span
+                              style={{
+                                fontSize: "11px",
+                                fontWeight: 600,
+                                borderRadius: 999,
+                                padding: "0.1rem 0.55rem",
+                                background: "var(--dept-bg)",
+                                color: "var(--dept-fg)",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {t("viewing")}
+                            </span>
+                          </li>
+                        ) : (
+                          <li key={row.key}>
+                            <Link
+                              to={row.to}
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "0.5rem",
+                                padding: "8px 10px",
+                                borderRadius: 6,
+                                color: "var(--text)",
+                                fontSize: "0.875rem",
+                                textDecoration: "none",
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.background = "var(--bg-alt)";
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.background = "";
+                              }}
+                            >
+                              <TableIcon />
+                              <span className="min-w-0 flex-1" style={{ overflowWrap: "anywhere" }}>
+                                {humanizeRaw(row.name)}
+                              </span>
+                              <span aria-hidden style={{ color: "var(--text-muted)" }}>›</span>
+                            </Link>
+                          </li>
+                        ),
+                      )}
+                    </ul>
+                  )}
+                  {card.table_count > 5 && (
+                    <Link
+                      to={`/datasets/${encodeURIComponent(card.dataset)}`}
+                      className="mt-2 inline-block font-semibold"
+                      style={{ color: "var(--blue-700)", fontSize: "0.875rem" }}
+                    >
+                      {t("viewAllTables", { count: String(card.table_count) })}
+                    </Link>
                   )}
                 </div>
               </div>
 
-              <div className="p-4" style={{ border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)" }}>
-                <h2 className="font-semibold" style={{ color: "var(--navy-900)", fontSize: "1rem" }}>Parent dataset</h2>
-                <Link
-                  to={`/datasets/${encodeURIComponent(card.dataset)}`}
-                  className="mt-1 block font-medium"
-                  style={{ color: "var(--blue-700)", fontSize: "0.9375rem" }}
-                >
-                  {humanizeRaw(card.name)}
-                </Link>
-                {otherTables.length > 0 && (
-                  <>
-                    <h3 className="mt-3 font-medium" style={{ color: "var(--text-muted)", fontSize: "0.8125rem" }}>
-                      Other tables in this dataset
-                    </h3>
-                    <ul className="mt-1 space-y-1">
-                      {otherTables.slice(0, 8).map((t) => (
-                        <li key={t.id}>
-                          <Link
-                            to={`/datasets/${encodeURIComponent(card.dataset)}/tables/${encodeURIComponent(t.name)}`}
-                            style={{ color: "var(--blue-700)", fontSize: "0.875rem" }}
-                          >
-                            {humanizeRaw(t.name)}
-                          </Link>
-                        </li>
-                      ))}
-                    </ul>
-                  </>
-                )}
-              </div>
+              {isFull && canEdit && (
+                <div style={{ border: "0.5px solid var(--border)", borderRadius: 12, background: "var(--bg)", padding: "12px 16px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.5rem" }}>
+                    <h2
+                      className="font-semibold"
+                      style={{ display: "flex", alignItems: "center", gap: "0.35rem", color: "var(--navy-900)", fontSize: "1rem" }}
+                    >
+                      Metadata completeness
+                      <span
+                        tabIndex={0}
+                        aria-label="Share of key metadata fields filled in"
+                        className="completeness-info"
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          width: "16px",
+                          height: "16px",
+                          borderRadius: "50%",
+                          border: "1px solid var(--text-muted)",
+                          color: "var(--text-muted)",
+                          fontSize: "11px",
+                          fontWeight: 700,
+                          cursor: "help",
+                        }}
+                      >
+                        <span aria-hidden="true">i</span>
+                        <span role="tooltip" className="completeness-info-tip">
+                          Share of key metadata fields filled in
+                        </span>
+                      </span>
+                    </h2>
+                    <span style={{ color: completenessColor, fontSize: "1rem", fontWeight: 700 }}>
+                      {completenessPct}%
+                    </span>
+                  </div>
+                  <div
+                    role="progressbar"
+                    aria-valuenow={completenessPct}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-label="Metadata completeness"
+                    className="mt-2"
+                    style={{ height: "6px", borderRadius: 999, background: "var(--bg-alt)" }}
+                  >
+                    <div
+                      style={{
+                        width: `${completenessPct}%`,
+                        height: "100%",
+                        borderRadius: 999,
+                        background: completenessColor,
+                      }}
+                    />
+                  </div>
+                  <p className="mt-1" style={{ color: "var(--text-muted)", fontSize: "0.8125rem" }}>
+                    {t("documentedCount", { done: String(completenessDone), total: String(completenessItems.length) })}
+                  </p>
+                  <ul className="mt-1" style={{ fontSize: "0.875rem" }}>
+                    {completenessItems.map((item) => (
+                      <li
+                        key={item.key}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "0.5rem",
+                          borderTop: "1px solid var(--border)",
+                          paddingTop: "7px",
+                          paddingBottom: "7px",
+                          color: item.done ? "var(--text)" : "var(--text-muted)",
+                        }}
+                      >
+                        {item.done ? (
+                          <span aria-hidden style={{ color: "var(--public-fg)", fontWeight: 700 }}>
+                            ✓
+                          </span>
+                        ) : (
+                          <span
+                            aria-hidden
+                            style={{
+                              width: "14px",
+                              height: "14px",
+                              flexShrink: 0,
+                              borderRadius: "50%",
+                              border: "1.5px dashed var(--text-muted)",
+                            }}
+                          />
+                        )}
+                        <span className="min-w-0 flex-1">{item.label}</span>
+                        {item.count !== null && (
+                          <span style={{ color: "var(--text-muted)", fontSize: "0.8125rem", whiteSpace: "nowrap" }}>
+                            {item.count}
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
 
               {(tableTags.length > 0 || datasetTagNames.length > 0) && (
                 <div className="p-4" style={{ border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)" }}>
@@ -582,18 +859,6 @@ export function TablePage() {
                   </div>
                 </div>
               )}
-
-              <div className="p-4" style={{ border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)" }}>
-                <h2 className="font-semibold" style={{ color: "var(--navy-900)", fontSize: "1rem" }}>
-                  Metadata completeness
-                </h2>
-                <ul className="mt-2 space-y-1 text-sm" style={{ fontSize: "0.875rem" }}>
-                  <ChecklistItem done={Boolean(table?.description)} label="Description" />
-                  <ChecklistItem done={owners.length > 0} label="Owner" />
-                  <ChecklistItem done={Boolean(facts?.steward)} label="Steward" />
-                  <ChecklistItem done={describedCols === totalCols && totalCols > 0} label={`Column descriptions ${describedCols}/${totalCols}`} />
-                </ul>
-              </div>
             </div>
           </aside>
         </div>
@@ -602,11 +867,90 @@ export function TablePage() {
   );
 }
 
+function classificationBadgeClass(level: DataClassification): string {
+  switch (level) {
+    case "Public":
+      return "badge-public";
+    case "Internal":
+      return "badge-department";
+    case "Restricted":
+      return "badge-restricted";
+    case "Sensitive":
+      return "badge-confidential";
+  }
+}
+
+function classificationLabel(level: DataClassification): string {
+  switch (level) {
+    case "Public":
+      return t("classificationPublic");
+    case "Internal":
+      return t("classificationInternal");
+    case "Restricted":
+      return t("classificationRestricted");
+    case "Sensitive":
+      return t("classificationSensitive");
+  }
+}
+
+function ClassificationFact({ level }: { level: DataClassification | null }) {
+  return (
+    <div>
+      <dt className="metadata-fact-label">{t("dataClassification")}</dt>
+      <dd className="mt-0.5" style={{ color: "var(--text)", fontSize: "0.9375rem" }}>
+        {level ? (
+          <span className={`badge ${classificationBadgeClass(level)}`}>{classificationLabel(level)}</span>
+        ) : (
+          <span className="not-provided">Not provided</span>
+        )}
+      </dd>
+    </div>
+  );
+}
+
+function ApiAvailableFact({
+  available,
+  docsUrl,
+  tableName,
+}: {
+  available: boolean | null;
+  docsUrl: string | null;
+  tableName: string;
+}) {
+  return (
+    <div>
+      <dt className="metadata-fact-label">{t("apiAvailable")}</dt>
+      <dd className="mt-0.5" style={{ color: "var(--text)", fontSize: "0.9375rem" }}>
+        {available === null ? (
+          <span className="not-provided">Not provided</span>
+        ) : (
+          <span style={{ display: "inline-flex", flexWrap: "wrap", alignItems: "center", gap: "0.5rem" }}>
+            <span className={`badge ${available ? "badge-public" : "badge-neutral"}`}>
+              {available ? t("yes") : t("no")}
+            </span>
+            {available && docsUrl ? (
+              <a
+                href={docsUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={t("viewApiDocsFor", { name: tableName })}
+                style={{ color: "var(--blue-700)", fontSize: "0.875rem", fontWeight: 600 }}
+              >
+                {t("viewApiDocs")}
+              </a>
+            ) : null}
+          </span>
+        )}
+      </dd>
+    </div>
+  );
+}
+
 function Fact({ label, value }: { label: string; value: string | null | undefined }) {
   const text = value && String(value).trim() ? String(value) : null;
   return (
     <div>
-      <dt style={{ color: "var(--text-muted)", fontSize: "0.8125rem" }}>{label}</dt>
+      <dt className="metadata-fact-label">{label}</dt>
       <dd className="mt-0.5" style={{ color: "var(--text)", fontSize: "0.9375rem" }}>
         {text ?? <span className="not-provided">Not provided</span>}
       </dd>
@@ -626,13 +970,39 @@ function DocRow({ label, value, hint }: { label: string; value: string | null | 
   );
 }
 
-function ChecklistItem({ done, label }: { done: boolean; label: string }) {
+function DatabaseIcon() {
   return (
-    <li className="flex items-center gap-2" style={{ color: done ? "var(--text)" : "var(--text-muted)" }}>
-      <span aria-hidden style={{ color: done ? "var(--public-fg)" : "var(--text-muted)" }}>
-        {done ? "✓" : "○"}
-      </span>
-      {label}
-    </li>
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      aria-hidden="true"
+      style={{ flexShrink: 0 }}
+    >
+      <ellipse cx="8" cy="3.5" rx="5.5" ry="2" />
+      <path d="M2.5 3.5v9c0 1.1 2.5 2 5.5 2s5.5-.9 5.5-2v-9" />
+      <path d="M2.5 8c0 1.1 2.5 2 5.5 2s5.5-.9 5.5-2" />
+    </svg>
+  );
+}
+
+function TableIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      aria-hidden="true"
+      style={{ flexShrink: 0 }}
+    >
+      <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" />
+      <path d="M1.5 6h13M1.5 10h13M6 6v7" />
+    </svg>
   );
 }

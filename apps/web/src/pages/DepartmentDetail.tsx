@@ -48,7 +48,7 @@ export function DepartmentDetailPage() {
   const deptSearching = trimmed.length > 0 && (searchQuery.isPending || searchQuery.isFetching);
 
   return (
-    <div className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+    <div className="page-container mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
       <nav aria-label="Breadcrumb" className="mb-4 text-sm" style={{ color: "var(--text-muted)" }}>
         <Link to="/" style={{ color: "var(--blue-700)" }}>Home</Link>
         {" / "}

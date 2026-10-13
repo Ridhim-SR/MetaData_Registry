@@ -11,6 +11,7 @@ department identity is the OM *service* name. Display names come from the
 local department_profile table, never from formatted service IDs.
 """
 
+import asyncio
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -33,12 +34,24 @@ from src.openmetadata.schemas.dataset import AccessRequestCreate
 
 router = APIRouter(prefix="/registry", tags=["registry"])
 
-CATALOG_TTL_SECONDS = 60
+CATALOG_TTL_SECONDS = 300
 
 # Viewer-class -> (fetched_at, {"tables": [...], "databases": [...]})
 # Raw OpenMetadata payloads only; the visibility map and profiles stay fresh
 # per request so access changes apply immediately while OM polling is cached.
+# Bounded to the 3 viewer classes (guest/admin/user:{dept}); user keys are
+# capped with simple FIFO eviction to avoid unbounded growth.
 _catalog_cache: dict[str, tuple[float, dict]] = {}
+_catalog_locks: dict[str, asyncio.Lock] = {}
+_CATALOG_MAX_USER_KEYS = 50
+
+
+def _catalog_lock(key: str) -> asyncio.Lock:
+    lock = _catalog_locks.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _catalog_locks[key] = lock
+    return lock
 
 
 # ---- sidecar helpers ----
@@ -87,24 +100,40 @@ def _profiles_from_services(services: list[dict]) -> list[dict]:
 
 
 async def _catalog_raw(session: AsyncSession, ctx: dict | None) -> dict:
-    """Raw OM payloads shared by every endpoint (60s cache per viewer class).
+    """Raw OM payloads shared by every endpoint (300s cache per viewer class).
 
-    One tables fetch (with columns, needed for full cards/detail) and one
-    light databases fetch per window; visibility maps and profiles are read
-    fresh on every request.
+    Tables (with columns, needed for full cards/detail), databases and
+    services are fetched concurrently. A per-key lock provides singleflight:
+    N concurrent cache misses collapse into 1 OM fetch. Visibility maps and
+    profiles are read fresh on every request.
     """
     key = vis.viewer_key(ctx)
     now = time.monotonic()
     hit = _catalog_cache.get(key)
     if hit and now - hit[0] < CATALOG_TTL_SECONDS:
         return hit[1]
-    async with OpenMetadataClient() as client:
-        tables = await client._fetch_all("tables", {"fields": "columns,tags,owners", "limit": 1000})
-        databases = await client._fetch_all("databases", {"limit": 1000})
-        services = await client._fetch_all("services/databaseServices", {"limit": 100})
-    payload = {"tables": tables, "databases": databases, "services": services}
-    _catalog_cache[key] = (now, payload)
-    return payload
+    async with _catalog_lock(key):
+        # Re-check after acquiring: a waiter reuses the fresh payload.
+        now = time.monotonic()
+        hit = _catalog_cache.get(key)
+        if hit and now - hit[0] < CATALOG_TTL_SECONDS:
+            return hit[1]
+        async with OpenMetadataClient() as client:
+            tables, databases, services = await asyncio.gather(
+                client._fetch_all("tables", {"fields": "columns,tags,owners", "limit": 1000}),
+                client._fetch_all("databases", {"limit": 1000}),
+                client._fetch_all("services/databaseServices", {"limit": 100}),
+            )
+        payload = {"tables": tables, "databases": databases, "services": services}
+        _catalog_cache[key] = (time.monotonic(), payload)
+        # Bound user-key growth; guest/admin keys are never evicted here.
+        if len(_catalog_cache) > _CATALOG_MAX_USER_KEYS + 2:
+            for k in list(_catalog_cache):
+                if k not in ("guest", "admin"):
+                    del _catalog_cache[k]
+                    if len(_catalog_cache) <= _CATALOG_MAX_USER_KEYS + 2:
+                        break
+        return payload
 
 
 async def _viewer_catalog(session: AsyncSession, ctx: dict | None) -> tuple[list[dict], dict, list[dict], list[dict]]:
@@ -218,13 +247,17 @@ async def public_datasets(
 async def list_datasets(
     department: str | None = None,
     search: str | None = None,
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=500, ge=1, le=1000),
     session: AsyncSession = Depends(db_get_session),
     user: User | None = Depends(get_optional_user),
 ) -> dict:
     """Catalog datasets visible to the caller (full cards + locked teasers).
 
-    Logged-in callers additionally receive table-level restricted teasers
-    (historical shape); guests never receive table names of non-public data.
+    Paged via page/size (default 500 covers current catalogs; total is the
+    full visible count). Logged-in callers additionally receive table-level
+    restricted teasers capped to the same page size; guests never receive
+    table names of non-public data.
     """
     ctx = user_context(user)
     cards, vmap, _databases, services = await _viewer_catalog(session, ctx)
@@ -238,6 +271,9 @@ async def list_datasets(
             c for c in cards
             if needle in (c["name"] or "").lower() or needle in (c["dataset"] or "").lower()
         ]
+    total = len(cards)
+    start = (page - 1) * size
+    items = cards[start:start + size]
     teasers: list[dict] = []
     if user is not None:
         raw = await _catalog_raw(session, ctx)
@@ -248,9 +284,10 @@ async def list_datasets(
                 t for t in table_teasers
                 if (t.get("fullyQualifiedName") or "").split(".")[0] in wanted
             ]
-        teasers = table_teasers
-    _with_dept_display(cards, profiles)
-    return {"items": cards, "teasers": teasers, "total": len(cards)}
+        teasers = table_teasers[:size]
+    _with_dept_display(items, profiles)
+    _with_dept_display(teasers, profiles)
+    return {"items": items, "teasers": teasers, "total": total, "page": page, "size": size}
 
 
 def _dataset_exists(raw_tables: list[dict], databases: list[dict], fqn: str) -> bool:
@@ -283,9 +320,11 @@ async def dataset_by_fqn(
 ) -> dict:
     """Single dataset (OM database). Teaser-level returns 200 locked.
 
-    Legacy 3-part schema-level FQNs resolve to their parent database.
-    Confidential datasets are 404 for everyone except admins. Guests never
-    receive 401 here: hidden datasets are either locked (200) or 404.
+    Departments and datasets stay visible to anonymous viewers as FULL or
+    locked teaser cards; tables/columns inside require sign-in (see the
+    table endpoints which return 401 for anonymous). Legacy 3-part
+    schema-level FQNs resolve to their parent database. Confidential
+    datasets are 404 for everyone except admins.
     """
     ctx = user_context(user)
     key = vis.normalize_dataset_fqn(fqn)
@@ -372,8 +411,10 @@ async def registry_table(
 ) -> dict:
     """Single table. Public → anyone; confidential → 404 (non-admin).
 
-    Viewers without full access receive 200 with a locked table summary
-    (name, description, column count, columns: []); there is no 403.
+    Anonymous viewers requesting an existing non-public table receive 401
+    with no metadata so the frontend can show a sign-in prompt. Authenticated
+    viewers without full access receive 200 with a locked table summary
+    (name, description, column count, columns: []); there is no 403 for them.
     Used by the frontend only to resolve legacy table links to datasets.
 
     Full-access responses carry `info`/`facts` -- the dataset documentation
@@ -399,7 +440,14 @@ async def registry_table(
             raise HTTPException(status_code=404, detail="Table not found")
         service, _, _, _ = vis.split_fqn(fqn)
         owner = vmap.get(fqn, {}).get("department") or service
-        annotated = {**table, "access_level": visibility, "department": owner}
+        # Data classification is passed through only when OpenMetadata itself
+        # provides it; it is never guessed from tags (missing -> "Not provided").
+        annotated = {
+            **table,
+            "access_level": visibility,
+            "department": owner,
+            "data_classification": table.get("data_classification"),
+        }
         full, _ = vis.visible_tables([table], vmap, ctx)
         if full:
             info = await _dataset_info(session, client, fqn)
@@ -415,6 +463,12 @@ async def registry_table(
                 "source": None,
             }
             return annotated
+        if user is None:
+            # Anonymous + existing non-public table: unauthorized, no metadata.
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Sign in to view this table.",
+            )
     columns = table.get("columns") or []
     return {
         "id": table.get("id"),
@@ -444,8 +498,10 @@ async def table_dictionary(
 ):
     """Downloadable data dictionary (CSV) for one table — full access only.
 
-    Viewers without full access are refused (403 locked, 404 hidden or
-    confidential); the frontend hides the button unless the table is open.
+    Anonymous viewers without full access receive 401 so the frontend can
+    show a sign-in prompt; authenticated viewers without full access receive
+    403; confidential tables are 404 for non-admins. The frontend hides the
+    button unless the table is open.
     """
     ctx = user_context(user)
     async with OpenMetadataClient() as client:
@@ -469,11 +525,25 @@ async def table_dictionary(
     full, _ = vis.visible_tables([table], vmap, ctx)
     if not full:
         # The table exists (fetched above) but the viewer may not open it.
+        if user is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Sign in with an authorized account to download this dictionary.",
+            )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Sign in with an authorized account to download this dictionary.",
         )
-    lines = ["column_name,data_type,description,tags"]
+    info = (await table_info_map(session, [fqn])).get(fqn) or {}
+    api_available = info.get("api_available")
+    lines = [
+        f"# table: {table.get('name') or ''}",
+        f"# dataset: {vis.dataset_fqn(fqn)}",
+        f"# data_classification: {table.get('data_classification') or 'Not provided'}",
+        "# api_available: "
+        + ("Yes" if api_available is True else "No" if api_available is False else "Not provided"),
+        "column_name,data_type,description,tags,data_classification",
+    ]
     for col in table.get("columns") or []:
         tags = ";".join(
             t.get("tagFQN") or t.get("name") or ""
@@ -484,6 +554,7 @@ async def table_dictionary(
             _csv_cell(col.get("dataTypeDisplay") or col.get("dataType")),
             _csv_cell(col.get("description")),
             _csv_cell(tags),
+            _csv_cell(col.get("data_classification")),
         ]))
     filename = f"{(table.get('name') or 'table')}_data_dictionary.csv"
     return PlainTextResponse(
@@ -545,10 +616,13 @@ async def registry_search(
     """Grouped registry search: departments, datasets, tables, columns.
 
     The OpenMetadata search runs first; the visibility filter applies after
-    it and totals are re-computed post-filter. For viewers without full
-    access, OM hits whose only match is structural/column text are
-    discarded, and table/column names of non-public datasets are never
-    returned. `scope` limits the groups returned.
+    it and totals are re-computed post-filter. Departments and datasets stay
+    visible to anonymous viewers (locked teasers carry no table/column
+    names); tables/columns require sign-in and are never returned for
+    anonymous viewers on non-public data. For viewers without full access,
+    OM hits whose only match is structural/column text are discarded.
+    `scope` limits the groups returned. `department` is an Owner filter
+    only and never changes access permissions.
     """
     ctx = user_context(user)
     needle = q.strip().lower()
@@ -601,13 +675,15 @@ async def registry_search(
                 kept_tables.append(t)
             continue
         if user is not None:
-            # Logged-in historical behavior: non-public OM hits still surface
-            # the dataset teaser (table teasers unchanged elsewhere). Tables
-            # of locked datasets enter the strict name/description gate below.
+            # Logged-in: non-public OM hits still surface the dataset teaser.
+            # Tables of locked datasets enter the strict name/description
+            # gate below.
             kept_datasets[key] = card
             kept_tables.append(t)
             continue
-        # Guest + non-public: keep only on a non-column match.
+        # Guest + non-public: keep only on a non-column match (no table or
+        # column names are ever returned for these datasets; tables stay
+        # gated behind sign-in below).
         allowed = _dataset_allowed_text(card, tables_by_dataset, dept_text_by_service.get(service, ""))
         if needle and needle in allowed:
             kept_datasets[key] = card

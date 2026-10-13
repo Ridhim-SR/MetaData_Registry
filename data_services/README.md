@@ -37,9 +37,9 @@ the UI. If a server is wiped or a new one is set up, **one command rebuilds it**
 
 | Step | Command |
 |---|---|
-| 1. Upload the file and update the catalog | `ENVIRONMENT=development python3 -m src.schema_registry.add <file> --department <dept> --dataset <dataset> --table <table>` |
+| 1. Upload the file and update the catalog | `python3 -m src.schema_registry.add <file> --department <dept> --dataset <dataset> --table <table>` |
 | 2. Fill in dataset details, commit `catalog.yaml`, open a PR, merge | git |
-| 3. Store and publish | `ENVIRONMENT=development python3 -m src.schema_registry.sync` |
+| 3. Store and publish | `python3 -m src.schema_registry.sync` |
 
 The backup runs on its own at the end of steps 1 and 3.
 
@@ -85,29 +85,20 @@ cp .env.example .env          # then fill in .env -- each setting has a comment
 
 ## Environments (local, development, production)
 
-One line in `.env` decides where everything goes:
+**The git branch you're on decides where everything goes.** Leave `ENVIRONMENT=` blank in `.env`.
 
-```
-ENVIRONMENT=local        # local | development | production
-```
+| Git branch | Environment | Files go to (Wasabi) | OpenMetadata |
+|---|---|---|---|
+| any feature branch | `local` | your own Wasabi, folder `local/` | `LOCAL_OPENMETADATA_...` (your laptop) |
+| `main` | `development` | company Wasabi, folder `dev/` | `DEV_OPENMETADATA_...` (BIPP2, 10.0.96.105; needs office network or VPN) |
+| `production` | `production` | company Wasabi, folder `prod/` | `PROD_OPENMETADATA_...` (not set up yet) |
 
-| `ENVIRONMENT` | Files go to | OpenMetadata |
-|---|---|---|
-| `local` (default) | `storage/` folder on your laptop (never Wasabi) | `LOCAL_OPENMETADATA_...` (your laptop) |
-| `development` | Wasabi, folder `dev/` | `DEV_OPENMETADATA_...` (BIPP2, 10.0.96.105; needs office network or VPN) |
-| `production` | Wasabi, folder `prod/` | `PROD_OPENMETADATA_...` (not set up yet) |
-
-**Which branch may use which environment** (enforced: the command stops otherwise):
-
-| Git branch | Allowed | Blocked |
-|---|---|---|
-| `main` | `development`, `production` | `local` |
-| any other branch | `local`, `development` | `production` |
-
-- Production data only comes from reviewed code on `main`. If git can't tell the branch, production is blocked.
-- Try things on `local` first (on a feature branch). It can't change shared data.
-- `development` and `production` refuse to run if `WASABI_BUCKET` is blank, so shared data never lands on one laptop by mistake.
-- For one command only, put it in front: `ENVIRONMENT=local python3 -m src.schema_registry.sync`
+- Each branch can only use its own environment. Anything else is refused, so dev and production data only come from reviewed code.
+- If git can't tell the branch, it counts as a feature branch (`local`).
+- Try things on a feature branch first. It writes only to `local/` and your laptop's OpenMetadata.
+- `main` and `production` use the company Wasabi (`WASABI_...` in `.env`). **Feature branches never do:** they use your own Wasabi account from the `LOCAL_WASABI_...` lines (section 3b of `.env`), and stop with an error if those are blank.
+- **Going live:** merge `main` into `production`, check out `production`, then run `add`/`sync` there.
+- **Every command that changes data asks first.** `add`, `sync`, `backup setup/copy/restore`, `inputs upload` and the other writing commands show where they will write (environment, branch, Wasabi folder, OpenMetadata) and ask twice: type `yes`, then the environment's name. Anything else cancels with nothing changed. Read-only commands (`--dry-run`, `verify`, `inputs list`) don't ask. For scripts, add `--yes` to skip the questions.
 
 ---
 
@@ -126,27 +117,27 @@ Do it the same way every time. Examples use PWD; replace the file, department, d
 
 **A: existing department**
 ```bash
-ENVIRONMENT=development python3 -m src.schema_registry.add samples/pwd_vishwakarma_full_raw_columns.txt \
+python3 -m src.schema_registry.add samples/pwd_vishwakarma_full_raw_columns.txt \
     --department pwd --dataset vishwakarma --table vishwakarma_T
 ```
 
 **B: new department.** Add its full name (first time only):
 ```bash
-ENVIRONMENT=development python3 -m src.schema_registry.add samples/cmsvy_applications.csv \
+python3 -m src.schema_registry.add samples/cmsvy_applications.csv \
     --department samaj_kalyan --department-name "Department of Social Welfare" \
     --dataset cmsvy --table cmsvy_application
 ```
 
 **C: with descriptions/tags.** Same as A or B, plus `--metadata`:
 ```bash
-ENVIRONMENT=development python3 -m src.schema_registry.add samples/pwd_vishwakarma_full_raw_columns.txt \
+python3 -m src.schema_registry.add samples/pwd_vishwakarma_full_raw_columns.txt \
     --department pwd --dataset vishwakarma --table vishwakarma_T \
     --metadata samples/pwd_vishwakarma_metadata.csv
 ```
 
 **D: one file, many tables.** `--field-dictionary` instead of `--table`:
 ```bash
-ENVIRONMENT=development python3 -m src.schema_registry.add samples/kanya_sumangla_field_dictionary.csv \
+python3 -m src.schema_registry.add samples/kanya_sumangla_field_dictionary.csv \
     --department samaj_kalyan --dataset cmsvy --field-dictionary
 ```
 
@@ -175,7 +166,7 @@ For a new dataset, `add` leaves these blank. Fill in what you know in `catalog.y
 ### Step 3: Check, then commit and open a PR
 
 ```bash
-ENVIRONMENT=development python3 -m src.schema_registry.sync --dry-run
+python3 -m src.schema_registry.sync --dry-run
 ```
 Every table should show `would ingest` or `unchanged`, with `0 failed`. Fix anything that `failed` first (see [When something fails](#when-something-fails)).
 
@@ -190,8 +181,8 @@ Open the PR on GitHub and get it reviewed and merged.
 
 Nothing runs it automatically yet.
 ```bash
-ENVIRONMENT=development python3 -m src.schema_registry.sync                    # all departments
-ENVIRONMENT=development python3 -m src.schema_registry.sync --department pwd   # just one
+python3 -m src.schema_registry.sync                    # all departments
+python3 -m src.schema_registry.sync --department pwd   # just one
 ```
 It prints a summary:
 ```
@@ -206,7 +197,7 @@ pwd.vishwakarma.vishwakarma_t  ingested      published      source file changed;
 
 Open http://10.0.96.105:8585 and find the table under the department's service.
 
-**For production:** repeat step 1 and step 4 with `ENVIRONMENT=production` (on `main`). The catalog is already right.
+**For production:** merge `main` into the `production` branch, check it out, and repeat step 1 and step 4 there. The catalog is already right.
 
 ---
 
@@ -266,14 +257,14 @@ Only once per Wasabi account, by whoever has the admin key. Takes 1–3 minutes,
 ```bash
 # 1. In .env:  WASABI_BACKUP_BUCKET=pwd-schema-registry-backup   WASABI_BACKUP_REGION=eu-central-1
 # 2. See what it will do (changes nothing):
-ENVIRONMENT=development python3 -m src.storage.backup setup --pipeline-user sda-pipeline --dry-run
+python3 -m src.storage.backup setup --pipeline-user sda-pipeline --dry-run
 # 3. Do it, and make a key for the pipeline user:
-ENVIRONMENT=development python3 -m src.storage.backup setup --pipeline-user sda-pipeline --create-key
+python3 -m src.storage.backup setup --pipeline-user sda-pipeline --create-key
 # 4. Put the printed key in .env (WASABI_ACCESS_KEY_ID / WASABI_SECRET_ACCESS_KEY).
 #    It's shown only once. Keep the admin key out of .env.
 # 5. First full copy, then check it:
-ENVIRONMENT=development python3 -m src.storage.backup copy --all
-ENVIRONMENT=development python3 -m src.storage.backup verify --all
+python3 -m src.storage.backup copy --all
+python3 -m src.storage.backup verify --all
 ```
 - Running `setup` again is safe: it only does what's missing and prints `already` for the rest.
 - If the admin key isn't in `.env`, put it in front: `WASABI_ADMIN_ACCESS_KEY_ID=... WASABI_ADMIN_SECRET_ACCESS_KEY=... python3 -m src.storage.backup setup ...`
@@ -289,7 +280,7 @@ ENVIRONMENT=development python3 -m src.storage.backup verify --all
 | Bring back missing files | `python3 -m src.storage.backup restore`, then `sync` |
 | Also replace files that differ | `python3 -m src.storage.backup restore --overwrite` |
 
-These cover this `ENVIRONMENT`'s folder (`dev/` or `prod/`). Add `--all` for the whole bucket.
+These cover this environment's folder (`local/`, `dev/` or `prod/`). Add `--all` for the whole bucket.
 
 In the Wasabi console, the backup is its own bucket (`pwd-schema-registry-backup`, Frankfurt), with the same folders as the main one.
 
@@ -299,7 +290,7 @@ In the Wasabi console, the backup is its own bucket (`pwd-schema-registry-backup
 
 | What was lost | What to do |
 |---|---|
-| **OpenMetadata** (server wiped or new) | `ENVIRONMENT=development python3 -m src.schema_registry.sync --publish-only` (quick: republish what's in Wasabi), or plain `sync` (full: from `catalog.yaml`) |
+| **OpenMetadata** (server wiped or new) | `python3 -m src.schema_registry.sync --publish-only` (quick: republish what's in Wasabi), or plain `sync` (full: from `catalog.yaml`) |
 | **One file** deleted or overwritten by mistake | Wasabi console → the bucket → turn on "Show Versions" → restore the older version |
 | **Many files or a whole folder** in Wasabi | `python3 -m src.storage.backup restore`, then `sync` |
 
@@ -367,7 +358,7 @@ Log file: logs/sync_20261007_164556.log
 
 | Error says | What to do |
 |---|---|
-| `not found in storage -- upload it first` | Run `add` for that file in this ENVIRONMENT (e.g. added in development but not yet in production) |
+| `not found in storage -- upload it first` | Run `add` for that file on this branch (e.g. added on `main` but not yet on `production`) |
 | `isn't in catalog.yaml yet -- add --department-name` | New department: add `--department-name "..."` |
 | `unknown key(s)` / `must be CAT-1 ... CAT-4` | Fix that line in `catalog.yaml` |
 | `this run is missing N column(s)` | Partial file: ask for the full one. Real removal: `allow_column_removal: true` for one sync |
@@ -377,8 +368,7 @@ Log file: logs/sync_20261007_164556.log
 | `Unknown category '...'` | `category:` must be `CAT-1`..`CAT-4`, or left blank — fix that line in `catalog.yaml` |
 | `name(s) matching no column` (warning) | Typo in the metadata file; those rows were ignored |
 | `Unrecognized Format value` (field dictionary) | Add a rule to `FORMAT_TYPE_RULES` in `field_dictionary_parser.py` |
-| `ENVIRONMENT=production isn't allowed on branch '...'` | Merge your PR, `git checkout main && git pull`, then run it |
-| `ENVIRONMENT=local isn't allowed on branch 'main'` | On `main` use `development` or `production` |
+| `ENVIRONMENT=... isn't allowed on branch '...'` | Each branch runs one environment: feature → local, `main` → development, `production` → production. Leave `ENVIRONMENT` blank in `.env`, or switch branch |
 | `Couldn't lock ... held by` | Someone else is running sync. Wait; a dead run's lock frees itself after 15 minutes |
 | `Can't reach the OpenMetadata server` | BIPP2 needs the office network or VPN; local needs `docker compose up -d` |
 | `401` from OpenMetadata | Token expired: put a new one in `.env` |
@@ -426,7 +416,7 @@ these):
 | `CATEGORY`/`API_AVAILABLE`/`OWNER`/`FREQUENCY`/`TIMELINE`/`DATASET_DESCRIPTION` | no | dataset-level fields — type a real value only once you have it; blank/omitted carries forward whatever was last set, so these rarely need touching after the first time |
 ### Where files are stored
 
-Same layout in `storage/` (local), in Wasabi (`dev/`, `prod/`) and in the backup bucket (without `_locks/`):
+Same layout in each Wasabi folder (`local/`, `dev/`, `prod/`) and in the backup bucket (without `_locks/`):
 
 ```
 inputs/<dept>/<dataset>/<file>                      files uploaded with `add`
@@ -446,7 +436,7 @@ Every run adds new files with the time in the name, so the full history stays. O
 
 | Ours | In OpenMetadata |
 |---|---|
-| Department (`pwd`) | Database service |
+| Department (`pwd`) | Database service. Its name is the id (`pwd`); the full department name from the catalog is shown as its display name |
 | Dataset (`vishwakarma`) | Database: description, category tag, and owner / frequency / timeline / API as custom properties |
 | `schema:` (default `public`) | Schema |
 | Table | Table: columns, types, descriptions |
@@ -484,9 +474,9 @@ Every run adds new files with the time in the name, so the full history stays. O
 | `src/schema_registry/curate.py` | Checks types and names, adds automatic tags and classification |
 | `src/schema_registry/openmetadata/publish.py` | Sends one table to OpenMetadata |
 | `src/schema_registry/registry/` | Department/dataset/table lists, and folder layout |
-| `src/storage/` | Local folder or Wasabi, plus locking |
+| `src/storage/` | Wasabi storage, plus locking |
 | `src/storage/backup.py` | Backup bucket: setup, copy, verify, restore |
-| `src/utils/config.py` | Reads `.env`, applies `ENVIRONMENT` and the branch rule |
+| `src/utils/config.py` | Reads `.env`, picks the environment from the git branch |
 | `src/utils/cli.py` | The error box and log file for every command |
 
 **Which parser reads which file** is decided in one place: `parse_source()` in `pipeline.py`. Most departments use the shared parser for their `format:` (`postgres_ddl` or `csv`); `agri_dept` has its own (`parsers/agriculture_parser.py`), which picks its table's block out of a one-file-many-tables submission and falls back to the shared parser for anything else.

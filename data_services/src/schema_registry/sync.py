@@ -65,13 +65,13 @@ def _table_needs_ingest(storage: ObjectStorage, dept_id: str, ds_slug: str, tabl
     """Why this table must be (re-)ingested, or None if nothing changed."""
 
     table_slug = lookups.slugify(table.name)
+    source_bytes, _ = inputs.read_input(storage, table.source)  # first, so a dry run also catches a missing file
     registered = lookups.get_table(storage, table_id)
     if registered is None:
         return "new table"
     if (registered["table_name"], registered["schema_name"]) != (table.name, table.schema):
         return "table name or schema changed"
     prefix = paths.raw_source_prefix(dept_id, ds_slug, table_slug)
-    source_bytes, _ = inputs.read_input(storage, table.source)
     if inputs.sha256(source_bytes) != _latest_archived_sha(storage, prefix, metadata=False):
         return "source file changed"
     if table.metadata:
@@ -262,6 +262,7 @@ def _main(argv: list[str]) -> int:
     from src.schema_registry.openmetadata.setup_custom_properties import setup as setup_custom_properties
     from src.storage import storage_from_env
     from src.storage.backup import backup_after_run
+    from src.utils.cli import confirm_changes
     from src.utils.config import load_env
 
     parser = argparse.ArgumentParser(prog="python3 -m src.schema_registry.sync", description=__doc__.split("\n\n")[0])
@@ -281,6 +282,10 @@ def _main(argv: list[str]) -> int:
     load_env()
     storage = storage_from_env()
     departments = load_catalog(args.catalog)
+    if not args.dry_run:
+        which = f"department '{args.department}'" if args.department else "every department"
+        confirm_changes(f"sync {which} in catalog.yaml -- "
+                        + ("republish what's stored" if args.publish_only else "store in Wasabi and publish"))
 
     client = setup = None
     host, token = os.environ.get("OPENMETADATA_HOST_PORT"), os.environ.get("OPENMETADATA_JWT_TOKEN")

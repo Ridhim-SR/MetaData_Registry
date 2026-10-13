@@ -27,7 +27,7 @@ export function HowItWorks() {
       aria-label="How it works"
       style={{ background: "var(--bg-alt)", borderTop: "1px solid var(--border)" }}
     >
-      <div className="mx-auto w-full max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
+      <div className="page-container mx-auto w-full max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
         <h2 className="font-semibold" style={{ color: "var(--navy-900)", fontSize: "1.375rem" }}>
           How It Works
         </h2>
