@@ -6,7 +6,7 @@
 #
 # Per dataset (all optional; blank = not set):
 #   category      CAT-1 | CAT-2 | CAT-3 | CAT-4
-#   owner, frequency, timeline, api_available (Y/N), description
+#   owner, steward, frequency, timeline, api_available (Y/N), description
 # Per table:
 #   source        storage:<key> of the department's file (required)
 #   format        postgres_ddl (default) | csv
@@ -22,12 +22,13 @@ departments:
     name: Public Works Department
     datasets:
       vishwakarma:
-        category:
+        category: CAT-3
         owner:
+        steward:
         frequency:
         timeline:
         api_available:
-        description:
+        description: "Works managed by the Public Works Department under the Vishwakarma scheme: road and bridge works with their costs, year-wise funds, tenders, agreements, contractors, progress and locations."
         tables:
           vishwakarma_T:
             source: storage:inputs/pwd/vishwakarma/pwd_vishwakarma_full_raw_columns.txt

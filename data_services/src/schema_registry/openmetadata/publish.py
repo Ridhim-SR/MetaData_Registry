@@ -257,9 +257,32 @@ def _ensure_service(client: OpenMetadata, service_name: str, display_name: str =
 _CUSTOM_PROPERTY_NAMES = {
     "api_available": "apiAvailable",
     "owner": "datasetOwner",
+    "steward": "datasetSteward",
     "frequency": "frequency",
     "timeline": "timeline",
 }
+
+
+# One JSON string on each Table (a Custom Property, created by
+# setup_custom_properties.py) with what the curated schema holds that has no
+# place in OpenMetadata's own fields -- kept in case it's wanted later.
+EXTRA_METADATA_PROPERTY = "extraMetadata"
+_PUBLISHED_ELSEWHERE = {"table_id", "name", "business_description", "tag", "classification", "glossary_term",
+                        "ingestion_timestamp"}
+
+
+def _extra_metadata_json(curated_columns: list[dict], curated_path: str) -> str:
+    """Every curated column field that isn't shown elsewhere in OpenMetadata,
+    blanks left out, as one compact JSON string (same input -> same string,
+    so a re-publish with nothing new changes nothing)."""
+
+    columns = []
+    for row in curated_columns:
+        extra = {k: v for k, v in row.items() if k not in _PUBLISHED_ELSEWHERE and v not in ("", None)}
+        columns.append({"name": row["name"], **extra})
+    snapshot = curated_columns[0].get("ingestion_timestamp", "") if curated_columns else ""
+    return json.dumps({"curated_file": curated_path, "snapshot": snapshot, "columns": columns},
+                      separators=(",", ":"), sort_keys=True)
 
 
 def _ensure_database(
@@ -522,6 +545,7 @@ def publish_table(
         custom_properties={
             "api_available": dataset_row.get("api_available", ""),
             "owner": dataset_row.get("owner", ""),
+            "steward": dataset_row.get("steward", ""),
             "frequency": dataset_row.get("frequency", ""),
             "timeline": dataset_row.get("timeline", ""),
         },
@@ -542,6 +566,9 @@ def publish_table(
             columns=columns,
         ),
     )
+    _replace_entity_fields(client, "/tables", _unwrap(table.id),
+                           {"extension": {EXTRA_METADATA_PROPERTY: _extra_metadata_json(curated_columns, curated_path)}},
+                           op="add")
     _replace_column_tags(client, table, columns)
 
     logger.info(f"Published {table_id} -> {_fqn(table)} ({len(curated_columns)} column(s)) from {curated_path}")

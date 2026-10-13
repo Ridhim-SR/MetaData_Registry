@@ -16,6 +16,7 @@ departments:
       vishwakarma:
         category: CAT-3
         owner: PWD IT Cell
+        steward: PWD Data Cell
         tables:
           works:
             source: storage:inputs/pwd/works.txt
@@ -75,6 +76,7 @@ def test_first_sync_fills_storage_and_openmetadata_from_nothing(storage):
     assert _published_tables(client) == ["tenders", "works"]
     row = lookups.get_dataset(storage, "pwd.vishwakarma")
     assert (row["category"], row["owner"]) == ("CAT-3", "PWD IT Cell")
+    assert row["steward"] == "PWD Data Cell"
 
 
 def test_second_sync_changes_nothing_in_storage_but_still_publishes(storage):

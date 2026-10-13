@@ -188,6 +188,7 @@ def test_publish_table_clears_stale_category_and_description_on_republish(tmp_pa
         source_format="postgres_ddl",
         category="CAT-2",
         owner="Someone",
+        steward="A Steward",
     )
     client = _fake_client()
     publish_table(client, storage, "pwd.vishwakarma.t1")
@@ -204,6 +205,7 @@ def test_publish_table_clears_stale_category_and_description_on_republish(tmp_pa
     assert patch_body["/extension"] == {
         "apiAvailable": "",
         "datasetOwner": "Someone",
+        "datasetSteward": "A Steward",
         "frequency": "",
         "timeline": "",
     }
@@ -219,12 +221,13 @@ def test_publish_table_clears_stale_category_and_description_on_republish(tmp_pa
         if row["dataset_id"] == "pwd.vishwakarma":
             row["category"] = ""
             row["owner"] = ""
+            row["steward"] = ""
     storage.write_csv(lookups.DATASETS_PATH, rows)
     publish_table(client, storage, "pwd.vishwakarma.t1")
 
     patch_body = _last_patch_body(client, "/databases/")
     assert patch_body["/tags"] == []
-    assert patch_body["/extension"] == {"apiAvailable": "", "datasetOwner": "", "frequency": "", "timeline": ""}
+    assert patch_body["/extension"] == {"apiAvailable": "", "datasetOwner": "", "datasetSteward": "", "frequency": "", "timeline": ""}
 
 
 def test_publish_table_reuses_existing_entities_instead_of_recreating(tmp_path):
@@ -553,3 +556,20 @@ def test_existing_service_with_the_right_display_name_is_left_alone(tmp_path):
     publish_table(client, storage, "pwd.vishwakarma.tbd_confirm_with_pwd")
 
     assert not [c for c in client.client.patch.call_args_list if "databaseServices" in c.kwargs["path"]]
+
+
+def test_publish_table_stores_unpublished_column_details_as_json_property(tmp_path):
+    storage = _ingested_storage(tmp_path)
+    client = _fake_client()
+
+    publish_table(client, storage, "pwd.vishwakarma.tbd_confirm_with_pwd")
+
+    call = next(c for c in client.client.patch.call_args_list
+                if c.kwargs["path"].startswith("/tables/") and "/extension" in c.kwargs["data"])
+    ops = json.loads(call.kwargs["data"])
+    assert [o["path"] for o in ops] == ["/extension"]
+    extra = json.loads(ops[0]["value"]["extraMetadata"])
+    assert extra["curated_file"].startswith("department/pwd/vishwakarma/")
+    assert [c["name"] for c in extra["columns"]] == ["sno", "firm_name", "total_cost"]
+    sno = extra["columns"][0]
+    assert sno["data_type"] == "integer" and "business_description" not in sno and "tag" not in sno
