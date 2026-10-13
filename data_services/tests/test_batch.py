@@ -180,7 +180,13 @@ def test_manifest_row_can_set_the_dataset_level_fields(tmp_path):
 
 def _run_cli(tmp_path, manifest) -> "subprocess.CompletedProcess":
     env = {**os.environ, "MANIFEST_FILE": str(manifest), "STORAGE_ROOT": str(tmp_path / "storage")}
-    env.pop("OPENMETADATA_JWT_TOKEN", None)  # storage-only run
+    # Storage-only run. Popping the token is NOT enough: load_env() re-reads
+    # it from .env, so the CLI would build a real client and this test would
+    # publish `pwd.vishwakarma.t1` into whatever local OpenMetadata is up
+    # (it did -- a stray `pwd` service kept reappearing after every suite
+    # run). An empty value survives load_env()'s setdefault and keeps the
+    # client None.
+    env["OPENMETADATA_JWT_TOKEN"] = ""
     return subprocess.run(
         [sys.executable, "-m", "src.schema_registry.batch"],
         cwd=Path(__file__).resolve().parents[1],
