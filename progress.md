@@ -946,6 +946,63 @@ imports it), run the full suites (data_services + apps/api), then
 services / 13 tables. Steward should then flow catalog → pipeline →
 datasets.csv → the `datasetSteward` custom property end to end.
 
+### Column descriptions + MDSF CAT for agri_dept (2026-10-14, done)
+
+Delivered the 270 missing agri column descriptions, per-table metadata
+files, and a dataset-level CAT-x classification per MDSF s5.1.
+
+**What landed**
+- `configs/field_dictionaries/<table>_metadata.csv` -- 8 new files
+  (`name,business_description,tag`), one per distribution/scheme table:
+  crop_sales 53, current_booking 55, current_booking_farmer_details 19,
+  online_booking 13, online_booking_details 19, target_allocation_v2 22,
+  financial_budget_allocation 18, grant_wise_bill_generation 36.
+  Each is wired in `catalog.yaml` via `metadata: storage:inputs/agri_dept/...`.
+- `farmer_registration_field_dictionary.csv` -- +35 rows appended (53
+  total). The 18 department-answered rows are untouched byte for byte
+  (only the missing final newline was added; without it the append
+  glued onto `block_id`'s line and produced a 52-row file).
+- `catalog.yaml` -- `category:` CAT-3 / CAT-3 / CAT-3 / CAT-1 and a
+  dataset `description:` for each of the 4 datasets. MGNREGA is CAT-1
+  (aggregated, no PII); the other three are CAT-3 (direct identifiers).
+- `samples/cat_definitions.txt` -- the MeitY s5.1 text verbatim,
+  force-added (`samples/` is gitignored); `_CAT_DESCRIPTIONS` in
+  `publish.py` was rewritten to match it, CAT-4 = "Non-Shareable".
+- `ai_metadata.py` -- replaced with the reviewed version; `DIRECT_ID`'s
+  `ration` anchored to `(^|_)ration` (was matching `migration_status`).
+  `Sensitive` added to `curate.KNOWN_TAGS` -- the pasted code emits it
+  and `validate_tag("Sensitive")` was False, which would have failed at
+  ingest. Auto-tagger switched off: only the `curate_schema()` fallback
+  is commented out; `AUTO_TAG_RULES`/`auto_tag()` stay because
+  `KNOWN_TAGS` derives from them. `--reclassify` now pops only
+  `classification`, never `tag`.
+
+**Result (verified against live OpenMetadata 2.0.2)**
+- **372/372 columns described, 0 blank** (was 270 blank).
+- **4/4 datasets carry `DataSensitivity.CAT-x`** and a description.
+- **116 FieldTag labels** (was 59; 57 added, **0 removed, 0 overwritten**
+  -- the department's answers are never overridden by the rules).
+- **372/372 columns carry an MDSF level.** Tag values: Financial 39,
+  PII 31, Date/Timestamp 27, Status/Workflow 14, Sensitive 5.
+- Tests: data_services **478 passed**, apps/api **47 passed**.
+
+**Gotcha for whoever verifies column tags next.** On this OM build
+`GET /v1/tables/name/<fqn>?fields=tags` returns `tags: []` for *every*
+column even though the labels are stored and indexed correctly -- do not
+read that as data loss. The REST API's own log confirms it
+(`storeUpdate: versionChanged=true, entityChanged=true ... Successfully
+updated entity in ElasticSearch`), and the Elasticsearch
+`table_search_index` shows the real values. Verify with
+`/v1/search/query?index=table_search_index`, not the entity GET. Dataset
+level is fine through GET (`fields=tags`).
+
+**Known issue, not caused by this work.** `sync` exits 1 at the very end:
+`Backup to 'sda-local-backup' failed (InvalidAccessKeyId)`. The data is
+saved in `sda-local`; the backup bucket's key is invalid/absent in
+`.env` (`LOCAL_WASABI_BACKUP_BUCKET`). No sync log before today mentions
+"backup" at all, so this path had never succeeded locally. Fix by
+creating the backup bucket and a key for it, or blank the variable.
+
 ### Future Work
 - [x] **FIRST TASK (2026-10-14): `git pull`, merge `origin/main` locally,
       then raise the PR `department/agriculture_department` -> `main`**

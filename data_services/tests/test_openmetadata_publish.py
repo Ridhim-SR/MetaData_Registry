@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -29,8 +30,23 @@ def _ingested_storage(tmp_path):
         source_file=_write_ddl(tmp_path),
         storage=storage,
         source_format="postgres_ddl",
+        # curate_schema() no longer tags from the column name, so the two
+        # tags every publish test below asserts on have to arrive the way a
+        # department's do: through the metadata file.
+        business_metadata_file=_write_tag_csv(tmp_path),
     )
     return storage
+
+
+def _write_tag_csv(tmp_path) -> str:
+    path = tmp_path / "tags.csv"
+    path.write_text(
+        "name,tag\n"
+        "firm_name,Firm/Contractor-Identifier\n"
+        "total_cost,Financial\n",
+        encoding="utf-8",
+    )
+    return str(path)
 
 
 def _write_ddl(tmp_path) -> str:
@@ -95,10 +111,10 @@ def test_publish_table_builds_full_entity_chain(tmp_path):
 
     created = [call.args[0] for call in client.create_or_update.call_args_list]
 
-    # FieldTag (with firm_name/total_cost's auto-tags) and the MDSF
-    # classification (with all 7 level tags) are ensured before the table
-    # request, so every tagFQN the columns reference resolves against a
-    # real tag.
+    # FieldTag (with the tags the metadata file supplies for firm_name and
+    # total_cost) and the MDSF classification (with all 7 level tags) are
+    # ensured before the table request, so every tagFQN the columns
+    # reference resolves against a real tag.
     classification_requests = [r for r in created if type(r).__name__ == "CreateClassificationRequest"]
     assert [_unwrap(r.name) for r in classification_requests] == ["FieldTag", "MDSF"]
     tag_requests = [r for r in created if type(r).__name__ == "CreateTagRequest"]
@@ -220,6 +236,7 @@ def test_publish_table_clears_stale_category_and_description_on_republish(tmp_pa
         source_file=_write_ddl(tmp_path),
         storage=storage,
         source_format="postgres_ddl",
+        business_metadata_file=_write_tag_csv(tmp_path),
         category="CAT-3",
         owner="Someone",
         steward="A Steward",
@@ -264,8 +281,8 @@ def test_publish_table_clears_stale_category_and_description_on_republish(tmp_pa
     assert patch_body["/extension"] == {"apiAvailable": "", "datasetOwner": "", "datasetSteward": "", "frequency": "", "timeline": ""}
 
     # the PUT carries only the non-MDSF tags; the curated MDSF
-    # classifications (plus each column's auto-tag where AUTO_TAG_RULES
-    # matched) land in the JSON-Patch that follows the PUT
+    # classifications (plus the tags submitted in the metadata file) land in
+    # the JSON-Patch that follows the PUT
     table_request = client.create_or_update.call_args_list[-1].args[0]
     assert [
         [str(_unwrap(t.tagFQN)) for t in (c.tags or [])]
@@ -401,7 +418,79 @@ def test_all_cat_levels_have_a_published_description():
     from src.schema_registry.openmetadata.publish import _CAT_DESCRIPTIONS
 
     assert set(_CAT_DESCRIPTIONS) == set(CATEGORY_LEVELS)
-    assert "No Sharing" in _CAT_DESCRIPTIONS["CAT-4"]
+    assert "Non-Shareable" in _CAT_DESCRIPTIONS["CAT-4"]
+    # MeitY draft, 31 Aug 2026, section 5.1 -- definition, examples and the
+    # access rule all travel with the tag, not just the level's name.
+    for level, text in _CAT_DESCRIPTIONS.items():
+        assert "Examples:" in text and "Access:" in text, level
+
+
+def test_cat_definitions_file_matches_the_vocabulary_publish_writes():
+    """samples/cat_definitions.txt is what ai_metadata feeds the model to
+    pick a `category`; publish.py's tag descriptions are what the reader
+    sees afterwards. The two must name the same four levels, or the draft
+    and the published label drift apart."""
+
+    from src.schema_registry.curate import CATEGORY_LEVELS
+    from src.schema_registry.openmetadata.publish import _CAT_DESCRIPTIONS
+
+    text = (Path(__file__).resolve().parents[1] / "samples" / "cat_definitions.txt").read_text(
+        encoding="utf-8"
+    )
+    for level in CATEGORY_LEVELS:
+        assert level in text
+        assert _CAT_DESCRIPTIONS[level].split(" -- ")[0] in text
+
+
+def test_ai_metadata_can_emit_every_tag_the_pipeline_accepts():
+    """ai_metadata.apply_rules() writes PII / Sensitive straight into the
+    metadata file, so anything it can emit has to be in curate's vocabulary
+    -- otherwise the file passes review and then dies at ingest with
+    "unknown tag 'Sensitive'". This is the same drift the
+    test_all_cat_levels_have_a_published_description guards, on the tag axis.
+    """
+
+    from src.schema_registry import ai_metadata
+    from src.schema_registry.curate import validate_tag
+
+    for tag in ai_metadata.KNOWN_TAGS:
+        assert validate_tag(tag), tag
+
+
+def test_ai_metadata_category_never_drops_below_what_the_data_allows():
+    """Any PII or Sensitive column floors the table at CAT-3, and a model
+    suggestion can only raise it, never lower it."""
+
+    from src.schema_registry import ai_metadata
+
+    pii = [{"name": "farmer_name", "tag": "PII"}]
+    plain = [{"name": "district_name", "tag": ""}]
+
+    assert ai_metadata.category_floor(pii, "CAT-1") == "CAT-3"
+    assert ai_metadata.category_floor(pii, "CAT-4") == "CAT-4"
+    assert ai_metadata.category_floor(plain, "CAT-2") == "CAT-2"
+    assert ai_metadata.category_floor(plain, None) == "CAT-1"
+    assert ai_metadata.category_floor(plain, "CAT-9") == "CAT-1"
+
+
+def test_apply_rules_overrides_the_model_and_covers_skipped_fields():
+    from src.schema_registry import ai_metadata
+
+    columns = [{"name": "farmer_name"}, {"name": "caste"}, {"name": "mobile_verified"},
+               {"name": "status"}, {"name": "district_name"}]
+    drafted = [{"name": "farmer_name", "business_description": "Name", "tag": "Financial"},
+               {"name": "status", "business_description": "State", "tag": "Status/Workflow"}]
+
+    out, changed = ai_metadata.apply_rules(columns, drafted)
+    by_name = {d["name"]: d for d in out}
+
+    assert by_name["farmer_name"]["tag"] == "PII"          # PII wins over Financial
+    assert by_name["caste"]["tag"] == "Sensitive"          # skipped field still covered
+    assert by_name["mobile_verified"]["tag"] == ""         # a flag, not the number
+    assert by_name["district_name"]["tag"] == ""           # no rule, left to auto-tag
+    assert by_name["status"]["tag"] == "Status/Workflow"   # untouched
+    assert by_name["caste"]["business_description"] == ""  # no description invented
+    assert any(line.startswith("farmer_name:") for line in changed)
 
 
 def test_publish_rejects_an_unknown_category_written_before_validation(tmp_path):

@@ -1,0 +1,19 @@
+name,business_description,tag
+id,Unique row identifier for this budget allocation.,
+created_at,Timestamp when the record was created.,
+created_by,User who created the record.,
+modified_at,Timestamp when the record was last modified.,
+modified_by,User who last modified the record.,
+status,Lifecycle status of the allocation.,Status/Workflow
+allocation_type,Type of budget allocation recorded.,Financial
+assign_by,Identifier of the officer who assigned the allocation.,
+assign_to,Identifier of the officer the allocation was assigned to.,
+project_budget_amount,Budget allocated to the project.,
+project_remaining_amount,Budget remaining unspent against the project.,
+recent_received_sanction_amount,Sanction amount received most recently.,
+total_cumulative_sanction_amount,Total sanction amount accumulated to date.,
+departmental_scheme_id,Identifier of the departmental scheme the budget belongs to.,
+financial_year_id,Identifier of the financial year the allocation belongs to.,
+office_type_id,Type of office the allocation was made to.,
+parent_id,Identifier of the parent record in the allocation hierarchy.,
+umbrella_scheme_id,Identifier of the umbrella scheme the allocation rolls up into.,

@@ -384,12 +384,20 @@ def run(
 
             business_metadata = _business_metadata_from_rows(previous_curated) if previous_curated else {}
             if reclassify:
-                # Drop the stored auto-derived answers before the merge, so
-                # the current rules re-derive them; anything this run's
-                # submitted metadata file answers is put back by the merge.
+                # Drop the stored rule-derived *classification* before the
+                # merge, so the current AUTO_CLASSIFICATION_RULES re-derive
+                # it; anything this run's submitted metadata file answers is
+                # put back by the merge.
+                #
+                # `tag` is deliberately NOT popped any more. Auto-tagging
+                # was switched off in curate_schema(), so there is no rule
+                # left to restore it with: popping it would silently delete
+                # every reviewed tag on the next `sync --reclassify`, and
+                # because publish JSON-Patches each column's tags those
+                # labels would then disappear from OpenMetadata too. A tag
+                # now changes only by submitting a file that says so.
                 for meta in business_metadata.values():
                     meta.pop("classification", None)
-                    meta.pop("tag", None)
             business_metadata = _merge_business_metadata(business_metadata, submitted_metadata)
 
             curated_columns = curate_schema(raw_columns, business_metadata)

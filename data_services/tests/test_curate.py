@@ -9,26 +9,38 @@ def _col(name, data_type="integer", **overrides):
     return col
 
 
-def test_auto_tags_financial_field():
-    curated = curate_schema([_col("total_cost", "double precision")])
-    assert curated[0]["tag"] == "Financial"
+def test_curate_schema_no_longer_tags_from_the_column_name():
+    """Auto-tagging is switched off: a tag is a reviewed decision, not a
+    guess at the column name, so a column the submitted metadata does not
+    answer stays blank. Nothing is derived behind the reviewer's back."""
+
+    curated = curate_schema(
+        [
+            _col("total_cost", "double precision"),
+            _col("firm_pannumber", "character varying"),
+            _col("lat", "double precision"),
+            _col("demand_status"),
+            _col("tender_date", "date"),
+        ]
+    )
+    assert [row["tag"] for row in curated] == ["", "", "", "", ""]
 
 
-def test_auto_tags_firm_identifier():
-    curated = curate_schema([_col("firm_pannumber", "character varying")])
-    assert curated[0]["tag"] == "Firm/Contractor-Identifier"
+def test_auto_tag_rules_still_cover_their_original_cases():
+    """Only curate_schema()'s *use* of AUTO_TAG_RULES is off -- the rules
+    themselves stay, because KNOWN_TAGS is derived from them (so every tag
+    already published still validates) and ai_metadata drafts against the
+    same list."""
 
+    from src.schema_registry.curate import auto_tag
 
-def test_auto_tags_geospatial():
-    curated = curate_schema([_col("lat", "double precision"), _col("longs", "double precision")])
-    assert curated[0]["tag"] == "Geospatial"
-    assert curated[1]["tag"] == "Geospatial"
-
-
-def test_auto_tags_status_and_date():
-    curated = curate_schema([_col("demand_status"), _col("tender_date", "date")])
-    assert curated[0]["tag"] == "Status/Workflow"
-    assert curated[1]["tag"] == "Date/Timestamp"
+    assert auto_tag("total_cost") == "Financial"
+    assert auto_tag("firm_pannumber") == "Firm/Contractor-Identifier"
+    assert auto_tag("lat") == "Geospatial"
+    assert auto_tag("longs") == "Geospatial"
+    assert auto_tag("demand_status") == "Status/Workflow"
+    assert auto_tag("tender_date") == "Date/Timestamp"
+    assert auto_tag("comment") is None
 
 
 def test_untagged_field_gets_empty_string_not_none():
@@ -36,7 +48,7 @@ def test_untagged_field_gets_empty_string_not_none():
     assert curated[0]["tag"] == ""
 
 
-def test_business_metadata_overrides_auto_tag():
+def test_submitted_tag_is_taken_as_written():
     business_metadata = {
         "total_cost": {
             "business_description": "Total sanctioned project cost",

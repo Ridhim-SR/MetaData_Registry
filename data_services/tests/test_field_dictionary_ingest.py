@@ -218,8 +218,8 @@ def _write_dictionary_with_personal(tmp_path, rows):
 def test_personal_data_column_is_classified_but_not_tagged_by_ingest(tmp_path):
     """The ingest step writes only name + business_description: the file's
     `Personal Data (Y/N)` answer must not land as a column tag. Classification
-    still comes from curate.py's own PII rules, and the tag from its auto-tag
-    rules (which have no rule for an aadhaar number)."""
+    still comes from curate.py's own PII rules; the tag stays blank, because
+    auto-tagging from the column name is switched off."""
 
     storage = LocalObjectStorage(tmp_path / "storage")
     lookups.register_department(storage, "welfare", "Social Welfare Department")
@@ -234,7 +234,13 @@ def test_personal_data_column_is_classified_but_not_tagged_by_ingest(tmp_path):
     assert results["t1"]["columns"][0]["classification"] == "PII"
 
 
-def test_personal_data_no_leaves_auto_tagging_in_charge(tmp_path):
+def test_personal_data_no_leaves_the_tag_blank(tmp_path):
+    """Personal Data = N used to hand the column to the auto-tagger, which
+    tagged tender_cost Financial from its name. Auto-tagging is switched off,
+    so an answer the department did not give is simply blank -- while
+    `classification` is still derived by the MDSF rules, so the column is
+    never left unclassified."""
+
     storage = LocalObjectStorage(tmp_path / "storage")
     lookups.register_department(storage, "welfare", "Social Welfare Department")
     source = _write_dictionary_with_personal(
@@ -244,7 +250,8 @@ def test_personal_data_no_leaves_auto_tagging_in_charge(tmp_path):
 
     results = run_field_dictionary(department="welfare", dataset="cmsvy", source_file=source, storage=storage)
 
-    assert results["t1"]["columns"][0]["tag"] == "Financial"
+    assert results["t1"]["columns"][0]["tag"] == ""
+    assert results["t1"]["columns"][0]["classification"] == "Financial"
 
 
 def test_unrecognised_format_row_is_still_ingested(tmp_path):

@@ -93,11 +93,14 @@ AUTO_TAG_RULES: list[tuple[str, re.Pattern]] = [
 ]
 
 # The controlled vocabulary for a column's `tag`: everything AUTO_TAG_RULES
-# can assign, plus the values real Field Dictionaries already use (PII).
-# Anything outside it is a typo or an invented value, and publishing it would
-# silently create a brand-new tag under the FieldTag Classification in
-# OpenMetadata -- which is how "cat3" ended up as a tag next to CAT-3.
-KNOWN_TAGS = sorted({tag for tag, _ in AUTO_TAG_RULES} | {"PII"})
+# can assign, plus the values real Field Dictionaries already use (PII) and
+# the MDSF s5.1 sensitive attributes ai_metadata's apply_rules() writes
+# (Sensitive). Anything outside it is a typo or an invented value, and
+# publishing it would silently create a brand-new tag under the FieldTag
+# Classification in OpenMetadata -- which is how "cat3" ended up as a tag
+# next to CAT-3. ai_metadata.KNOWN_TAGS must stay a subset of this set or
+# a drafted file fails at ingest rather than at review.
+KNOWN_TAGS = sorted({tag for tag, _ in AUTO_TAG_RULES} | {"PII", "Sensitive"})
 
 # MDSF dataset-level categories (the axis curate_schema()'s per-column
 # `classification` is NOT part of -- this one is per dataset, see
@@ -198,9 +201,14 @@ def curate_schema(
     """Standardize raw columns (already checked by validate_schema), merging
     in business metadata (business description / tag / glossary term / active
     / classification) keyed by field name where it's available. Fields without
-    an answer yet are left blank rather than guessed, except `tag`, which
-    falls back to a rule-based auto-tag so sensitive fields are never left
-    unclassified.
+    an answer yet are left blank rather than guessed -- including `tag`, which
+    used to fall back to a rule-based auto-tag; that fallback is switched off
+    (see the tag line below), so a tag now only ever comes from a submitted
+    Field Dictionary / ai_metadata draft.
+
+    `classification` is unaffected: every column is still classified by
+    AUTO_CLASSIFICATION_RULES (defaulting to "Internal"), so the MDSF
+    per-field compliance story does not depend on anyone having answered.
 
     MDSF Compliance: Classification is done PER FIELD based on potential risk
     of disclosure, re-identification, or misuse -- not per dataset.
@@ -236,7 +244,23 @@ def curate_schema(
         # which falls back to auto-classification, these would otherwise be
         # created as-is in OpenMetadata (a made-up tag, or a glossary term
         # whose "." breaks its own FQN).
-        tag = meta.get("tag") or auto_tag(name) or ""
+        #
+        # AUTO-TAGGING IS SWITCHED OFF. A tag used to be guessed from the
+        # column name when the submitted metadata did not carry one; that
+        # made the same column's tag depend on who ran the ingest last, and
+        # put labels a reviewer never saw onto published tables. `tag` is
+        # now whatever the submitted metadata says and nothing else:
+        #   * a blank cell still means "not answered", so _merge's
+        #     carry-forward keeps the table's existing tag -- nothing is
+        #     silently stripped from OpenMetadata by re-ingesting;
+        #   * AUTO_TAG_RULES itself stays, because KNOWN_TAGS is built from
+        #     it (tags already published still have to validate) and because
+        #     ai_metadata drafts against it. Turning off the *fallback*
+        #     needs no change to the vocabulary;
+        #   * `classification` keeps auto_classify, so every column remains
+        #     MDSF-classified even with no submitted metadata.
+        # tag = meta.get("tag") or auto_tag(name) or ""
+        tag = meta.get("tag") or ""
         if tag and not validate_tag(tag):
             raise ValueError(
                 f"{name}: unknown tag {tag!r} -- allowed tags are "

@@ -1,0 +1,20 @@
+name,business_description,tag
+id,Unique row identifier for this online booking detail.,
+created_at,Timestamp when the record was created.,
+created_by,User who created the record.,
+modified_at,Timestamp when the record was last modified.,
+modified_by,User who last modified the record.,
+status,Lifecycle status of the detail row.,Status/Workflow
+booking_amount,Amount booked on this online booking.,
+booking_amount_required,Whether a booking amount must be paid for this item.,
+maxno_booking_allowed,Maximum number of bookings allowed for this item.,
+repurchase_threshold,Stock level at which repurchase of the item is triggered.,
+restrict_maxno_booking,Whether the maximum number of bookings is restricted.,
+total_non_crop_distributed,Total quantity of non-crop items distributed.,
+upload_document,Reference to the document uploaded with the booking.,
+crop_noncrop_name_id,Identifier of the crop or non-crop item in the booking.,
+online_booking_id,Reference to the online booking this detail row belongs to.,
+sub_assistance_id,Identifier of the subsidy assistance component linked to the item.,
+grant_id,Identifier of the grant linked to this booking.,Financial
+total_booking_allowed,Total number of bookings allowed for this item.,
+document_upload_validity,"Validity period of the uploaded document, in days.",

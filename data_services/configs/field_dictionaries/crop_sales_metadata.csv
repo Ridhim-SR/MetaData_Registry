@@ -1,0 +1,54 @@
+name,business_description,tag
+id,Unique row identifier for this crop sale record.,
+status,"Lifecycle status of the record (open, closed or cancelled).",Status/Workflow
+block_code,Administrative block code where the sale was recorded.,
+central_subsidy,Central government subsidy amount on this sale.,Financial
+crop_id,Identifier of the crop that was sold.,
+cumulative_sale,Running total held against this record; whether it measures quantity or value is not stated by the field name.,
+device_id,Identifier of the device used to enter the record.,
+device_user_name,User name of the person who entered the record on the device.,
+dist_code,District code of the location where the sale was recorded.,
+distribution_type,Type of distribution route used for this crop sale.,
+farmer_share,Share of the sale amount payable to the farmer.,Financial
+mausam_id,Season reference taken from the Mausam source system; the exact meaning is not stated by the field name.,
+prajati_id,Reference to the prajati (crop variety or class); the exact meaning is not stated by the field name.,
+quantity,Quantity of crop sold under this record.,
+receipt_no,Receipt number issued for the sale.,
+registration_id,Registration reference linked to this sale record.,
+sales_date,Date on which the sale was recorded.,
+sell_price,Price at which the crop was sold.,
+state_subsidy,State government subsidy amount on this sale.,Financial
+store_id,Identifier of the store or centre holding the stock.,
+trans_mode,Mode of transport used for the transaction.,
+transaction_no,Transaction number of the sale.,Financial
+transaction_type,Type of transaction recorded for the sale.,Financial
+year_id,Financial or crop year this sale belongs to.,
+consume_land,Land area recorded as consumed for this crop; the unit is not stated by the field name.,
+remaining_land,Land area recorded as remaining for this crop; the unit is not stated by the field name.,
+total_land,Total land area recorded for this crop; the unit is not stated by the field name.,
+batch_number,Batch number of the stock issued or sold.,
+caste_id,Caste category reference of the beneficiary.,Sensitive
+bill_number,Number of the bill raised for this sale.,Financial
+master_store_id,Identifier of the parent or master store.,
+departmental_scheme_id,Identifier of the departmental scheme funding this sale.,
+departmental_scheme_name,Name of the departmental scheme funding this sale.,
+agency_id,Identifier of the agency that executed the sale or distribution.,
+subsidy_from_top_up_project,Subsidy received from the top-up project on this sale.,Financial
+top_up_scheme_id,Identifier of the top-up scheme applied to this sale.,
+top_up_scheme_name,Name of the top-up scheme applied to this sale.,
+top_up_max_subsidy_amount,Maximum subsidy amount allowed under the top-up scheme.,
+top_up_max_subsidy_percentage,Maximum subsidy percentage allowed under the top-up scheme.,Financial
+bill_type,Type of bill raised for this sale.,
+store_type,Type of store or centre the stock belongs to.,
+cafeteria_id,Identifier of the cafeteria associated with the sale.,
+bill_upload,Reference to the bill document uploaded for this sale.,
+change_mainschemeid,Identifier of the main scheme after a scheme change; the field name appears to be missing an underscore.,
+unit_name,Name of the unit or centre the sale is recorded against.,
+unit_id,Identifier of the unit or centre the sale is recorded against.,
+updated_departmental_scheme_id,Updated identifier of the departmental scheme after a correction.,
+updated_departmental_scheme_name,Updated name of the departmental scheme after a correction.,
+updated_top_up_scheme_id,Updated identifier of the top-up scheme after a correction.,
+updated_top_up_scheme_name,Updated name of the top-up scheme after a correction.,
+modified_by,User who last modified the record.,
+modified_at,Timestamp when the record was last modified.,
+previous_central_subsidy,Central subsidy amount applied before the current revision.,Financial

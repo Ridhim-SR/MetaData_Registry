@@ -1,0 +1,28 @@
+Data classification categories
+(Model Data Sharing Framework, MeitY draft, 31 Aug 2026, section 5.1)
+
+CAT-1  Open Access
+  Definition: Fully anonymised, aggregated, or non-personal data. No risk of re-identification.
+  Examples: Aggregate statistics, counts, district-level summaries, reference data.
+  Access: Open, no login required.
+
+CAT-2  Registered Access
+  Definition: De-identified data useful to researchers, start-ups, and civil society. Individual identity not exposed.
+  Examples: Anonymised scheme data, de-identified health datasets, economic statistics.
+  Access: Login / KYC and a purpose declaration.
+
+CAT-3  Restricted Access
+  Definition: Personal or sensitive data at individual or entity level. Shared only with DPDPA-compliant consent or a specific legal mandate.
+  Examples: Vehicle / DL records, Aadhaar-linked records, individual scheme benefits.
+  Access: API-based, purpose-bound, annual renewal.
+
+CAT-4  Non-Shareable
+  Definition: Classified, national-security-sensitive, or legally restricted data.
+  Examples: Intelligence records, Cabinet deliberations, strategic infrastructure data.
+  Access: Not shared externally; internal government network only.
+
+Rules from the framework
+- When in doubt, the higher (more restrictive) category applies.
+- Direct identifiers are: name, Aadhaar, PAN, mobile, email, passport number, voter ID, driving licence number, vehicle registration, account number. A dataset holding them is personal or entity-level data (CAT-3).
+- Quasi-identifiers (date of birth, full address, income, employer name) and sensitive attributes (caste, religion, health condition, disability, criminal record, financial distress, migration status) also raise the risk.
+- A dataset holding sensitive fields may be CAT-3; the same dataset with those fields removed may be CAT-2; aggregated geographic and scheme-level totals may be CAT-1.

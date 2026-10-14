@@ -130,9 +130,11 @@ def _replace_entity_fields(
 
 # Where curate.py's per-column `tag`/`classification`/`glossary_term`
 # values land in OpenMetadata -- one fixed Classification for each of the
-# first two (their values are a small, code-defined vocabulary: AUTO_TAG_RULES
-# and CLASSIFICATION_LEVELS in curate.py), one fixed Glossary for the third
-# (its values are free text from a department's Field Dictionary).
+# first two (their values are a small, code-defined vocabulary: KNOWN_TAGS
+# and CLASSIFICATION_LEVELS in curate.py; KNOWN_TAGS is derived from
+# AUTO_TAG_RULES but the rules no longer assign anything themselves), one
+# fixed Glossary for the third (its values are free text from a department's
+# Field Dictionary).
 _TAG_CLASSIFICATION = "FieldTag"
 _MDSF_CLASSIFICATION = "MDSF"
 _SENSITIVITY_CLASSIFICATION = "DataSensitivity"
@@ -510,20 +512,44 @@ def _unique_in_order(values: Iterable[str]) -> list[str]:
     return list(dict.fromkeys(v for v in values if v))
 
 
-# MDSF (Model Data Sharing Framework) Section 5.1's own category definitions,
-# reused verbatim as the OpenMetadata Tag description so anyone browsing the
-# catalog sees what a CAT-x label actually means without leaving OpenMetadata.
+# MDSF (Model Data Sharing Framework, MeitY draft, 31 Aug 2026) section 5.1's
+# own category definitions, reused as the OpenMetadata Tag description so
+# anyone browsing the catalog sees what a CAT-x label actually means without
+# leaving OpenMetadata. The same text lives in samples/cat_definitions.txt,
+# which is what ai_metadata feeds the model when it drafts a `category` --
+# keep the two in step.
 # Keys are the entire allowed vocabulary for a dataset's `category`
 # (curate.CATEGORY_LEVELS) -- anything else is rejected instead of being
 # published as a new tag next to the real ones.
 _CAT_DESCRIPTIONS = {
-    "CAT-1": "Open Access -- fully anonymised, aggregated or non-personal data. No risk of re-identification.",
-    "CAT-2": "Registered Access -- de-identified data. Individual identity not exposed.",
-    "CAT-3": "Restricted Access -- personal or sensitive data at individual/entity level. "
-    "Shared only with DPDPA-compliant consent or a specific legal mandate.",
-    "CAT-4": "No Sharing -- confidential data that must not leave the owning organisation. "
-    "Not published through any API or external feed.",
+    "CAT-1": "Open Access -- fully anonymised, aggregated, or non-personal data; no risk of "
+             "re-identification. Examples: aggregate statistics, counts, district-level "
+             "summaries, reference data. Access: open, no login required.",
+    "CAT-2": "Registered Access -- de-identified data useful to researchers, start-ups and "
+             "civil society; individual identity not exposed. Examples: anonymised scheme "
+             "data, de-identified health datasets, economic statistics. Access: login / KYC "
+             "and a purpose declaration.",
+    "CAT-3": "Restricted Access -- personal or sensitive data at individual or entity level; "
+             "shared only with DPDPA-compliant consent or a specific legal mandate. Examples: "
+             "vehicle / DL records, Aadhaar-linked records, individual scheme benefits. "
+             "Access: API-based, purpose-bound, annual renewal.",
+    "CAT-4": "Non-Shareable -- classified, national-security-sensitive, or legally restricted "
+             "data. Examples: intelligence records, Cabinet deliberations, strategic "
+             "infrastructure data. Access: not shared externally; internal government "
+             "network only.",
 }
+
+# The framework's decision rules, carried on the classification itself (one
+# description for the whole CAT axis) rather than repeated on every tag.
+_CAT_CLASSIFICATION_DESCRIPTION = (
+    "Model Data Sharing Framework data classification categories (MeitY draft, 31 Aug 2026, "
+    "section 5.1), assigned per dataset in _lookups/datasets.csv: CAT-1 Open Access, "
+    "CAT-2 Registered Access, CAT-3 Restricted Access, CAT-4 Non-Shareable. "
+    "When in doubt, the higher (more restrictive) category applies. Direct identifiers -- "
+    "name, Aadhaar, PAN, mobile, email, passport number, voter ID, driving licence number, "
+    "vehicle registration, account number -- make a dataset personal or entity-level, "
+    "i.e. CAT-3."
+)
 
 
 def _ensure_sensitivity_tag(client: OpenMetadata, category: str) -> None:
@@ -544,9 +570,7 @@ def _ensure_sensitivity_tag(client: OpenMetadata, category: str) -> None:
     _ensure_classification(
         client,
         _SENSITIVITY_CLASSIFICATION,
-        "Model Data Sharing Framework data classification (CAT-1 Open / CAT-2 Registered / "
-        "CAT-3 Restricted / CAT-4 No Sharing), assigned per column by curate_schema() and "
-        "per dataset in _lookups/datasets.csv.",
+        _CAT_CLASSIFICATION_DESCRIPTION,
     )
     _ensure_tag(
         client,
@@ -633,9 +657,21 @@ def _ensure_tags_and_terms(client: OpenMetadata, curated_columns: list[dict]) ->
             raise ValueError(f"Glossary term '{term}' contains '.', which breaks OpenMetadata's FQN.")
 
     if tags:
-        _ensure_classification(client, _TAG_CLASSIFICATION, "Rule-based field categories auto-assigned by curate_schema() (see AUTO_TAG_RULES).")
+        _ensure_classification(
+            client,
+            _TAG_CLASSIFICATION,
+            "Column tags supplied by a department's Field Dictionary or an "
+            "ai_metadata draft and approved at review. curate.py's KNOWN_TAGS "
+            "is the closed list a tag must be in to be published -- tags are no "
+            "longer guessed from the column name at ingest time.",
+        )
         for tag in tags:
-            _ensure_tag(client, _TAG_CLASSIFICATION, tag, f"Columns matching curate.py's AUTO_TAG_RULES pattern for '{tag}'.")
+            _ensure_tag(
+                client,
+                _TAG_CLASSIFICATION,
+                tag,
+                f"Supplied by a reviewed field dictionary or metadata draft for '{tag}'.",
+            )
     if classifications:
         _ensure_mdsf_levels(client)
     if glossary_terms:
