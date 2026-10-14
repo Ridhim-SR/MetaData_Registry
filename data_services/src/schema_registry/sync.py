@@ -144,22 +144,23 @@ def _ingest_dataset(storage: ObjectStorage, dept: DepartmentEntry, ds: DatasetEn
 
 def _tables_to_publish(
     storage: ObjectStorage, departments: list[DepartmentEntry], publish_only: bool, only_department: str | None = None
-) -> list[str]:
-    """table_id for every table to publish."""
+) -> list[tuple[str, bool]]:
+    """(table_id, allow_category_below_columns) for every table to publish."""
 
     registered = storage.read_csv(lookups.TABLES_PATH) if storage.exists(lookups.TABLES_PATH) else []
     if only_department:
         registered = [r for r in registered if r["dataset_id"].split(".")[0] == only_department]
+    flags = {f"{d.id}.{lookups.slugify(ds.name)}": ds.allow_category_below_columns for d in departments for ds in d.datasets}
     if publish_only:  # restore: everything storage knows about
-        return [r["table_id"] for r in registered]
+        return [(r["table_id"], flags.get(r["dataset_id"], False)) for r in registered]
 
-    wanted: list[str] = []
+    wanted: list[tuple[str, bool]] = []
     for dept in departments:
         for ds in dept.datasets:
             ds_id = f"{dept.id}.{lookups.slugify(ds.name)}"
             if ds.field_dictionary:  # its tables are whatever the file contained
-                wanted += [r["table_id"] for r in registered if r["dataset_id"] == ds_id]
-            wanted += [f"{ds_id}.{lookups.slugify(t.name)}" for t in ds.tables]
+                wanted += [(r["table_id"], ds.allow_category_below_columns) for r in registered if r["dataset_id"] == ds_id]
+            wanted += [(f"{ds_id}.{lookups.slugify(t.name)}", ds.allow_category_below_columns) for t in ds.tables]
     return list(dict.fromkeys(wanted))
 
 
@@ -223,7 +224,7 @@ def sync(
                     outcomes[outcome.table_id] = outcome
 
     targets = _tables_to_publish(storage, departments, publish_only, only_department)
-    for table_id in targets:
+    for table_id, allow_category in targets:
         outcome = outcomes.setdefault(table_id, Outcome(table_id))
         if outcome.ingest == "failed":
             outcome.publish = "skipped"
@@ -231,7 +232,7 @@ def sync(
             outcome.publish = "skipped" if client is None else "would publish"
         else:
             try:
-                publish_table(client, storage, table_id)
+                publish_table(client, storage, table_id, allow_category_below_columns=allow_category)
                 outcome.publish = "published"
                 _record_publish(storage, table_id, "published")
             except Exception as exc:  # noqa: BLE001

@@ -216,6 +216,7 @@ def run(
     dataset_description: str = "",
     openmetadata_client: OpenMetadata | None = None,
     allow_column_removal: bool = False,
+    allow_category_below_columns: bool = False,
     operator: str = "",
     reclassify: bool = False,
 ) -> dict:
@@ -272,6 +273,10 @@ def run(
     the last step of this same call, so ingest -> curate -> publish is one
     pipeline run instead of two separate manual steps. Omit it to keep
     this call to storage only.
+
+    `allow_category_below_columns`: passed through to publish_table() --
+    see its check that the dataset's category is at least as high as its
+    most sensitive column's classification.
 
     Re-running for a table that's already been curated before diffs the new
     source against the *previous* curated snapshot instead of blindly
@@ -481,6 +486,7 @@ def run(
                     openmetadata_client,
                     storage,
                     table_id,
+                    allow_category_below_columns=allow_category_below_columns,
                 )
             except Exception as exc:  # noqa: BLE001 -- recorded, then re-raised
                 publish_status = "failed"
@@ -565,6 +571,8 @@ def _main(argv: list[str]) -> int:
         dataset_description=os.environ.get("DATASET_DESCRIPTION", ""),
         openmetadata_client=_client,
         allow_column_removal=os.environ.get("ALLOW_COLUMN_REMOVAL", "").strip().lower() in _TRUE_VALUES,
+        allow_category_below_columns=os.environ.get("ALLOW_CATEGORY_BELOW_COLUMNS", "").strip().lower()
+        in _TRUE_VALUES,
     )
     return 0
 

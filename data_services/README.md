@@ -260,6 +260,7 @@ They come from a metadata file: `add … --metadata <file>`, then `sync`.
 Edit them in `catalog.yaml` → PR → merge → `sync`. No new file or `add` needed.
 - **Deleting a value in `catalog.yaml` clears it** in OpenMetadata. The catalog is the truth.
 - **`category` is optional.** Leave it blank until the governance meeting answers: a blank value just means the Database entity carries no CAT tag. When it is set, only `CAT-1`..`CAT-4` are accepted — an unknown value is rejected rather than published as a new tag.
+- **`category` must be at least as high as the most sensitive column** (e.g. not CAT-1 when a phone-number column is CAT-3), or publishing is refused. Only if those columns are removed before sharing, add `allow_category_below_columns: true` to the dataset.
 
 ### Rules
 

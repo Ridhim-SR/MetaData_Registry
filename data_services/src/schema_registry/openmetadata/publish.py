@@ -552,6 +552,56 @@ _CAT_CLASSIFICATION_DESCRIPTION = (
 )
 
 
+_CATEGORY_RE = re.compile(r"^CAT-(\d+)$", re.IGNORECASE)
+
+
+def _category_level(value: str) -> int | None:
+    match = _CATEGORY_RE.match((value or "").strip())
+    return int(match.group(1)) if match else None
+
+
+def _check_category_covers_columns(table_id: str, category: str, curated_columns: list[dict]) -> None:
+    """MDSF: when a dataset mixes categories, the highest one applies. So a
+    dataset published as CAT-1 (Open) while one of its columns is CAT-3
+    (Restricted) would advertise restricted data as open -- refuse that
+    before anything is written to OpenMetadata.
+
+    A blank dataset category (not confirmed yet) is only warned about, since
+    most datasets are still waiting on their department's answer.
+
+    Only columns whose `classification` is itself a CAT-<n> value take part.
+    curate.CLASSIFICATION_LEVELS' 7-level vocabulary (Public, Internal, ...)
+    is a different axis, published under the MDSF classification, so those
+    columns deliberately don't feed this check."""
+
+    column_levels = {
+        row["name"]: level
+        for row in curated_columns
+        if (level := _category_level(row.get("classification", ""))) is not None
+    }
+    if not column_levels:
+        return
+    highest = max(column_levels.values())
+    highest_columns = sorted(name for name, level in column_levels.items() if level == highest)
+
+    dataset_level = _category_level(category)
+    if dataset_level is None:
+        if category:
+            raise ValueError(f"{table_id}: dataset category '{category}' isn't a CAT-<n> value.")
+        logger.warning(
+            f"{table_id}: dataset has no category yet, but column(s) {', '.join(highest_columns)} "
+            f"are CAT-{highest}. Set the dataset's CATEGORY to at least CAT-{highest}."
+        )
+        return
+    if dataset_level < highest:
+        raise ValueError(
+            f"{table_id}: dataset category is {category} but column(s) {', '.join(highest_columns)} "
+            f"are CAT-{highest}. Under MDSF the highest category applies -- set the dataset's "
+            f"CATEGORY to at least CAT-{highest}, or pass allow_category_below_columns=True if "
+            f"those columns are removed/anonymised before sharing."
+        )
+
+
 def _ensure_sensitivity_tag(client: OpenMetadata, category: str) -> None:
     """Dataset-level `category` (publish_table) -- the MDSF CAT-1..CAT-4
     vocabulary attached to the Database entity. Column levels live in
@@ -689,6 +739,7 @@ def publish_table(
     storage: ObjectStorage,
     table_id: str,
     service_name: str | None = None,
+    allow_category_below_columns: bool = False,
 ) -> dict:
     """Publish one table's latest curated schema snapshot into OpenMetadata
     as a Table entity (Service -> Database -> Schema -> Table -> Columns).
@@ -699,6 +750,10 @@ def publish_table(
     `table_id` is the same hierarchical id used throughout this pipeline
     ("pwd.vishwakarma.<table>"); service defaults to the department so each
     department gets its own OpenMetadata database service.
+
+    Refuses to publish a dataset whose `category` is below its most
+    sensitive column's `classification` (see _check_category_covers_columns)
+    unless `allow_category_below_columns=True`.
 
 """
 
@@ -722,6 +777,13 @@ def publish_table(
     # dataset-level CAT tag. When it is set, _ensure_sensitivity_tag() below
     # refuses a value that isn't in the CAT-1..CAT-4 vocabulary.
     category = dataset_row.get("category", "")
+
+    # Checked before any OpenMetadata call, so a refused publish leaves no
+    # half-updated service/database behind.
+    if allow_category_below_columns:
+        logger.warning(f"{table_id}: dataset-vs-column category check skipped (allow_category_below_columns=True)")
+    else:
+        _check_category_covers_columns(table_id, category, curated_columns)
 
     service = _ensure_service(client, service_name or department_id, lookups.department_name(storage, department_id))
     if category:
