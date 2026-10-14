@@ -289,29 +289,57 @@ def _to_column(row: dict) -> Column:
     return Column(**kwargs)
 
 
+def _is_denied(exc: Exception) -> bool:
+    return getattr(exc, "status_code", None) == 403 or "denied" in str(exc).lower()
+
+
 def _ensure_service(client: OpenMetadata, service_name: str, display_name: str = "") -> DatabaseService:
     """Get or create the department's service. `service_name` (the id, e.g.
     pwd) is what identifies it; `display_name` (the full department name) is
-    only the label people see, and is kept in step with the catalog."""
+    only the label people see. Setting it is best effort: OpenMetadata's
+    ingestion bot is not allowed to edit display names by default, and that
+    must never stop a table from being published -- it's a warning, and the
+    name can be set once in the UI."""
 
     existing = _get_or_none(client, DatabaseService, service_name)
     if existing:
         current = _unwrap(getattr(existing, "displayName", None)) or ""
         if display_name and current != display_name:
-            _replace_entity_fields(client, "/services/databaseServices", _unwrap(existing.id),
-                                   {"displayName": display_name}, op="add")
+            try:
+                _replace_entity_fields(client, "/services/databaseServices", _unwrap(existing.id),
+                                       {"displayName": display_name}, op="add")
+            except Exception as exc:  # noqa: BLE001
+                if not _is_denied(exc):
+                    raise
+                logger.warning(_display_name_denied(service_name, display_name))
         return existing
-    return _create_or_update(
-        client,
-        CreateDatabaseServiceRequest(
-            name=service_name,
-            displayName=display_name or None,
-            serviceType=DatabaseServiceType.CustomDatabase,
-            connection=DatabaseConnection(
-                config=CustomDatabaseConnection(type="CustomDatabase", sourcePythonClass="custom")
+
+    def create(with_display_name: bool):
+        return _create_or_update(
+            client,
+            CreateDatabaseServiceRequest(
+                name=service_name,
+                displayName=(display_name or None) if with_display_name else None,
+                serviceType=DatabaseServiceType.CustomDatabase,
+                connection=DatabaseConnection(
+                    config=CustomDatabaseConnection(type="CustomDatabase", sourcePythonClass="custom")
+                ),
             ),
-        ),
-    )
+        )
+
+    try:
+        return create(with_display_name=True)
+    except Exception as exc:  # noqa: BLE001
+        if not display_name or not _is_denied(exc):
+            raise
+        logger.warning(_display_name_denied(service_name, display_name))
+        return create(with_display_name=False)
+
+
+def _display_name_denied(service_name: str, display_name: str) -> str:
+    return (f"Couldn't set the display name '{display_name}' on service '{service_name}': OpenMetadata's "
+            f"ingestion bot isn't allowed to edit display names. Publishing continues. Set it once in the UI "
+            f"(Settings -> Services -> Databases -> {service_name}), or let the bot edit display names.")
 
 
 # Dataset-level fields (_lookups/datasets.csv) that don't map to a built-in
@@ -320,6 +348,7 @@ def _ensure_service(client: OpenMetadata, service_name: str, display_name: str =
 _CUSTOM_PROPERTY_NAMES = {
     "api_available": "apiAvailable",
     "owner": "datasetOwner",
+    "steward": "datasetSteward",
     "frequency": "frequency",
     "timeline": "timeline",
 }
@@ -361,6 +390,28 @@ def _resolve_owner(client: OpenMetadata, owner: str) -> EntityReference | None:
         f"Create the user/team in OpenMetadata, or fix the owner in _lookups/datasets.csv."
     )
     return None
+
+
+# One JSON string on each Table (a Custom Property, created by
+# setup_custom_properties.py) with what the curated schema holds that has no
+# place in OpenMetadata's own fields -- kept in case it's wanted later.
+EXTRA_METADATA_PROPERTY = "extraMetadata"
+_PUBLISHED_ELSEWHERE = {"table_id", "name", "business_description", "tag", "classification", "glossary_term",
+                        "ingestion_timestamp"}
+
+
+def _extra_metadata_json(curated_columns: list[dict], curated_path: str) -> str:
+    """Every curated column field that isn't shown elsewhere in OpenMetadata,
+    blanks left out, as one compact JSON string (same input -> same string,
+    so a re-publish with nothing new changes nothing)."""
+
+    columns = []
+    for row in curated_columns:
+        extra = {k: v for k, v in row.items() if k not in _PUBLISHED_ELSEWHERE and v not in ("", None)}
+        columns.append({"name": row["name"], **extra})
+    snapshot = curated_columns[0].get("ingestion_timestamp", "") if curated_columns else ""
+    return json.dumps({"curated_file": curated_path, "snapshot": snapshot, "columns": columns},
+                      separators=(",", ":"), sort_keys=True)
 
 
 def _ensure_database(
@@ -648,6 +699,7 @@ def publish_table(
         custom_properties={
             "api_available": dataset_row.get("api_available", ""),
             "owner": dataset_row.get("owner", ""),
+            "steward": dataset_row.get("steward", ""),
             "frequency": dataset_row.get("frequency", ""),
             "timeline": dataset_row.get("timeline", ""),
         },
@@ -669,6 +721,9 @@ def publish_table(
             columns=_columns_for_put(columns),
         ),
     )
+    _replace_entity_fields(client, "/tables", _unwrap(table.id),
+                           {"extension": {EXTRA_METADATA_PROPERTY: _extra_metadata_json(curated_columns, curated_path)}},
+                           op="add")
     _replace_column_tags(client, table, columns)
 
     logger.info(f"Published {table_id} -> {_fqn(table)} ({len(curated_columns)} column(s)) from {curated_path}")

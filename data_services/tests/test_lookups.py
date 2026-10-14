@@ -38,6 +38,7 @@ def test_upsert_dataset_links_to_department(tmp_path):
             "category": "",
             "api_available": "",
             "owner": "",
+            "steward": "",
             "frequency": "",
             "timeline": "",
             "dataset_description": "",

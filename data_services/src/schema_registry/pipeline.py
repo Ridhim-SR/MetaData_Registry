@@ -210,6 +210,7 @@ def run(
     category: str = "",
     api_available: str = "",
     owner: str = "",
+    steward: str = "",
     frequency: str = "",
     timeline: str = "",
     dataset_description: str = "",
@@ -242,7 +243,7 @@ def run(
     department, so departments are a deliberately controlled vocabulary
     rather than auto-created from whatever text a caller passes.
 
-    category/api_available/owner/frequency/timeline/dataset_description are
+    category/api_available/owner/steward/frequency/timeline/dataset_description are
     dataset-level fields (decided in the governance meeting) stored once
     per dataset in `_lookups/datasets.csv`, not repeated per column row --
     `category` (MDSF CAT-1/2/3/4) and `dataset_description` are also pushed
@@ -441,7 +442,7 @@ def run(
 
         lookups.upsert_dataset(
             storage, dataset_id, department_id, dataset,
-            category=category, api_available=api_available, owner=owner,
+            category=category, api_available=api_available, owner=owner, steward=steward,
             frequency=frequency, timeline=timeline, dataset_description=dataset_description,
         )
         lookups.upsert_table(storage, table_id, dataset_id, table_name, schema_name)
@@ -550,6 +551,7 @@ def _main(argv: list[str]) -> int:
         category=os.environ.get("CATEGORY", ""),
         api_available=os.environ.get("API_AVAILABLE", ""),
         owner=os.environ.get("OWNER", ""),
+        steward=os.environ.get("STEWARD", ""),
         frequency=os.environ.get("FREQUENCY", ""),
         timeline=os.environ.get("TIMELINE", ""),
         dataset_description=os.environ.get("DATASET_DESCRIPTION", ""),

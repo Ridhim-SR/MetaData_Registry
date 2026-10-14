@@ -146,6 +146,7 @@ def upsert_dataset(
     category: str = "",
     api_available: str = "",
     owner: str = "",
+    steward: str = "",
     frequency: str = "",
     timeline: str = "",
     dataset_description: str = "",
@@ -176,6 +177,7 @@ def upsert_dataset(
             "category": category or existing.get("category", ""),
             "api_available": api_available or existing.get("api_available", ""),
             "owner": owner or existing.get("owner", ""),
+            "steward": steward or existing.get("steward", ""),
             "frequency": frequency or existing.get("frequency", ""),
             "timeline": timeline or existing.get("timeline", ""),
             "dataset_description": dataset_description or existing.get("dataset_description", ""),
@@ -188,7 +190,7 @@ def upsert_dataset(
     logger.info(f"Dataset {'updated' if existing else 'created'}: {dataset_id}")
 
 
-DATASET_FIELDS = ("category", "api_available", "owner", "frequency", "timeline", "dataset_description")
+DATASET_FIELDS = ("category", "api_available", "owner", "steward", "frequency", "timeline", "dataset_description")
 
 
 def set_dataset_fields(storage: ObjectStorage, dataset_id: str, department_id: str, dataset_name: str, fields: dict) -> bool:
@@ -221,8 +223,10 @@ def latest_curated_snapshot_path(
 
     prefix = paths.curated_schemas_prefix(department_id, dataset_slug, table_slug)
     # Local storage on Windows returns backslash-separated paths, S3 returns
-    # forward slashes -- normalize before taking the filename.
-    files = [f for f in storage.list(prefix) if _SNAPSHOT_NAME.match(f.replace("\\", "/").rsplit("/", 1)[-1])]
+    # forward slashes -- normalize so callers get one shape of path either way
+    # (the raw text is also what ends up in OpenMetadata's extraMetadata).
+    files = [f.replace("\\", "/") for f in storage.list(prefix)
+             if _SNAPSHOT_NAME.match(f.replace("\\", "/").rsplit("/", 1)[-1])]
     if not files:
         raise FileNotFoundError(f"No curated schema under {prefix} -- run the pipeline for this table first.")
     return files[-1]
