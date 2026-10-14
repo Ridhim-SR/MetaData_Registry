@@ -30,6 +30,11 @@ _DESCRIPTIONS = {
     "extraMetadata": "JSON with the column details not shown elsewhere (nullable, default, scale, ...), kept for later use.",
 }
 
+# Every call here is a raw requests call, so the timeout is ours to set --
+# without one, an unreachable/hung OpenMetadata server hangs this one-shot
+# setup command forever instead of failing with a clear error.
+_TIMEOUT = (10, 60)
+
 
 def setup(host_port: str, jwt_token: str) -> None:
     auth = {"Authorization": f"Bearer {jwt_token}"}

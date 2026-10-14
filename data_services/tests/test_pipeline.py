@@ -71,7 +71,9 @@ def test_run_with_postgres_ddl_format(tmp_path):
 
     curated = storage.read_csv(result["curated_path"])
     assert curated[0]["table_id"] == "pwd.vishwakarma.tbd_confirm_with_pwd"
-    assert curated[1]["tag"] == "Financial"
+    # No metadata file was submitted and curate no longer guesses a tag
+    # from the column name, so total_cost is blank rather than Financial.
+    assert curated[1]["tag"] == ""
 
 
 def test_run_with_openmetadata_client_publishes_in_the_same_call(tmp_path):
@@ -95,9 +97,12 @@ def test_run_with_openmetadata_client_publishes_in_the_same_call(tmp_path):
 
     assert result["openmetadata"]["fully_qualified_name"] == "pwd.vishwakarma.public.t1"
     assert result["openmetadata"]["column_count"] == 2
-    # service, database, schema, table, + the "FieldTag" classification and
-    # "Firm/Contractor-Identifier" tag that firm_name auto-tags into
-    assert client.create_or_update.call_count == 6
+    # service, database, schema, table + the "MDSF" classification and its
+    # 7 level tags. No "FieldTag" classification is created any more: with
+    # auto-tagging off and no metadata file submitted, no column carries a
+    # tag, so there is nothing to ensure. (_ingested_storage in
+    # test_openmetadata_publish.py covers the tagged case.)
+    assert client.create_or_update.call_count == 12
 
 
 def test_run_without_openmetadata_client_skips_publish(tmp_path):
@@ -381,7 +386,7 @@ def test_description_only_rerun_keeps_manual_classification_glossary_and_active(
 
     run(**common, business_metadata_file=_write_metadata_csv(
         tmp_path, "first.csv",
-        "name,business_description,classification,glossary_term,active\nphone,Contact,CAT-2,Contact Number,false\n",
+        "name,business_description,classification,glossary_term,active\nphone,Contact,Confidential,Contact Number,false\n",
     ))
     result = run(**common, business_metadata_file=_write_metadata_csv(
         tmp_path, "second.csv", "name,business_description\nphone,Contact number of the firm\n",
@@ -389,9 +394,73 @@ def test_description_only_rerun_keeps_manual_classification_glossary_and_active(
 
     phone = next(c for c in result["columns"] if c["name"] == "phone")
     assert phone["business_description"] == "Contact number of the firm"  # new answer wins
-    assert phone["classification"] == "CAT-2"  # not reset to auto CAT-3
+    # `classification` is an MDSF level, so "Confidential" is kept instead of
+    # being reset to the auto one (PII, from the `phone` name rule)
+    assert phone["classification"] == "Confidential"
     assert phone["glossary_term"] == "Contact Number"
     assert phone["active"] is False  # kept, not flipped by the missing column
+
+
+def test_reclassify_rederives_auto_classification_and_keeps_reviewed_tags(tmp_path):
+    """reclassify=True opts out of the carry-forward for the rule-derived
+    `classification`: a stored answer from an older ruleset is replaced by
+    what the current AUTO_CLASSIFICATION_RULES produce (the whole point of
+    sync --reclassify).
+
+    `tag` is deliberately the opposite now. Auto-tagging is switched off,
+    so there is no rule left to re-derive a tag with -- popping it here
+    would delete every reviewed tag and strip those labels from
+    OpenMetadata on the next publish. A tag only changes when a submitted
+    file says so."""
+
+    ddl_file = tmp_path / "raw.txt"
+    ddl_file.write_text("phone character varying(10), total_cost numeric")
+    storage = _storage_with_department(tmp_path)
+    common = dict(department="pwd", dataset="vishwakarma", table_name="t1", source_file=str(ddl_file), storage=storage)
+
+    run(**common, business_metadata_file=_write_metadata_csv(
+        tmp_path, "first.csv",
+        "name,classification,tag\nphone,Confidential,Status/Workflow\ntotal_cost,,PII\n",
+    ))
+    result = run(
+        **common,
+        business_metadata_file=_write_metadata_csv(
+            tmp_path, "second.csv", "name,business_description\nphone,Contact number\n",
+        ),
+        reclassify=True,
+    )
+
+    phone = next(c for c in result["columns"] if c["name"] == "phone")
+    assert phone["classification"] == "PII"       # auto (name rule), not the stored Confidential
+    assert phone["tag"] == "Status/Workflow"      # reviewed tag survives the reclassify
+    cost = next(c for c in result["columns"] if c["name"] == "total_cost")
+    assert cost["tag"] == "PII"                   # reviewed tag survives, no auto tag replaces it
+    assert cost["classification"] == "Financial"  # auto (cost rule), never hand-set here
+
+
+def test_reclassify_still_keeps_answers_resubmitted_this_run(tmp_path):
+    """The merge is unchanged: answers this run's metadata file re-submits
+    win over the re-derived auto values, so a hand-set classification that
+    the department sends again survives a --reclassify."""
+
+    ddl_file = tmp_path / "raw.txt"
+    ddl_file.write_text("phone character varying(10)")
+    storage = _storage_with_department(tmp_path)
+    common = dict(department="pwd", dataset="vishwakarma", table_name="t1", source_file=str(ddl_file), storage=storage)
+
+    run(**common, business_metadata_file=_write_metadata_csv(
+        tmp_path, "first.csv", "name,classification\nphone,Confidential\n",
+    ))
+    result = run(
+        **common,
+        business_metadata_file=_write_metadata_csv(
+            tmp_path, "second.csv", "name,classification\nphone,Confidential\n",
+        ),
+        reclassify=True,
+    )
+
+    phone = next(c for c in result["columns"] if c["name"] == "phone")
+    assert phone["classification"] == "Confidential"
 
 
 def test_blank_cells_in_metadata_file_do_not_erase_previous_answers(tmp_path):
@@ -401,7 +470,7 @@ def test_blank_cells_in_metadata_file_do_not_erase_previous_answers(tmp_path):
     common = dict(department="pwd", dataset="vishwakarma", table_name="t1", source_file=str(ddl_file), storage=storage)
 
     run(**common, business_metadata_file=_write_metadata_csv(
-        tmp_path, "first.csv", "name,business_description,tag,glossary_term\nremarks,Notes,Free Text,Field Note\n",
+        tmp_path, "first.csv", "name,business_description,tag,glossary_term\nremarks,Notes,Status/Workflow,Field Note\n",
     ))
     result = run(**common, business_metadata_file=_write_metadata_csv(
         tmp_path, "second.csv", "name,business_description,tag,glossary_term\nremarks,,,\n",
@@ -409,7 +478,7 @@ def test_blank_cells_in_metadata_file_do_not_erase_previous_answers(tmp_path):
 
     remarks = result["columns"][0]
     assert (remarks["business_description"], remarks["tag"], remarks["glossary_term"]) == (
-        "Notes", "Free Text", "Field Note",
+        "Notes", "Status/Workflow", "Field Note",
     )
 
 

@@ -26,7 +26,10 @@ def run_batch(manifest_file: str, storage: ObjectStorage, openmetadata_client: O
     naming a not-yet-registered department here explicitly registers it,
     unlike pipeline.run() which refuses to auto-create departments from
     arbitrary text), allow_column_removal (optional, y/yes/true/1 -- see
-    pipeline.run()).
+    pipeline.run()), and the dataset-level fields category, api_available,
+    owner, frequency, timeline, dataset_description (all optional, blank
+    carries forward whatever the dataset already has -- see
+    pipeline.run()/README's Concepts).
 
     One row failing doesn't stop the rest -- each result records its own
     status so a bad submission can be fixed and rerun without redoing
@@ -41,7 +44,7 @@ def run_batch(manifest_file: str, storage: ObjectStorage, openmetadata_client: O
     any other per-row error.
     """
 
-    with open(manifest_file, newline="") as f:
+    with open(manifest_file, newline="", encoding="utf-8-sig") as f:
         rows = list(csv.DictReader(f))
 
     results = []
@@ -60,6 +63,12 @@ def run_batch(manifest_file: str, storage: ObjectStorage, openmetadata_client: O
                 source_format=row.get("source_format") or "postgres_ddl",
                 schema_name=row.get("schema_name") or "public",
                 business_metadata_file=row.get("business_metadata_file") or None,
+                category=row.get("category") or "",
+                api_available=row.get("api_available") or "",
+                owner=row.get("owner") or "",
+                frequency=row.get("frequency") or "",
+                timeline=row.get("timeline") or "",
+                dataset_description=row.get("dataset_description") or "",
                 openmetadata_client=openmetadata_client,
                 allow_column_removal=row.get("allow_column_removal", "").strip().lower() in {"y", "yes", "true", "1"},
             )
@@ -92,7 +101,12 @@ def _main(argv: list[str]) -> int:
         storage=storage_from_env(),
         openmetadata_client=_client,
     )
-    return 1 if any(r["status"] == "failed" for r in results) else 0
+    # Any failed row means this invocation didn't do its job -- exiting 0
+    # (the old behaviour) let cron/CI call a half-failed batch a success.
+    failed = [r for r in results if r["status"] == "failed"]
+    for row in failed:
+        print(f"FAILED {row['table_id']}: {row['error']}")
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

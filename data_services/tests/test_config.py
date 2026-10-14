@@ -12,6 +12,7 @@ _KEYS = (
     "WASABI_BUCKET", "WASABI_PREFIX", "DEPARTMENT", "WASABI_ACCESS_KEY_ID",
     "WASABI_ENDPOINT_URL", "WASABI_SECRET_ACCESS_KEY", "WASABI_REGION", "WASABI_BACKUP_BUCKET", "WASABI_BACKUP_REGION",
     "LOCAL_WASABI_BUCKET", "LOCAL_WASABI_ACCESS_KEY_ID", "LOCAL_WASABI_ENDPOINT_URL", "LOCAL_WASABI_SECRET_ACCESS_KEY",
+    "LOCAL_ONLY",
 )
 
 
@@ -131,6 +132,63 @@ def test_branch_rule(branch, env, allowed):
             config.check_branch_allows(env, branch)
 
 
+@pytest.mark.parametrize(
+    "env, prefix, branch, allowed",
+    [
+        # load_env() ran: the branch that owns the environment must be checked out
+        ("development", "", "main", True),
+        ("development", "", "fix/SDA-DS-001", False),
+        ("development", "", None, False),
+        ("production", "", "production", True),
+        ("production", "", "main", False),
+        # load_env() never ran: the Wasabi folder the storage targets decides
+        ("", "dev", "main", True),
+        ("", "dev", "fix/SDA-DS-001", False),
+        ("", "prod", "production", True),
+        ("", "prod", "main", False),
+        # local is a feature branch's own account -- anyone may sync to it
+        ("", "local", "fix/SDA-DS-001", True),
+        ("", "", "fix/SDA-DS-001", True),
+        ("local", "", "fix/SDA-DS-001", True),
+    ],
+)
+def test_sync_branch_rule(monkeypatch, env, prefix, branch, allowed):
+    monkeypatch.delenv("ENVIRONMENT", raising=False)
+    monkeypatch.delenv("WASABI_PREFIX", raising=False)
+    if env:
+        monkeypatch.setenv("ENVIRONMENT", env)
+    if prefix:
+        monkeypatch.setenv("WASABI_PREFIX", prefix)
+    _on(monkeypatch, branch)
+
+    if allowed:
+        config.check_sync_branch()
+    else:
+        with pytest.raises(PermissionError, match="isn't allowed on"):
+            config.check_sync_branch()
+
+
+def test_sync_branch_rule_names_how_to_get_onto_the_right_branch(monkeypatch):
+    """The message has to say what to do, not just that it refused."""
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.delenv("WASABI_PREFIX", raising=False)
+    _on(monkeypatch, "department/agriculture_department")
+
+    with pytest.raises(PermissionError, match="development only runs on 'main'"):
+        config.check_sync_branch()
+
+
+def test_sync_branch_rule_does_not_fire_when_load_env_already_applied_it(monkeypatch, env_file):
+    """On the CLI path load_env() has already resolved the environment, so
+    this must be a no-op rather than a second, contradictory refusal."""
+    _on(monkeypatch, "main")
+    monkeypatch.delenv("ENVIRONMENT", raising=False)
+    monkeypatch.delenv("WASABI_PREFIX", raising=False)
+    config.load_env()  # main -> development, WASABI_PREFIX=dev
+
+    config.check_sync_branch()
+
+
 def test_production_blocked_off_production_branch_before_anything_else_happens(env_file, monkeypatch):
     _on(monkeypatch, "main")
     monkeypatch.setenv("ENVIRONMENT", "production")
@@ -168,3 +226,44 @@ def test_local_never_falls_back_to_the_company_wasabi(env_file, monkeypatch):
     with pytest.raises(ValueError, match="LOCAL_WASABI_ENDPOINT_URL, LOCAL_WASABI_ACCESS_KEY_ID, "
                                          "LOCAL_WASABI_SECRET_ACCESS_KEY are blank"):
         config.load_env()
+
+
+# LOCAL_ONLY=1: local storage and local OpenMetadata must stay on this machine.
+
+
+def test_local_only_refuses_a_remote_storage_address(env_file, monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "local")
+    monkeypatch.setenv("LOCAL_ONLY", "1")
+    with pytest.raises(PermissionError, match=r"LOCAL_ONLY=1 refuses WASABI_ENDPOINT_URL .*wasabisys\.com"):
+        config.load_env()
+
+
+def test_local_only_refuses_a_shared_openmetadata_server(env_file, monkeypatch):
+    env_file.write_text(
+        env_file.read_text()
+        .replace("LOCAL_WASABI_ENDPOINT_URL=https://s3.us-west-1.wasabisys.com",
+                 "LOCAL_WASABI_ENDPOINT_URL=http://localhost:9000")
+        .replace("LOCAL_OPENMETADATA_HOST_PORT=http://localhost:8585/api",
+                 "LOCAL_OPENMETADATA_HOST_PORT=http://10.0.96.105:8585/api")
+    )
+    monkeypatch.setenv("ENVIRONMENT", "local")
+    monkeypatch.setenv("LOCAL_ONLY", "1")
+    with pytest.raises(PermissionError, match=r"LOCAL_ONLY=1 refuses OPENMETADATA_HOST_PORT .*10\.0\.96\.105"):
+        config.load_env()
+
+
+def test_local_only_happy_path_is_localhost(env_file, monkeypatch):
+    env_file.write_text(env_file.read_text().replace(
+        "LOCAL_WASABI_ENDPOINT_URL=https://s3.us-west-1.wasabisys.com",
+        "LOCAL_WASABI_ENDPOINT_URL=http://localhost:9000"))
+    monkeypatch.setenv("ENVIRONMENT", "local")
+    monkeypatch.setenv("LOCAL_ONLY", "1")
+    assert config.load_env() == "local"
+    assert os.environ["WASABI_ENDPOINT_URL"] == "http://localhost:9000"
+
+
+def test_without_local_only_a_personal_wasabi_account_is_still_allowed(env_file, monkeypatch):
+    # README 3b behaviour is unchanged by default: LOCAL_ONLY is opt-in.
+    monkeypatch.setenv("ENVIRONMENT", "local")
+    assert config.load_env() == "local"
+    assert os.environ["WASABI_ENDPOINT_URL"] == "https://s3.us-west-1.wasabisys.com"

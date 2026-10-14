@@ -29,7 +29,7 @@ from metadata.generated.schema.entity.data.database import Database
 from metadata.generated.schema.entity.data.databaseSchema import DatabaseSchema
 from metadata.generated.schema.entity.data.glossary import Glossary
 from metadata.generated.schema.entity.data.glossaryTerm import GlossaryTerm
-from metadata.generated.schema.entity.data.table import Column, DataType, TableType
+from metadata.generated.schema.entity.data.table import Column, DataType, Table, TableType
 from metadata.generated.schema.entity.services.connections.database.customDatabaseConnection import (
     CustomDatabaseConnection,
 )
@@ -42,14 +42,25 @@ from metadata.generated.schema.entity.services.databaseService import (
     DatabaseService,
     DatabaseServiceType,
 )
+from metadata.generated.schema.entity.teams.team import Team
+from metadata.generated.schema.entity.teams.user import User
 from metadata.generated.schema.security.client.openMetadataJWTClientConfig import (
     OpenMetadataJWTClientConfig,
 )
+from metadata.generated.schema.type.entityReference import EntityReference
 from metadata.generated.schema.type.tagLabel import LabelType, State, TagLabel, TagSource
 from metadata.ingestion.ometa.client import APIError
 from metadata.ingestion.ometa.ometa_api import OpenMetadata
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
+from src.schema_registry.curate import (
+    CATEGORY_LEVELS,
+    CLASSIFICATION_LEVELS,
+    KNOWN_TAGS,
+    validate_category,
+    validate_glossary_term,
+    validate_tag,
+)
 from src.schema_registry.registry import lookups
 from src.storage import storage_from_env
 from src.storage.base import ObjectStorage
@@ -91,7 +102,13 @@ def _create_or_update(client: OpenMetadata, request):
 
 
 @_retry_transient
-def _replace_entity_fields(client: OpenMetadata, rest_suffix: str, entity_id, fields: dict, op: str = "replace") -> None:
+def _patch_entity(client: OpenMetadata, rest_suffix: str, entity_id, patch: list[dict]) -> None:
+    client.client.patch(path=f"{rest_suffix}/{entity_id}", data=json.dumps(patch))
+
+
+def _replace_entity_fields(
+    client: OpenMetadata, rest_suffix: str, entity_id, fields: dict, op: str = "replace"
+) -> None:
     """create_or_update()'s PUT merges array/object fields (tags, extension)
     instead of replacing them -- verified live: clearing a dataset's
     `category`/custom-property value in _lookups/datasets.csv and
@@ -99,22 +116,42 @@ def _replace_entity_fields(client: OpenMetadata, rest_suffix: str, entity_id, fi
     A JSON-Patch `replace` on the exact fields that carry this risk is the
     only way a cleared value actually clears here too.
 
+    Every field here must therefore always be sent on the PUT as well
+    (non-null, empty list included) -- `replace` needs the path to exist in
+    the entity's JSON, and OpenMetadata omits null fields from its responses.
+
     `op="add"` sets a path whether or not it exists yet (JSON-Patch `add` on
     an existing object member replaces it) -- used for per-column tags,
     where a column with no tags may not carry a `tags` member at all."""
 
     patch = [{"op": op, "path": f"/{field}", "value": value} for field, value in fields.items()]
-    client.client.patch(path=f"{rest_suffix}/{entity_id}", data=json.dumps(patch))
+    _patch_entity(client, rest_suffix, entity_id, patch)
 
 
 # Where curate.py's per-column `tag`/`classification`/`glossary_term`
 # values land in OpenMetadata -- one fixed Classification for each of the
-# first two (their values are a small, code-defined vocabulary: AUTO_TAG_RULES
-# and PII_CLASSIFICATION_RULES in curate.py), one fixed Glossary for the third
-# (its values are free text from a department's Field Dictionary).
+# first two (their values are a small, code-defined vocabulary: KNOWN_TAGS
+# and CLASSIFICATION_LEVELS in curate.py; KNOWN_TAGS is derived from
+# AUTO_TAG_RULES but the rules no longer assign anything themselves), one
+# fixed Glossary for the third (its values are free text from a department's
+# Field Dictionary).
 _TAG_CLASSIFICATION = "FieldTag"
+_MDSF_CLASSIFICATION = "MDSF"
 _SENSITIVITY_CLASSIFICATION = "DataSensitivity"
 _GLOSSARY = "BusinessGlossary"
+
+# The MDSF per-field levels, reused verbatim as the OpenMetadata tag
+# descriptions so anyone browsing the catalog sees what a level means
+# without leaving OpenMetadata.
+_MDSF_LEVEL_DESCRIPTIONS = {
+    "Public": "No risk of disclosure or re-identification.",
+    "Internal": "Internal use only; low sensitivity.",
+    "Confidential": "Sensitive; restricted access.",
+    "Restricted": "Highly sensitive; need-to-know basis.",
+    "PII": "Personally identifiable information.",
+    "Financial": "Financial data requiring protection.",
+    "Health": "Health or medical data.",
+}
 
 # Only the Postgres types curate.py's KNOWN_POSTGRES_TYPES actually allows
 # through -- everything else already fails validation before it gets here.
@@ -140,6 +177,7 @@ _TYPE_MAP: dict[str, DataType] = {
     "json": DataType.JSON,
     "jsonb": DataType.JSON,
     "uuid": DataType.UUID,
+    "bytea": DataType.BYTEA,
 }
 # OM server rejects these types without an explicit dataLength.
 _LENGTH_REQUIRED_TYPES = {DataType.CHAR, DataType.VARCHAR}
@@ -197,10 +235,37 @@ def _column_tags(row: dict) -> list[TagLabel]:
     if row.get("tag"):
         tags.append(_tag_label(f"{_TAG_CLASSIFICATION}.{row['tag']}", TagSource.Classification))
     if row.get("classification"):
-        tags.append(_tag_label(f"{_SENSITIVITY_CLASSIFICATION}.{row['classification']}", TagSource.Classification))
+        tags.append(_tag_label(f"{_MDSF_CLASSIFICATION}.{row['classification']}", TagSource.Classification))
     if row.get("glossary_term"):
         tags.append(_tag_label(f"{_GLOSSARY}.{row['glossary_term']}", TagSource.Glossary))
     return tags
+
+
+def _columns_for_put(columns: list[Column]) -> list[Column]:
+    """Strip the MDSF classification labels from the CreateTableRequest.
+
+    create_or_update()'s PUT merges each column's submitted tags with the
+    ones already on the entity (tag_usage rows the table API GET doesn't
+    even return), and OpenMetadata 2.x rejects that merged list when it
+    holds two labels of the mutuallyExclusive MDSF classification
+    (MDSF.PII + MDSF.Public) with HTTP 400. That made a reclassify
+    deadlock: the PUT that carries the new level could never land because
+    the old one was still stored. Send only the non-MDSF tags (FieldTag /
+    glossary terms merge harmlessly) and let _replace_column_tags()'s
+    JSON-Patch -- an `add` on the exact `columns/N/tags` member, which
+    replaces it -- set the exact list afterwards; that *does* swap the old
+    MDSF label for the new one (verified against local OpenMetadata 2.0.2)."""
+
+    put_columns = []
+    for column in columns:
+        clone = column.model_copy(deep=True)
+        clone.tags = [
+            tag
+            for tag in (column.tags or [])
+            if not str(tag.model_dump(mode="json").get("tagFQN", "")).startswith(_MDSF_CLASSIFICATION + ".")
+        ]
+        put_columns.append(clone)
+    return put_columns
 
 
 def _to_column(row: dict) -> Column:
@@ -291,6 +356,44 @@ _CUSTOM_PROPERTY_NAMES = {
 }
 
 
+def _resolve_owner(client: OpenMetadata, owner: str) -> EntityReference | None:
+    """Resolve a dataset's free-text `owner` (`_lookups/datasets.csv`) to an
+    existing OpenMetadata User or Team, so the Database's built-in Owners
+    field gets populated and everything driven by it -- ownership-based
+    access rules, "my assets" filters, ownership reports -- actually applies.
+
+    Tries User first, then Team, by fully-qualified name (for a user that
+    can be either the username or the email address). Returns None when
+    nothing matches: that's a warning, not a failure -- the raw text still
+    lands in the `datasetOwner` custom property, and the owner can be
+    created in OpenMetadata later and picked up by the next republish."""
+
+    if not owner:
+        return None
+
+    candidates = list(dict.fromkeys([owner, owner.split("@", 1)[0]] if "@" in owner else [owner]))
+    for candidate in candidates:
+        for entity, entity_type in ((User, "user"), (Team, "team")):
+            found = _get_or_none(client, entity, candidate)
+            if found is None:
+                continue
+            name = str(_unwrap(found.name))
+            return EntityReference(
+                id=str(_unwrap(found.id)),
+                type=entity_type,
+                name=name,
+                fullyQualifiedName=str(_unwrap(getattr(found, "fullyQualifiedName", None) or name)),
+                displayName=str(_unwrap(getattr(found, "displayName", None) or name)),
+            )
+
+    logger.warning(
+        f"Dataset owner '{owner}' matches no OpenMetadata user or team -- the built-in Owners "
+        f"field stays unset (the datasetOwner custom property still records the text). "
+        f"Create the user/team in OpenMetadata, or fix the owner in _lookups/datasets.csv."
+    )
+    return None
+
+
 # One JSON string on each Table (a Custom Property, created by
 # setup_custom_properties.py) with what the curated schema holds that has no
 # place in OpenMetadata's own fields -- kept in case it's wanted later.
@@ -320,6 +423,7 @@ def _ensure_database(
     description: str = "",
     category: str = "",
     custom_properties: dict | None = None,
+    owner_ref: EntityReference | None = None,
 ) -> Database:
     """Unlike _ensure_service/_ensure_schema, always create-or-update (never
     short-circuits on an existing entity) -- `description`/`category`/
@@ -333,6 +437,11 @@ def _ensure_database(
     # whole `extension` silently disappearing when nothing's been set yet.
     custom_properties = custom_properties or {}
     extension = {name: custom_properties.get(field, "") for field, name in _CUSTOM_PROPERTY_NAMES.items()}
+    # `owners` is always a list, empty when nothing resolved: _replace_entity_fields()
+    # does a JSON-Patch `replace` on it, and `replace` needs the path to exist
+    # in the entity OpenMetadata just returned. Sending [] is accepted the same
+    # way column `tags: []` is (see _to_column).
+    owners = [owner_ref] if owner_ref else []
     database = _create_or_update(
         client,
         CreateDatabaseRequest(
@@ -341,6 +450,7 @@ def _ensure_database(
             description=description or None,
             tags=tags,
             extension=extension,
+            owners=owners,
         ),
     )
     _replace_entity_fields(
@@ -350,6 +460,7 @@ def _ensure_database(
         {
             "tags": [t.model_dump(mode="json", exclude_none=True) for t in tags],
             "extension": extension,
+            "owners": [o.model_dump(mode="json", exclude_none=True) for o in owners],
         },
     )
     return database
@@ -401,34 +512,44 @@ def _unique_in_order(values: Iterable[str]) -> list[str]:
     return list(dict.fromkeys(v for v in values if v))
 
 
-# MDSF (Model Data Sharing Framework) Section 5.1's own category definitions,
-# reused verbatim as the OpenMetadata Tag description so anyone browsing the
-# catalog sees what a CAT-x label actually means without leaving OpenMetadata.
+# MDSF (Model Data Sharing Framework, MeitY draft, 31 Aug 2026) section 5.1's
+# own category definitions, reused as the OpenMetadata Tag description so
+# anyone browsing the catalog sees what a CAT-x label actually means without
+# leaving OpenMetadata. The same text lives in samples/cat_definitions.txt,
+# which is what ai_metadata feeds the model when it drafts a `category` --
+# keep the two in step.
+# Keys are the entire allowed vocabulary for a dataset's `category`
+# (curate.CATEGORY_LEVELS) -- anything else is rejected instead of being
+# published as a new tag next to the real ones.
 _CAT_DESCRIPTIONS = {
-    "CAT-1": "Open Access -- fully anonymised, aggregated or non-personal data. No risk of re-identification.",
-    "CAT-2": "Registered Access -- de-identified data. Individual identity not exposed.",
-    "CAT-3": "Restricted Access -- personal or sensitive data at individual/entity level. "
-    "Shared only with DPDPA-compliant consent or a specific legal mandate.",
+    "CAT-1": "Open Access -- fully anonymised, aggregated, or non-personal data; no risk of "
+             "re-identification. Examples: aggregate statistics, counts, district-level "
+             "summaries, reference data. Access: open, no login required.",
+    "CAT-2": "Registered Access -- de-identified data useful to researchers, start-ups and "
+             "civil society; individual identity not exposed. Examples: anonymised scheme "
+             "data, de-identified health datasets, economic statistics. Access: login / KYC "
+             "and a purpose declaration.",
+    "CAT-3": "Restricted Access -- personal or sensitive data at individual or entity level; "
+             "shared only with DPDPA-compliant consent or a specific legal mandate. Examples: "
+             "vehicle / DL records, Aadhaar-linked records, individual scheme benefits. "
+             "Access: API-based, purpose-bound, annual renewal.",
+    "CAT-4": "Non-Shareable -- classified, national-security-sensitive, or legally restricted "
+             "data. Examples: intelligence records, Cabinet deliberations, strategic "
+             "infrastructure data. Access: not shared externally; internal government "
+             "network only.",
 }
 
-
-def _ensure_sensitivity_tag(client: OpenMetadata, category: str) -> None:
-    """Shared by column-level `classification` (_ensure_tags_and_terms) and
-    the dataset-level `category` (publish_table) -- both are the same MDSF
-    CAT-1/2/3/4 vocabulary, just attached at different entity levels."""
-
-    _ensure_classification(
-        client,
-        _SENSITIVITY_CLASSIFICATION,
-        "Model Data Sharing Framework data classification (CAT-1 Open / CAT-2 Registered / "
-        "CAT-3 Restricted), assigned per column by curate_schema() and per dataset in _lookups/datasets.csv.",
-    )
-    _ensure_tag(
-        client,
-        _SENSITIVITY_CLASSIFICATION,
-        category,
-        _CAT_DESCRIPTIONS.get(category, f"MDSF data classification category {category}."),
-    )
+# The framework's decision rules, carried on the classification itself (one
+# description for the whole CAT axis) rather than repeated on every tag.
+_CAT_CLASSIFICATION_DESCRIPTION = (
+    "Model Data Sharing Framework data classification categories (MeitY draft, 31 Aug 2026, "
+    "section 5.1), assigned per dataset in _lookups/datasets.csv: CAT-1 Open Access, "
+    "CAT-2 Registered Access, CAT-3 Restricted Access, CAT-4 Non-Shareable. "
+    "When in doubt, the higher (more restrictive) category applies. Direct identifiers -- "
+    "name, Aadhaar, PAN, mobile, email, passport number, voter ID, driving licence number, "
+    "vehicle registration, account number -- make a dataset personal or entity-level, "
+    "i.e. CAT-3."
+)
 
 
 _CATEGORY_RE = re.compile(r"^CAT-(\d+)$", re.IGNORECASE)
@@ -446,7 +567,12 @@ def _check_category_covers_columns(table_id: str, category: str, curated_columns
     before anything is written to OpenMetadata.
 
     A blank dataset category (not confirmed yet) is only warned about, since
-    most datasets are still waiting on their department's answer."""
+    most datasets are still waiting on their department's answer.
+
+    Only columns whose `classification` is itself a CAT-<n> value take part.
+    curate.CLASSIFICATION_LEVELS' 7-level vocabulary (Public, Internal, ...)
+    is a different axis, published under the MDSF classification, so those
+    columns deliberately don't feed this check."""
 
     column_levels = {
         row["name"]: level
@@ -476,6 +602,68 @@ def _check_category_covers_columns(table_id: str, category: str, curated_columns
         )
 
 
+def _ensure_sensitivity_tag(client: OpenMetadata, category: str) -> None:
+    """Dataset-level `category` (publish_table) -- the MDSF CAT-1..CAT-4
+    vocabulary attached to the Database entity. Column levels live in
+    _ensure_mdsf_levels instead: they are a different axis (per-field
+    sensitivity), published under the MDSF classification.
+
+    Validated here as well as in pipeline.run(): publish_table() is also
+    called on its own (republish, standalone republish), and `category` may
+    still hold a value written before the validation existed."""
+
+    if not validate_category(category):
+        raise ValueError(
+            f"Unknown category '{category}' -- allowed: {', '.join(CATEGORY_LEVELS)} "
+            f"(MDSF CAT levels, exactly as written). Not publishing it as a tag."
+        )
+    _ensure_classification(
+        client,
+        _SENSITIVITY_CLASSIFICATION,
+        _CAT_CLASSIFICATION_DESCRIPTION,
+    )
+    _ensure_tag(
+        client,
+        _SENSITIVITY_CLASSIFICATION,
+        category,
+        _CAT_DESCRIPTIONS.get(category, f"MDSF data classification category {category}."),
+    )
+
+
+def _ensure_mdsf_levels(client: OpenMetadata) -> None:
+    """Create the MDSF tag classification and all of its level tags.
+
+    All of CLASSIFICATION_LEVELS, not just the levels this snapshot uses, so
+    a column tagged later (or by another department) always resolves; also
+    `mutuallyExclusive` so a column carries at most one level, matching
+    curate_schema()'s single-`classification` model.
+    """
+
+    existing = _get_or_none(client, Classification, _MDSF_CLASSIFICATION)
+    if existing is None:
+        _create_or_update(
+            client,
+            CreateClassificationRequest(
+                name=_MDSF_CLASSIFICATION,
+                description=(
+                    "MDSF per-field data classification levels, ordered from least to "
+                    "most restrictive. Applied per column by the schema-registry pipeline."
+                ),
+                mutuallyExclusive=True,
+            ),
+        )
+    for level in CLASSIFICATION_LEVELS:
+        if _get_or_none(client, Tag, f"{_MDSF_CLASSIFICATION}.{level}") is None:
+            _ensure_tag(
+                client,
+                _MDSF_CLASSIFICATION,
+                level,
+                _MDSF_LEVEL_DESCRIPTIONS.get(level, ""),
+            )
+
+
+_CATEGORY_RE = re.compile(r"^CAT-(\d+)$", re.IGNORECASE)
+
 def _replace_column_tags(client: OpenMetadata, table, columns: list[Column]) -> None:
     """create_or_update()'s PUT merges column tags with the ones already
     there, so a column moved from CAT-3 to CAT-1 would carry both labels.
@@ -498,18 +686,44 @@ def _ensure_tags_and_terms(client: OpenMetadata, curated_columns: list[dict]) ->
     """Create-or-reuse every Classification/Tag/Glossary/GlossaryTerm the
     curated columns reference, before the table request tries to attach
     them as TagLabels -- OpenMetadata won't accept a TagLabel pointing at a
-    tag/term that doesn't exist yet."""
+    tag/term that doesn't exist yet.
+
+    Also the last line of defence for item 14: curate_schema() already
+    rejects unknown tags and "."-containing glossary terms, but publish can
+    run against a snapshot curated before that validation existed."""
 
     tags = _unique_in_order(row.get("tag", "") for row in curated_columns)
     classifications = _unique_in_order(row.get("classification", "") for row in curated_columns)
     glossary_terms = _unique_in_order(row.get("glossary_term", "") for row in curated_columns)
 
+    for tag in tags:
+        if not validate_tag(tag):
+            raise ValueError(
+                f"Unknown tag '{tag}' -- allowed: {', '.join(KNOWN_TAGS)}. "
+                f"Add it to KNOWN_TAGS in curate.py if it is a real new tag."
+            )
+    for term in glossary_terms:
+        if not validate_glossary_term(term):
+            raise ValueError(f"Glossary term '{term}' contains '.', which breaks OpenMetadata's FQN.")
+
     if tags:
-        _ensure_classification(client, _TAG_CLASSIFICATION, "Rule-based field categories auto-assigned by curate_schema() (see AUTO_TAG_RULES).")
+        _ensure_classification(
+            client,
+            _TAG_CLASSIFICATION,
+            "Column tags supplied by a department's Field Dictionary or an "
+            "ai_metadata draft and approved at review. curate.py's KNOWN_TAGS "
+            "is the closed list a tag must be in to be published -- tags are no "
+            "longer guessed from the column name at ingest time.",
+        )
         for tag in tags:
-            _ensure_tag(client, _TAG_CLASSIFICATION, tag, f"Columns matching curate.py's AUTO_TAG_RULES pattern for '{tag}'.")
-    for classification in classifications:
-        _ensure_sensitivity_tag(client, classification)
+            _ensure_tag(
+                client,
+                _TAG_CLASSIFICATION,
+                tag,
+                f"Supplied by a reviewed field dictionary or metadata draft for '{tag}'.",
+            )
+    if classifications:
+        _ensure_mdsf_levels(client)
     if glossary_terms:
         _ensure_glossary(
             client, _GLOSSARY, "Business terms attached to columns via a department's Field Dictionary (business_metadata_file)."
@@ -537,10 +751,11 @@ def publish_table(
     ("pwd.vishwakarma.<table>"); service defaults to the department so each
     department gets its own OpenMetadata database service.
 
-    Refuses to publish a dataset whose `category` is lower than its most
+    Refuses to publish a dataset whose `category` is below its most
     sensitive column's `classification` (see _check_category_covers_columns)
     unless `allow_category_below_columns=True`.
-    """
+
+"""
 
     department_id, dataset_slug, table_slug = table_id.split(".")
     dataset_id = f"{department_id}.{dataset_slug}"
@@ -548,14 +763,23 @@ def publish_table(
     table_row = lookups.get_table(storage, table_id)
     if table_row is None:
         raise ValueError(f"Unknown table_id '{table_id}' -- not found in {lookups.TABLES_PATH}")
+    if table_row.get("deleted"):
+        raise ValueError(
+            f"{table_id} was soft-deleted on {table_row['deleted']} -- it stays out of "
+            f"OpenMetadata until it is re-ingested (run() re-registers it and clears the mark)."
+        )
     dataset_row = lookups.get_dataset(storage, dataset_id) or {}
 
     curated_path = lookups.latest_curated_snapshot_path(storage, department_id, dataset_slug, table_slug)
     curated_columns = storage.read_csv(curated_path)
 
+    # `category` is optional: blank simply means the dataset carries no
+    # dataset-level CAT tag. When it is set, _ensure_sensitivity_tag() below
+    # refuses a value that isn't in the CAT-1..CAT-4 vocabulary.
+    category = dataset_row.get("category", "")
+
     # Checked before any OpenMetadata call, so a refused publish leaves no
     # half-updated service/database behind.
-    category = dataset_row.get("category", "")
     if allow_category_below_columns:
         logger.warning(f"{table_id}: dataset-vs-column category check skipped (allow_category_below_columns=True)")
     else:
@@ -577,6 +801,7 @@ def publish_table(
             "frequency": dataset_row.get("frequency", ""),
             "timeline": dataset_row.get("timeline", ""),
         },
+        owner_ref=_resolve_owner(client, dataset_row.get("owner", "")),
     )
     schema = _ensure_schema(client, _fqn(database), table_row["schema_name"])
 
@@ -591,7 +816,7 @@ def publish_table(
             name=table_row["table_name"],
             tableType=TableType.Regular,
             databaseSchema=_fqn(schema),
-            columns=columns,
+            columns=_columns_for_put(columns),
         ),
     )
     _replace_entity_fields(client, "/tables", _unwrap(table.id),
@@ -609,6 +834,39 @@ def publish_table(
     }
 
 
+def delete_table(client: OpenMetadata, storage: ObjectStorage, table_id: str) -> dict:
+    """Soft-delete a table in OpenMetadata and mark it deleted in the
+    registry -- the command that fixes "renaming a table leaves the old one
+    orphaned in OpenMetadata".
+
+    OpenMetadata goes first: if that call fails, nothing in the registry
+    changed and the whole thing can simply be retried. The registry mark is
+    the *consequence* of the entity being gone, never the other way round."""
+
+    department_id, dataset_slug, table_slug = table_id.split(".")
+    table_row = lookups.get_table(storage, table_id)
+    if table_row is None:
+        raise ValueError(f"Unknown table_id '{table_id}' -- not found in {lookups.TABLES_PATH}")
+
+    fqn = f"{department_id}.{dataset_slug}.{table_row['schema_name']}.{table_row['table_name']}"
+    existing = _get_or_none(client, Table, fqn)
+    deleted_in_om = False
+    if existing is not None:
+        client.delete(entity=Table, entity_id=str(_unwrap(existing.id)), recursive=False)
+        deleted_in_om = True
+        logger.info(f"Soft-deleted {fqn} in OpenMetadata")
+    else:
+        logger.info(f"{fqn} is not in OpenMetadata (already gone?) -- marking the registry only")
+
+    registry_row = lookups.soft_delete_table(storage, table_id)
+    return {
+        "table_id": table_id,
+        "fully_qualified_name": fqn,
+        "openmetadata": "deleted" if deleted_in_om else "not-found",
+        "registry": f"soft-deleted {registry_row['deleted']}",
+    }
+
+
 def _main(argv: list[str]) -> int:
     """Command line entry point (settings come from .env / the shell)."""
 
@@ -621,13 +879,7 @@ def _main(argv: list[str]) -> int:
         host_port=os.environ.get("OPENMETADATA_HOST_PORT", "http://localhost:8585/api"),
         jwt_token=os.environ["OPENMETADATA_JWT_TOKEN"],
     )
-    publish_table(
-        _client,
-        _storage,
-        os.environ["TABLE_ID"],
-        allow_category_below_columns=os.environ.get("ALLOW_CATEGORY_BELOW_COLUMNS", "").strip().lower()
-        in {"y", "yes", "true", "1"},
-    )
+    publish_table(_client, _storage, os.environ["TABLE_ID"])
     return 0
 
 

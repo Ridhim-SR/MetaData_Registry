@@ -118,10 +118,11 @@ class _Result:
 
 
 class _FakeSession:
-    """Stub AsyncSession serving canned sidecar visibility rows."""
+    """Stub AsyncSession serving canned sidecar visibility/info rows."""
 
-    def __init__(self, vmap=None):
+    def __init__(self, vmap=None, info=None):
         self._vmap = vmap if vmap is not None else VMAP
+        self._info = info or {}
 
     async def execute(self, stmt):
         text = str(stmt)
@@ -136,7 +137,11 @@ class _FakeSession:
             ]
             return _Result(rows)
         if "table_info" in text:
-            return _Result([])
+            rows = [
+                types.SimpleNamespace(fqn=fqn, **values)
+                for fqn, values in self._info.items()
+            ]
+            return _Result(rows)
         raise AssertionError(f"unexpected query in guest test: {text}")
 
 
@@ -184,10 +189,17 @@ def client(monkeypatch):
             raise Exception("404 Table not found")
         return dict(_TABLES_BY_ID[table_id])
 
+    async def _fake_get_database_by_fqn(self, fqn):
+        database = _DATABASES_BY_FQN.get(fqn)
+        if database is None:
+            raise Exception(f"404 Database {fqn} not found")
+        return dict(database)
+
     monkeypatch.setattr(OpenMetadataClient, "_login", _fake_login)
     monkeypatch.setattr(OpenMetadataClient, "_fetch_all", _fake_fetch_all)
     monkeypatch.setattr(OpenMetadataClient, "search_tables", _fake_search_tables)
     monkeypatch.setattr(OpenMetadataClient, "get_table", _fake_get_table)
+    monkeypatch.setattr(OpenMetadataClient, "get_database_by_fqn", _fake_get_database_by_fqn)
     registry_router._catalog_cache.clear()
 
     async def _fake_session():
@@ -367,6 +379,30 @@ _TABLES_BY_ID = {
     "t-con": _detail_table("t-con", "con.db.s.con_table", "con_table", ["top_secret"]),
 }
 
+# OM database entities keyed by database FQN: the custom properties
+# (extension) data_services publishes as dataset-level docs -- served as
+# a table's `info` by registry_table -> _dataset_info.
+_DATABASES_BY_FQN = {
+    "pub.db": {
+        "fullyQualifiedName": "pub.db",
+        "extension": {
+            "apiAvailable": "Y",
+            "datasetOwner": "Pub Owner",
+            "frequency": "monthly",
+            "timeline": "2020-2024",
+        },
+    },
+    "pwd.vishwakarma": {
+        "fullyQualifiedName": "pwd.vishwakarma",
+        "extension": {
+            "apiAvailable": "N",
+            "datasetOwner": "",
+            "frequency": "yearly",
+            "timeline": "2014-15 to 2025-26",
+        },
+    },
+}
+
 
 def test_admin_search_crop_full_tables_with_matched_in(client):
     async def _admin():
@@ -521,6 +557,51 @@ def test_admin_table_full_with_facts(client):
         assert body["facts"]["owner"] == "Data Owner"
         assert body["facts"]["updated_at"] == 1791199916652
     finally:
+        app.dependency_overrides.pop(get_optional_user, None)
+
+
+def test_table_info_served_from_om_database_custom_properties(client):
+    """Dataset docs (frequency/timeline/API available/owner) come from the
+    OM database entity's extension -- what data_services publishes -- so
+    every catalog table has them without the manual sidecar POST."""
+
+    resp = client.get("/registry/tables/t-pub")  # public table: guest gets full access
+    assert resp.status_code == 200, resp.text[:300]
+    body = resp.json()
+    info = body["info"]
+    assert info["api_available"] is True
+    assert info["dataset_owner"] == "Pub Owner"
+    assert info["frequency"] == "monthly"
+    assert info["timeline"] == "2020-2024"
+    assert body["facts"]["frequency"] == "monthly"
+
+
+def test_sidecar_row_overrides_om_extension_field_by_field(client):
+    """A manual POST /openmetadata/metadata/tables row wins where it has an
+    answer; OM fills the fields it leaves blank."""
+
+    async def _session_with_row():
+        yield _FakeSession(info={
+            "pwd.vishwakarma.public.dep_table": {
+                "api_available": None,
+                "dataset_owner": "Hand Set Owner",
+                "frequency": "quarterly",
+                "timeline": None,
+            }
+        })
+
+    app.dependency_overrides[db_get_session] = _session_with_row
+    _as_viewer(client, "admin", None)
+    try:
+        resp = client.get("/registry/tables/t-dep")
+        assert resp.status_code == 200, resp.text[:300]
+        info = resp.json()["info"]
+        assert info["frequency"] == "quarterly"            # sidecar wins
+        assert info["dataset_owner"] == "Hand Set Owner"   # sidecar wins
+        assert info["timeline"] == "2014-15 to 2025-26"    # OM fills the gap
+        assert info["api_available"] is False              # "N" mapped to bool
+    finally:
+        app.dependency_overrides.pop(db_get_session, None)
         app.dependency_overrides.pop(get_optional_user, None)
 
 

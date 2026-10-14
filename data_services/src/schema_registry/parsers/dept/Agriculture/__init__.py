@@ -1,0 +1,1 @@
+"""Agriculture Department preprocessing (schema-registry parser extensions)."""

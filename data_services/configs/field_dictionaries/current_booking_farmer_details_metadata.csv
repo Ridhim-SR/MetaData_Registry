@@ -1,0 +1,20 @@
+name,business_description,tag
+id,Unique row identifier for this farmer booking detail.,
+created_at,Timestamp when the record was created.,
+created_by,User who created the record.,
+modified_at,Timestamp when the record was last modified.,
+modified_by,User who last modified the record.,
+status,Lifecycle status of the record.,Status/Workflow
+address,Residential address of the farmer.,PII
+caste,Caste category of the farmer.,Sensitive
+email_id,Email address of the farmer.,PII
+farmer_name,Full name of the farmer who made the booking.,PII
+father_name,Father's name of the farmer.,PII
+mobile_no,Mobile number of the farmer.,PII
+registration_no,Farmer registration number linked to this booking.,PII
+current_booking_id,Reference to the booking this farmer detail belongs to.,
+farmer_id,Identifier of the farmer this detail belongs to.,
+sanstha_type_id,Type of the sanstha (institution) the farmer belongs to.,
+sansthaname,Name of the sanstha (institution) the farmer belongs to.,
+sanstha_id,Identifier of the sanstha (institution) the farmer belongs to.,
+beneficiary_category_id,Beneficiary category of the farmer.,

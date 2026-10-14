@@ -1,0 +1,31 @@
+# MinIO -- a local, S3-compatible stand-in for Wasabi.
+#
+#   docker compose -f infrastructure/minio/docker-compose.yml up -d
+#
+# data_services/.env points LOCAL_WASABI_* here (feature branches), so local
+# development runs the real S3 code path (S3ObjectStorage/boto3) against a
+# local server instead of a company account. Same API as Wasabi: what passes
+# here is what runs on Wasabi later.
+#
+# The image is bitnamilegacy/minio: Docker Hub's minio/minio was removed when
+# MinIO went closed-source (2025); the bitnami legacy org keeps the last
+# open build available.
+#
+# Console:   http://localhost:9001  (minioadmin / minioadmin)
+# Endpoint:  http://localhost:9000  (this is LOCAL_WASABI_ENDPOINT_URL)
+# Buckets:   sda-local, sda-local-backup -- created by scripts/init_minio.py
+services:
+  minio:
+    image: bitnamilegacy/minio:latest
+    container_name: sda-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio-data:/bitnami/minio/data
+
+volumes:
+  minio-data:

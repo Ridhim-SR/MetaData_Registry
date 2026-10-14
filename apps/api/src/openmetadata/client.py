@@ -247,6 +247,12 @@ class OpenMetadataClient:
     async def get_table_by_fqn(self, fqn: str) -> dict:
         return await self.get(f"tables/name/{fqn}", params={"fields": "columns,tags,owners"})
 
+    async def get_database_by_fqn(self, fqn: str) -> dict:
+        """Database entity with its custom properties (`extension`): the
+        dataset-level fields data_services publishes (frequency/timeline/
+        apiAvailable/datasetOwner -- see openmetadata/publish.py)."""
+        return await self.get(f"databases/name/{fqn}", params={"fields": "extension,owners"})
+
     async def get_table_lineage(self, fqn: str) -> dict:
         return await self.get(f"lineage/table/name/{fqn}")
 

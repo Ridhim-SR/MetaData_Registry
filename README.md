@@ -29,8 +29,9 @@ gov_agriculture.agriculture.farmer_register.farmer_register
 |---|---|
 | `apps/api` | FastAPI backend (Python, venv at `apps/api/.venv`). Routers in `src/routers/`, OM code in `src/openmetadata/` |
 | `apps/web` | React 19 + Vite + Tailwind frontend |
-| `data_services/` | Reserved for future data pipelines (Airflow DAGs). Not used yet |
+| `data_services/` | Schema-registry pipeline: `catalog.yaml` → `add`/`sync` → storage (local MinIO on feature branches, company Wasabi on `main`) → OpenMetadata. CLI in `src/schema_registry/`. See its own `README.md` |
 | `infrastructure/openmetadata/` | Docker Compose stack for local OpenMetadata (server **2.0.2**, MySQL, Elasticsearch). See its own `README.md` |
+| `infrastructure/minio/` | Docker Compose MinIO -- the local S3 stand-in for Wasabi that feature branches store in. See its own `README.md` |
 | `package.json` / `turbo.json` | Monorepo orchestration (`apps/*` workspaces) |
 
 ## The metadata pipeline (current scope)

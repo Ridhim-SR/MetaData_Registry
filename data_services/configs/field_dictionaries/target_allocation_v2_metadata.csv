@@ -1,0 +1,23 @@
+name,business_description,tag
+id,Unique row identifier for this target allocation.,
+created_at,Timestamp when the record was created.,
+created_by,User who created the record.,
+modified_at,Timestamp when the record was last modified.,
+modified_by,User who last modified the record.,
+status,Lifecycle status of the target.,Status/Workflow
+allocation_date,Date on which the allocation was made.,
+allocation_type,Type of allocation recorded.,Financial
+assign_by,Identifier of the officer who assigned the target.,
+assign_to,Identifier of the officer the target was assigned to.,
+project_budget_amount,Budget allocated against the target.,
+project_remaining_amount,Budget remaining unspent against the target.,
+total_hysical,Total physical progress recorded; the field name appears to be a typo of total_physical.,
+departmental_scheme_id,Identifier of the departmental scheme the target belongs to.,
+financial_year_id,Identifier of the financial year the target belongs to.,
+module_type_id,Type of module the allocation was created under.,
+office_type_id,Type of office the target was assigned to.,
+parent_id,Identifier of the parent record in the allocation hierarchy.,
+umbrella_scheme_id,Identifier of the umbrella scheme the target rolls up into.,
+district_id,Identifier of the district the target is allocated for.,
+booking_level,"Level at which the target applies, for example state, district or block.",
+store_type_id,Type of store the target applies to.,
