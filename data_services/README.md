@@ -124,6 +124,7 @@ cp .env.example .env          # then fill in .env -- each setting has a comment
 | `production` | `production` | company Wasabi, folder `prod/` | `PROD_OPENMETADATA_...` (not set up yet) |
 
 - Each branch can only use its own environment. Anything else is refused, so dev and production data only come from reviewed code.
+- **`sync` enforces this a second time, at the point of the write.** Every command gets the rule from `load_env()`, but `sync()` also checks the branch it is running on before it reads anything: company Wasabi (`dev/` or `prod/`) only from the branch that owns it — `main` for `dev/`, `production` for `prod/`. That covers a direct `sync()` call built from `WASABI_BUCKET`/`WASABI_PREFIX` left over in the shell by an earlier `main` session, which nothing else would notice. `local/` is unrestricted: it is this branch's own account.
 - If git can't tell the branch, it counts as a feature branch (`local`).
 - Try things on a feature branch first. It writes only to `local/` and your laptop's OpenMetadata.
 - `main` and `production` use the company Wasabi (`WASABI_...` in `.env`). **Feature branches never do:** they use your own Wasabi account from the `LOCAL_WASABI_...` lines (section 3b of `.env`), and stop with an error if those are blank.

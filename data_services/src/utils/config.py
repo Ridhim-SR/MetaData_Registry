@@ -93,6 +93,34 @@ def check_branch_allows(env: str, branch: str | None) -> None:
     raise PermissionError(f"ENVIRONMENT={env} isn't allowed on {where} (it runs {expected}) -- {hint}")
 
 
+# Wasabi folder each environment writes to (see ENVIRONMENTS). Anything other
+# than "local" is shared company data, which a feature branch must never touch.
+_COMPANY_FOLDERS = {"dev": "development", "prod": "production"}
+
+
+def check_sync_branch() -> None:
+    """Refuse a sync pointed at another branch's Wasabi folder.
+
+    load_env() already applies check_branch_allows() to every CLI, so this is
+    belt and braces -- but sync(storage, ...) can also be called directly,
+    with a storage built by storage_from_env() from a WASABI_BUCKET/WASABI_PREFIX
+    left in the shell by an earlier main session, and nothing would notice.
+    So the same rule is repeated at the point where the write happens:
+    development data is main's, production data is the production branch's,
+    and only local/ (a feature branch's own account) is unrestricted.
+
+    Reads the same facts load_env() did, so it is idempotent: on the CLI path
+    this passes because the earlier check already passed.
+    """
+
+    env = (os.environ.get("ENVIRONMENT") or "").strip().lower()
+    if not env:  # load_env() never ran -- the folder storage targets decides
+        env = _COMPANY_FOLDERS.get((os.environ.get("WASABI_PREFIX") or "").strip().lower(), "local")
+    if env == "local":
+        return
+    check_branch_allows(env, _current_branch())
+
+
 def load_env() -> str:
     """Load .env for every CLI entry point, then apply the one switch that
     says where this run reads and writes. Each git branch has one:

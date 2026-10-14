@@ -132,6 +132,63 @@ def test_branch_rule(branch, env, allowed):
             config.check_branch_allows(env, branch)
 
 
+@pytest.mark.parametrize(
+    "env, prefix, branch, allowed",
+    [
+        # load_env() ran: the branch that owns the environment must be checked out
+        ("development", "", "main", True),
+        ("development", "", "fix/SDA-DS-001", False),
+        ("development", "", None, False),
+        ("production", "", "production", True),
+        ("production", "", "main", False),
+        # load_env() never ran: the Wasabi folder the storage targets decides
+        ("", "dev", "main", True),
+        ("", "dev", "fix/SDA-DS-001", False),
+        ("", "prod", "production", True),
+        ("", "prod", "main", False),
+        # local is a feature branch's own account -- anyone may sync to it
+        ("", "local", "fix/SDA-DS-001", True),
+        ("", "", "fix/SDA-DS-001", True),
+        ("local", "", "fix/SDA-DS-001", True),
+    ],
+)
+def test_sync_branch_rule(monkeypatch, env, prefix, branch, allowed):
+    monkeypatch.delenv("ENVIRONMENT", raising=False)
+    monkeypatch.delenv("WASABI_PREFIX", raising=False)
+    if env:
+        monkeypatch.setenv("ENVIRONMENT", env)
+    if prefix:
+        monkeypatch.setenv("WASABI_PREFIX", prefix)
+    _on(monkeypatch, branch)
+
+    if allowed:
+        config.check_sync_branch()
+    else:
+        with pytest.raises(PermissionError, match="isn't allowed on"):
+            config.check_sync_branch()
+
+
+def test_sync_branch_rule_names_how_to_get_onto_the_right_branch(monkeypatch):
+    """The message has to say what to do, not just that it refused."""
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.delenv("WASABI_PREFIX", raising=False)
+    _on(monkeypatch, "department/agriculture_department")
+
+    with pytest.raises(PermissionError, match="development only runs on 'main'"):
+        config.check_sync_branch()
+
+
+def test_sync_branch_rule_does_not_fire_when_load_env_already_applied_it(monkeypatch, env_file):
+    """On the CLI path load_env() has already resolved the environment, so
+    this must be a no-op rather than a second, contradictory refusal."""
+    _on(monkeypatch, "main")
+    monkeypatch.delenv("ENVIRONMENT", raising=False)
+    monkeypatch.delenv("WASABI_PREFIX", raising=False)
+    config.load_env()  # main -> development, WASABI_PREFIX=dev
+
+    config.check_sync_branch()
+
+
 def test_production_blocked_off_production_branch_before_anything_else_happens(env_file, monkeypatch):
     _on(monkeypatch, "main")
     monkeypatch.setenv("ENVIRONMENT", "production")

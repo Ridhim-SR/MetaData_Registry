@@ -40,6 +40,7 @@ from src.schema_registry.parsers.field_dictionary_ingest import run_field_dictio
 from src.schema_registry.pipeline import run
 from src.schema_registry.registry import lookups, paths
 from src.storage.base import ObjectStorage
+from src.utils.config import check_sync_branch
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -201,6 +202,13 @@ def sync(
     `reclassify` force-re-ingests even unchanged files so pipeline.run's
     reclassify=True re-derives classification/tag under the current
     AUTO_* rules (use after fixing curate.py; see pipeline.run)."""
+
+    # Refused before the first storage read: a sync pointed at the company
+    # Wasabi (dev/ or prod/) may only run on the branch that owns it -- main
+    # for development, the production branch for production. A CLI run has
+    # already been checked by load_env(); this catches a direct sync() call
+    # built from settings left over in the shell.
+    check_sync_branch()
 
     if only_department:
         if not publish_only and not any(d.id == only_department for d in departments):

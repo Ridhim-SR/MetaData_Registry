@@ -7,6 +7,7 @@ from src.schema_registry.openmetadata.publish import _unwrap
 from src.schema_registry.registry import lookups
 from src.schema_registry.sync import sync
 from src.storage.local import LocalObjectStorage
+from src.utils import config
 
 _CATALOG = """
 departments:
@@ -117,6 +118,34 @@ def test_reclassify_requires_a_department(storage):
 
     with pytest.raises(ValueError, match="reclassify needs --department"):
         sync(storage, parse_catalog(_CATALOG), client=_fake_client(), reclassify=True)
+
+
+def test_sync_refuses_company_wasabi_off_its_own_branch(storage, monkeypatch):
+    """sync() writes to whatever Wasabi folder this process is pointed at, so
+    the branch that owns it must be checked out. Caught here as well as in
+    load_env(), because sync() can be called directly -- with settings left
+    in the shell by an earlier main session -- and would otherwise push to
+    the company Wasabi from a feature branch."""
+
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.delenv("WASABI_PREFIX", raising=False)
+    monkeypatch.setattr(config, "_current_branch", lambda: "department/agriculture_department")
+
+    with pytest.raises(PermissionError, match="development only runs on 'main'"):
+        sync(storage, parse_catalog(_CATALOG), client=_fake_client())
+
+
+def test_sync_allows_the_account_belonging_to_its_own_branch(storage, monkeypatch):
+    """local/ is this branch's own account -- syncing to it is the whole point,
+    and no other branch's data is reachable from it."""
+
+    monkeypatch.setenv("ENVIRONMENT", "local")
+    monkeypatch.delenv("WASABI_PREFIX", raising=False)
+    monkeypatch.setattr(config, "_current_branch", lambda: "department/agriculture_department")
+
+    sync(storage, parse_catalog(_CATALOG), client=_fake_client())
+
+    assert lookups.department_exists(storage, "pwd")
 
 
 def test_only_the_changed_file_is_reingested(storage):
