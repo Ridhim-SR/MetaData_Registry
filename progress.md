@@ -947,23 +947,33 @@ services / 13 tables. Steward should then flow catalog → pipeline →
 datasets.csv → the `datasetSteward` custom property end to end.
 
 ### Future Work
-- [ ] **FIRST TASK (2026-10-14): `git pull`, merge `origin/main` locally,
+- [x] **FIRST TASK (2026-10-14): `git pull`, merge `origin/main` locally,
       then raise the PR `department/agriculture_department` -> `main`**
-      Main is at `54679a2` (PR #23: dataset `steward` field + AI-drafted
-      column descriptions). Verified by a dry-run merge on 2026-10-13:
-      **only 3 files conflict, one hunk each -- `catalog.yaml`,
-      `publish.py`, `pipeline.py` -- and the other 9 overlapping files
-      auto-merge cleanly. Exact per-file resolutions are in "Merge
-      preview" above; start from there.** Then: `pip install -r
-      requirements.txt` (main adds `anthropic`), full test runs
-      (data_services + apps/api), `sync --dry-run` clean through MinIO,
-      local OM untouched (2 services, 13 tables), push,
-      and raise the PR summarizing the branch (agri 3 datasets, MGNREGA,
-      rename to `agri_dept`, MDSF classification, service display name,
-      MinIO local storage + `LOCAL_ONLY` rail, docs) and flagging that
-      the agri/mgnrega files reach the company bucket afterwards via the
-      next item. Don't merge into `production` -- that's a separate,
-      deliberate step
+      Done: merged as `eb13dbd` (main had moved `54679a2` -> `eee0696`).
+      Exactly the 3 files the dry-run predicted, resolved as planned --
+      `catalog.yaml` (ours + their `steward:`, pwd's richer metadata kept
+      inside the commented block), `publish.py` (both function blocks),
+      `pipeline.py` (our `result` dict + `steward=steward` on the
+      upsert). Tests: **data_services 474 passed / 2 skipped, apps/api
+      47 passed.** 6 failures found and fixed first: `test_ai_metadata`
+      leaked the real `.env` into the session (`WASABI_BUCKET` made
+      every later `storage_from_env()` build an S3 client -- stubbed
+      `load_dotenv`, `draft()` is faked anyway); our
+      `test_publish_table_patches_column_tags` counted table patches
+      and main added a second one for `extraMetadata` (select on the
+      column-tag ops); `latest_curated_snapshot_path()` returned
+      backslashes on Windows, failing main's own
+      `stores_unpublished_column_details` test (now returns forward
+      slashes, not just matches on them).
+      **Still outstanding from this item: `pip install -r
+      requirements.txt`** (main adds `anthropic>=0.40`; it's imported
+      lazily inside `draft()`, so nothing needs it at test time) **and
+      `sync --dry-run`** -- MinIO (:9000) and local OM (:8585) were not
+      running, so that check didn't happen. Run it before relying on
+      the result: local OM should still show 2 services / 13 tables and
+      steward should flow catalog -> pipeline -> datasets.csv ->
+      `datasetSteward` end to end. Don't merge into `production` --
+      that's a separate, deliberate step
 - [ ] **After the PR lands: push our 2 departments' files to the company
       Wasabi** (paused at a safe point 2026-10-13): run
       `python infrastructure/wasabi/push_agri_mgnrega.py` (dry-run -- it
