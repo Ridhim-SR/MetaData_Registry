@@ -68,6 +68,36 @@ catalog.yaml (in git) ───────────────────�
 
 ---
 
+## Two ways in (only one reaches OpenMetadata)
+
+Agriculture submits **one CSV holding several tables side by side**, so there
+are two ways to turn it into one CSV per table. They deliberately coexist, but
+they are not interchangeable:
+
+| | `sync` + **`catalog.yaml`** | `preprocess_dataset` + **manifests** |
+|---|---|---|
+| What it reads | the department's submission in storage (`storage:inputs/...`) | the submission on disk at `datasets/<file>.csv` |
+| Splits it with | `parsers/agriculture_parser.py`, at ingest time | `parsers/dept/Agriculture/preprocessors/` |
+| Writes | storage + OpenMetadata | per-table CSVs under `data_services/source/` and a manifest in `configs/` |
+| Read by | **`sync`** — the path that reaches OpenMetadata | `batch` (`MANIFEST_FILE=configs/<dataset>_manifest.csv python3 -m src.schema_registry.batch`) |
+
+**`catalog.yaml` is the source of truth.** `sync` reads only it, so any table
+that is not listed there is invisible to `sync` and to a rebuild — a manifest
+row on its own does nothing for the catalog. The preprocessed CSVs under
+`data_services/source/` and the `configs/*_manifest.csv` files are the dev-time
+convenience for running many tables through `batch` without uploading anything;
+they are committed so the pipeline can be exercised from a clone.
+
+**The raw submissions are not committed.** `preprocess_dataset` points at
+`datasets/*.csv` — the department's original multi-table workbooks — which are
+deliberately left out of the repo (raw department data, and large). To run it,
+drop the file at the path named in
+`src/schema_registry/parsers/dept/Agriculture/preprocessors/registry.py`
+(`PREPROCESSOR_CONFIG[<dataset>]["input_file"]`) and re-run. `sync` needs no
+local copy at all: it reads the submission from storage.
+
+---
+
 ## First-time setup
 
 ```bash

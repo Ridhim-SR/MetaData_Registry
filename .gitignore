@@ -278,6 +278,9 @@ CLAUDE.md
 /sda_baseline_quality_test_suite.yaml
 /sda_dcat_ndsap_schema.json
 
+# Team working notes -- kept on disk, not committed
+/progress.md
+
 # Separate ingestion pipeline (not wired into schema_registry)
 /data_services/src/ingestion/
 /data_services/data/

@@ -18,26 +18,28 @@
 #   field_dictionary: storage:<key>   instead of `tables`.
 
 departments:
-  # PWD (vishwakarma) is scoped local-only and owned by another team -- kept
-  # out of the catalog so sync never touches it (2026-10-12). Live depts:
-  # agri_dept (local + global) and rural_development_department (local only,
-  # global push later).
-  # pwd:
-  #   name: Public Works Department
-  #   datasets:
-  #     vishwakarma:
-  #       category: CAT-3
-  #       owner:
-  #       steward:
-  #       frequency:
-  #       timeline:
-  #       api_available:
-  #       description: "Works managed by the Public Works Department under the Vishwakarma scheme: road and bridge works with their costs, year-wise funds, tenders, agreements, contractors, progress and locations."
-  #       tables:
-  #         vishwakarma_T:
-  #           source: storage:inputs/pwd/vishwakarma/pwd_vishwakarma_full_raw_columns.txt
-  #           format: postgres_ddl
-  #           metadata: storage:inputs/pwd/vishwakarma/pwd_vishwakarma_full_raw_columns_metadata.csv
+  # PWD (vishwakarma) is owned by another team. It is left active here exactly
+  # as main has it, so merging this branch into main never comments it out --
+  # the catalog is main's source of truth and this branch only adds agri_dept
+  # and rural_development_department below. Local runs that must not touch PWD
+  # scope themselves instead of editing this file:
+  #     python3 -m src.schema_registry.sync --department agri_dept
+  pwd:
+    name: Public Works Department
+    datasets:
+      vishwakarma:
+        category: CAT-3
+        owner:
+        steward:
+        frequency:
+        timeline:
+        api_available:
+        description: "Works managed by the Public Works Department under the Vishwakarma scheme: road and bridge works with their costs, year-wise funds, tenders, agreements, contractors, progress and locations."
+        tables:
+          vishwakarma_T:
+            source: storage:inputs/pwd/vishwakarma/pwd_vishwakarma_full_raw_columns.txt
+            format: postgres_ddl
+            metadata: storage:inputs/pwd/vishwakarma/pwd_vishwakarma_full_raw_columns_metadata.csv
   agri_dept:
     name: Agriculture Department
     datasets:
