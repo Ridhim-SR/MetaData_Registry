@@ -955,7 +955,9 @@ datasets.csv → the `datasetSteward` custom property end to end.
       inside the commented block), `publish.py` (both function blocks),
       `pipeline.py` (our `result` dict + `steward=steward` on the
       upsert). Tests: **data_services 474 passed / 2 skipped, apps/api
-      47 passed.** 6 failures found and fixed first: `test_ai_metadata`
+      47 passed** (476 / 0 / 47 once MinIO was up -- the 2 skips were
+      `requires_minio` in `test_batch`).** 6 failures found and fixed
+      first: `test_ai_metadata`
       leaked the real `.env` into the session (`WASABI_BUCKET` made
       every later `storage_from_env()` build an S3 client -- stubbed
       `load_dotenv`, `draft()` is faked anyway); our
@@ -965,15 +967,37 @@ datasets.csv → the `datasetSteward` custom property end to end.
       backslashes on Windows, failing main's own
       `stores_unpublished_column_details` test (now returns forward
       slashes, not just matches on them).
-      **Still outstanding from this item: `pip install -r
-      requirements.txt`** (main adds `anthropic>=0.40`; it's imported
-      lazily inside `draft()`, so nothing needs it at test time) **and
-      `sync --dry-run`** -- MinIO (:9000) and local OM (:8585) were not
-      running, so that check didn't happen. Run it before relying on
-      the result: local OM should still show 2 services / 13 tables and
-      steward should flow catalog -> pipeline -> datasets.csv ->
-      `datasetSteward` end to end. Don't merge into `production` --
-      that's a separate, deliberate step
+      **`sync --dry-run` done 2026-10-14** (Docker up: `sda-minio` had
+      exited 255, restarted it; `openmetadata_elasticsearch` was also
+      down -- without it the `/api/v1/services/*` list hangs, since OM's
+      search-index workers can't resolve). Result: **14 table(s),
+      0 failed**, every row `unchanged` / `would publish`, exit 0. Local
+      OM **untouched: 2 services / 13 tables**, with the service display
+      name live (`Agriculture Department`). Steward chain verified
+      separately: catalog.yaml parses `steward` for all 4 datasets and
+      `set_dataset_fields()` writes it -- the column isn't in the live
+      `_lookups/datasets.csv` yet only because a dry run writes nothing;
+      the first real sync adds it (values blank until the governance
+      meeting fills them in).
+      **`pip install -r requirements.txt` done 2026-10-14** -- pulled
+      `anthropic-1.13.0` + 6 deps, exit 0, no Anthropic account needed:
+      installing is just downloading a PyPI package, and it asks for no
+      login, key or payment. Re-ran both suites after: **476 / 0 / 47,
+      still green** (it changed no behaviour -- `draft()` is faked in
+      tests).
+      What *does* need an account is **calling** the API, which
+      `ai_metadata` is the only thing here that does: it needs
+      `ANTHROPIC_API_KEY` (absent from `.env`). Two separate things to
+      not conflate --
+      - **Not** a Claude Pro/Max subscription (that's the claude.ai chat
+        plan). The API is the Console at platform.claude.com, billed
+        pay-as-you-go against prepaid credit with per-tier spend limits.
+      - Verified failure mode with no key: `draft()` raises
+        `KeyError: 'ANTHROPIC_API_KEY'` before any HTTP request, so
+        nothing is sent and nothing is charged. The pipeline never calls
+        `ai_metadata` (it's a manual step ahead of `add`), so the whole
+        suite, `sync`, and everything else work with no key at all.
+      Don't merge into `production` -- that's a separate, deliberate step
 - [ ] **After the PR lands: push our 2 departments' files to the company
       Wasabi** (paused at a safe point 2026-10-13): run
       `python infrastructure/wasabi/push_agri_mgnrega.py` (dry-run -- it
