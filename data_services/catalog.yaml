@@ -29,7 +29,7 @@ departments:
     datasets:
       vishwakarma:
         category: CAT-3
-        owner:
+        owner: Public Works Department (PWD)
         steward:
         frequency: Daily
         timeline:
