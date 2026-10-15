@@ -1,3 +1,4 @@
+import asyncio
 import os
 from contextlib import asynccontextmanager
 
@@ -62,16 +63,22 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
     # Prewarm the guest catalog cache in each worker so the first real
-    # request is a cache hit, not a full OM fetch. Failures are ignored:
-    # OM may still be booting when the API starts.
-    try:
-        from src.openmetadata.routers.registry import _catalog_raw
+    # request is a cache hit, not a full OM fetch. It runs in the background:
+    # awaiting it here would keep the worker from serving any request until
+    # the whole OM catalog downloaded (or timed out while OM boots).
+    # Failures are ignored.
+    async def _prewarm_catalog() -> None:
+        try:
+            from src.openmetadata.routers.registry import _catalog_raw
 
-        async with async_session() as _s:
-            await _catalog_raw(_s, None)
-    except Exception:
-        pass
+            async with async_session() as _s:
+                await _catalog_raw(_s, None)
+        except Exception:
+            pass
+
+    prewarm = asyncio.create_task(_prewarm_catalog())
     yield
+    prewarm.cancel()
     try:
         await aclose_shared_client()
     except Exception:

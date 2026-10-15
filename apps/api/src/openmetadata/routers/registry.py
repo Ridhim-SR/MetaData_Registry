@@ -403,7 +403,7 @@ def _info_from_extension(extension: dict | None) -> dict:
     return info
 
 
-async def _dataset_info(session: AsyncSession, client: OpenMetadataClient, table_fqn: str) -> dict:
+def _dataset_info(database: dict | None, sidecar: dict | None) -> dict:
     """Dataset-level docs for one table's page: frequency, timeline, API
     availability, owner.
 
@@ -411,14 +411,13 @@ async def _dataset_info(session: AsyncSession, client: OpenMetadataClient, table
     data_services' publish step); the local `table_info` sidecar row -- only
     ever written by the manual POST /openmetadata/metadata/tables flow --
     overrides it field by field, so an admin edit wins over a stale publish.
+    `database` is the entity from the cached catalog (fetched with
+    `extension`), so this costs no extra OM round trip.
     """
 
     info: dict = {key: None for key in _EXTENSION_TO_INFO.values()}
-    parts = table_fqn.split(".")
-    if len(parts) >= 4:  # service.database.schema.table -> the database FQN
-        database = await client.get_database_by_fqn(".".join(parts[:2]))
+    if database:
         info.update(_info_from_extension(database.get("extension")))
-    sidecar = (await table_info_map(session, [table_fqn])).get(table_fqn)
     if sidecar:
         info.update({key: value for key, value in sidecar.items() if value is not None})
     return info
@@ -474,18 +473,16 @@ async def registry_table(
     }
     full, _ = vis.visible_tables([table], vmap, ctx)
     if full:
-        info = (await table_info_map(session, [fqn])).get(fqn)
-        info = info or {
-            "api_available": None, "dataset_owner": None, "frequency": None, "timeline": None,
-        }
-        annotated["info"] = info
-        # Table values win; the dataset (OM database + DatasetInfo) fills gaps.
+        sidecar = (await table_info_map(session, [fqn])).get(fqn)
         dataset_key = vis.dataset_fqn(fqn)
+        database = _database_entity(raw["databases"], dataset_key)
+        annotated["info"] = _dataset_info(database, sidecar)
+        # Table values win; the dataset (OM database + DatasetInfo) fills gaps.
         facts = facts_mod.resolve_table_facts(
             table,
-            info,
+            sidecar,
             (await dataset_info_map(session, [dataset_key])).get(dataset_key),
-            _database_entity(raw["databases"], dataset_key),
+            database,
         )
         annotated["facts"] = facts
         annotated["data_classification"] = facts["data_classification"]

@@ -65,12 +65,14 @@ DATABASES = [
     {"name": "db", "displayName": "Db", "description": "Public database",
      "fullyQualifiedName": "pub.db",
      # OM Custom Properties + DataSensitivity tag, as OM returns them.
-     "extension": {"frequency": "lll", "datasetSteward": "Pub Steward",
-                   "apiAvailable": ["Yes"], "timeline": "2019-2024"},
+     "extension": {"apiAvailable": "Y", "datasetOwner": "Pub Owner", "frequency": "monthly",
+                   "timeline": "2020-2024", "datasetSteward": "Pub Steward"},
      "tags": [{"tagFQN": "DataSensitivity.CAT-1", "name": "CAT-1",
                "description": "Open Access"}]},
     {"name": "vishwakarma", "displayName": "Vishwakarma", "description": None,
-     "fullyQualifiedName": "pwd.vishwakarma"},
+     "fullyQualifiedName": "pwd.vishwakarma",
+     "extension": {"apiAvailable": "N", "datasetOwner": "", "frequency": "yearly",
+                   "timeline": "2014-15 to 2025-26"}},
     {"name": "db", "displayName": "Db", "description": None, "fullyQualifiedName": "res.db"},
     {"name": "db", "displayName": "Db", "description": None, "fullyQualifiedName": "con.db"},
     {"name": "db", "displayName": "Db", "description": None, "fullyQualifiedName": "unc.db"},
@@ -100,9 +102,6 @@ DATASET_INFO = {
 TABLE_INFO = {
     "pwd.vishwakarma.public.dep_table": {
         "api_available": True, "dataset_owner": None, "frequency": None, "timeline": "2024 only",
-    },
-    "pub.db.s.pub_table": {
-        "api_available": False, "dataset_owner": None, "frequency": "Daily", "timeline": None,
     },
 }
 
@@ -142,7 +141,7 @@ class _FakeSession:
 
     def __init__(self, vmap=None, info=None):
         self._vmap = vmap if vmap is not None else VMAP
-        self._info = info or {}
+        self._info = info if info is not None else TABLE_INFO
 
     async def execute(self, stmt):
         text = str(stmt)
@@ -159,7 +158,7 @@ class _FakeSession:
         if "dataset_info" in text:
             return _Result([types.SimpleNamespace(fqn=f, **v) for f, v in DATASET_INFO.items()])
         if "table_info" in text:
-            return _Result([types.SimpleNamespace(fqn=f, **v) for f, v in TABLE_INFO.items()])
+            return _Result([types.SimpleNamespace(fqn=f, **v) for f, v in self._info.items()])
         raise AssertionError(f"unexpected query in guest test: {text}")
 
 
@@ -657,9 +656,10 @@ def test_admin_table_facts_inherit_dataset_defaults(client):
     facts = body["facts"]
     # OM table owner wins over the dataset owner.
     assert facts["owner"] == "Data Owner" and facts["origin"]["owner"] == "table"
-    # Steward and frequency are inherited from the dataset.
+    # Steward (sidecar) and frequency (OM custom property, which wins over
+    # the sidecar's "Monthly") are inherited from the dataset.
     assert facts["steward"] == "Steward S" and facts["origin"]["steward"] == "dataset"
-    assert facts["frequency"] == "Monthly" and facts["origin"]["frequency"] == "dataset"
+    assert facts["frequency"] == "yearly" and facts["origin"]["frequency"] == "dataset"
     # The table's own timeline overrides the dataset timeline.
     assert facts["timeline"] == "2024 only" and facts["origin"]["timeline"] == "table"
     assert facts["api_available"] is True
@@ -668,11 +668,22 @@ def test_admin_table_facts_inherit_dataset_defaults(client):
     assert facts["data_classification"] == "Public"
 
 
-def test_table_override_without_dataset_defaults(client):
-    body = _get(client, "/registry/tables/t-pub")
-    facts = body["facts"]
+def test_table_sidecar_row_overrides_dataset_values(client):
+    async def _session_with_row():
+        yield _FakeSession(info={
+            "pub.db.s.pub_table": {
+                "api_available": False, "dataset_owner": None, "frequency": "Daily", "timeline": None,
+            }
+        })
+
+    app.dependency_overrides[db_get_session] = _session_with_row
+    try:
+        facts = _get(client, "/registry/tables/t-pub")["facts"]
+    finally:
+        app.dependency_overrides.pop(db_get_session, None)
     assert facts["frequency"] == "Daily" and facts["origin"]["frequency"] == "table"
-    assert facts["api_available"] is False
+    assert facts["api_available"] is False and facts["origin"]["api_available"] == "table"
+    assert facts["timeline"] == "2020-2024" and facts["origin"]["timeline"] == "dataset"
 
 
 def test_admin_dataset_info_summary(client):
@@ -684,7 +695,7 @@ def test_admin_dataset_info_summary(client):
     info = card["info"]
     assert info["owner"] == "PWD Data Cell"
     assert info["steward"] == "Steward S"
-    assert info["frequency"] == "Monthly"
+    assert info["frequency"] == "yearly"  # OM custom property beats the sidecar
     assert info["table_count"] == 2
     assert info["api_tables"] == 1 and info["api_known"] == 1
 
@@ -703,21 +714,22 @@ def test_dataset_info_update_requires_admin(client):
 def test_om_custom_properties_flow_to_dataset_and_table(client):
     card = _get(client, "/registry/datasets/by-fqn", fqn="pub.db")
     info = card["info"]
-    assert info["frequency"] == "lll"
+    assert info["owner"] == "Pub Owner"
+    assert info["frequency"] == "monthly"
     assert info["steward"] == "Pub Steward"
-    assert info["timeline"] == "2019-2024"
-    assert info["api_available"] is True
+    assert info["timeline"] == "2020-2024"
+    assert info["api_available"] is True  # "Y"
     assert info["data_classification"] == "CAT-1"
     assert info["data_classification_description"] == "Open Access"
 
     facts = _get(client, "/registry/tables/t-pub")["facts"]
-    # Table sidecar frequency overrides; the rest is inherited from OM.
-    assert facts["frequency"] == "Daily" and facts["origin"]["frequency"] == "table"
+    # No table-level values: everything is inherited from the OM database.
+    assert facts["frequency"] == "monthly" and facts["origin"]["frequency"] == "dataset"
     assert facts["steward"] == "Pub Steward" and facts["origin"]["steward"] == "dataset"
-    assert facts["timeline"] == "2019-2024" and facts["origin"]["timeline"] == "dataset"
-    # The table's own MDSF tag and API flag win over the dataset's.
+    assert facts["timeline"] == "2020-2024" and facts["origin"]["timeline"] == "dataset"
+    assert facts["api_available"] is True and facts["origin"]["api_available"] == "dataset"
+    # The table's own MDSF tag wins over the dataset's CAT tag.
     assert facts["data_classification"] == "Public"
-    assert facts["api_available"] is False
 
 
 def _tag_database(monkeypatch, fqn, level):
