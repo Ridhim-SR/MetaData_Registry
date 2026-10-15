@@ -1,0 +1,54 @@
+column_name,data_type
+id,character varying
+status,integer
+block_code,character varying
+central_subsidy,numeric
+crop_id,character varying
+cumulative_sale,numeric
+device_id,character varying
+device_user_name,character varying
+dist_code,character varying
+distribution_type,character varying
+farmer_share,numeric
+mausam_id,character varying
+prajati_id,character varying
+quantity,numeric
+receipt_no,character varying
+registration_id,character varying
+sales_date,character varying
+sell_price,numeric
+state_subsidy,numeric
+store_id,character varying
+trans_mode,character varying
+transaction_no,character varying
+transaction_type,character varying
+year_id,character varying
+consume_land,character varying
+remaining_land,character varying
+total_land,character varying
+batch_number,character varying
+caste_id,character varying
+bill_number,character varying
+master_store_id,character varying
+departmental_scheme_id,character varying
+departmental_scheme_name,character varying
+agency_id,character varying
+subsidy_from_top_up_project,numeric
+top_up_scheme_id,character varying
+top_up_scheme_name,character varying
+top_up_max_subsidy_amount,numeric
+top_up_max_subsidy_percentage,numeric
+bill_type,character varying
+store_type,character varying
+cafeteria_id,character varying
+bill_upload,character varying
+change_mainschemeid,character varying
+unit_name,character varying
+unit_id,character varying
+updated_departmental_scheme_id,character varying
+updated_departmental_scheme_name,character varying
+updated_top_up_scheme_id,character varying
+updated_top_up_scheme_name,character varying
+modified_by,character varying
+modified_at,timestamp without time zone
+previous_central_subsidy,numeric

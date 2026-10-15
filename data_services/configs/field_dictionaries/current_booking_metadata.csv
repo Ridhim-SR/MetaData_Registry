@@ -1,0 +1,56 @@
+name,business_description,tag
+id,Unique row identifier for this booking.,
+created_at,Timestamp when the record was created.,
+created_by,User who created the record.,
+modified_at,Timestamp when the record was last modified.,
+modified_by,User who last modified the record.,
+status,Lifecycle status of the booking.,Status/Workflow
+applicable_subsidy,Subsidy amount applicable to this booking.,Financial
+booking_amount,Amount booked for this transaction.,
+booking_date,Date on which the booking was made.,
+bookings_id,Reference to the parent booking record.,
+bookings_status,Status of the booking in the booking workflow.,
+payment_mode,Mode of payment used for the booking.,Financial
+transaction_id,Identifier of the payment transaction for the booking.,Financial
+waiting_no,Waiting number assigned to the booking in the queue.,
+crop_noncrop_name_id,Identifier of the crop or non-crop item booked.,
+departmental_scheme_id,Identifier of the departmental scheme under which the booking was made.,
+online_booking_details_id,Reference to the detail row of the online booking.,
+online_booking_id,Reference to the online booking this row belongs to.,
+variety_id,Identifier of the crop variety booked.,
+payment_term,Payment term agreed for the booking.,Financial
+grant_id,Identifier of the grant linked to this booking.,Financial
+booking_person,"Person count the booking was made for; it may instead be a person identifier, which the name alone does not settle.",
+sub_assistance_id,Identifier of the subsidy assistance component linked to the booking.,
+payment_status,Payment status of the booking.,
+document_upload_validity,"Validity period of the uploaded document, in days.",
+financial_year_id,Identifier of the financial year the booking belongs to.,
+winning_date,Date on which the booking won allocation in the draw.,
+cancel_date,Date on which the booking was cancelled.,
+sequence_no,Sequence number of the booking in processing order.,
+booking_level,"Level at which the booking is made, for example state, district or block.",
+is_scheme_validation_available,Whether scheme validation is available for this booking.,
+block_name,Name of the administrative block.,
+district_name,Name of the district.,
+way_of_booking,Channel through which the booking was made.,
+block_id,Identifier of the administrative block.,
+district_id,Identifier of the district.,
+village_id,Identifier of the village.,
+temp_column,Temporary working column; no documented purpose.,
+repayment_date,Date on which the repayment fell due.,
+repayment_amount,Amount to be repaid for this booking.,
+repayment_mode,Mode of repayment used.,Financial
+repayment_transaction_id,Identifier of the repayment transaction.,Financial
+old_grant_id,Previous grant identifier retained for migration reference.,Financial
+old_online_booking_details_id,Previous detail-row identifier retained for migration reference.,
+old_online_booking_id,Previous online booking identifier retained for migration reference.,
+old83_grant_id,"Grant identifier carried over from the previous system; the ""83"" prefix is not explained by the field name.",Financial
+old83_online_booking_id,Online booking identifier carried over from the previous system.,
+old83_online_booking_details_id,Detail-row identifier carried over from the previous system.,
+revert83to11,Flag marking a record reverted between system versions; the exact meaning is not stated by the field name.,
+updatewating_status,Updated waiting-list status of the booking; the field name appears to be a typo of update_waiting_status.,
+old_wating_no,Previous waiting number retained from the earlier system; the field name appears to be a typo of old_waiting_no.,
+old_bookings_status,Previous booking status retained from the earlier system.,
+cancel_booking_flag,Whether the booking has been cancelled.,
+promote_booking_flag,Whether the booking was promoted off the waiting list.,
+isp_mandal_code,Mandal (tehsil) code of the ISP office handling the booking.,

@@ -1,0 +1,184 @@
+import os
+import subprocess
+from pathlib import Path
+from urllib.parse import urlsplit
+
+from dotenv import load_dotenv
+
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
+# data_services/.env, regardless of the directory a command is run from.
+_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
+
+# ENVIRONMENT value -> (prefix of its OpenMetadata settings in .env,
+#                        its folder in the Wasabi bucket)
+ENVIRONMENTS = {
+    "local": ("LOCAL", "local"),
+    "development": ("DEV", "dev"),
+    "production": ("PROD", "prod"),
+}
+
+# Wasabi settings an environment can set for itself with its prefix (e.g.
+# LOCAL_WASABI_BUCKET); unset ones fall back to the shared WASABI_... value.
+_WASABI_SETTINGS = (
+    "WASABI_BUCKET", "WASABI_ENDPOINT_URL", "WASABI_REGION", "WASABI_ACCESS_KEY_ID",
+    "WASABI_SECRET_ACCESS_KEY", "WASABI_BACKUP_BUCKET", "WASABI_BACKUP_REGION",
+)
+# local must bring its own account: these can't fall back to the company one.
+_LOCAL_REQUIRED = ("WASABI_BUCKET", "WASABI_ENDPOINT_URL", "WASABI_ACCESS_KEY_ID", "WASABI_SECRET_ACCESS_KEY")
+
+# LOCAL_ONLY=1 (optional safety rail, see .env.example 3b): the local
+# environment may talk to nothing but this machine. Local data lives in a
+# local MinIO and a local OpenMetadata; a mistyped host or a copied company
+# address must never send it to a shared server.
+_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1", "host.docker.internal"}
+_TRUTHY = {"1", "true", "yes", "on"}
+
+
+def _local_only() -> bool:
+    return (os.environ.get("LOCAL_ONLY") or "").strip().lower() in _TRUTHY
+
+
+def _refuse_remote(setting: str, url: str) -> None:
+    """LOCAL_ONLY: refuse a local-environment address that leaves this machine."""
+    host = (urlsplit(url).hostname or "").lower() if url else ""
+    if url and host not in _LOOPBACK_HOSTS:
+        raise PermissionError(
+            f"LOCAL_ONLY=1 refuses {setting}={url!r}: it points off this machine "
+            f"(host '{host}'). Local runs use this machine's services only "
+            f"(local MinIO + local OpenMetadata) -- fix the address, or unset "
+            f"LOCAL_ONLY if you really mean to send local data there"
+        )
+
+# Each git branch runs exactly one ENVIRONMENT, so shared data only ever
+# comes from reviewed code: the production branch -> production, main ->
+# development, any other branch (or an unknown one) -> local.
+PRODUCTION_BRANCH = "production"
+MAIN_BRANCH = "main"
+
+
+def environment_for_branch(branch: str | None) -> str:
+    return {PRODUCTION_BRANCH: "production", MAIN_BRANCH: "development"}.get(branch, "local")
+
+
+def _current_branch() -> str | None:
+    """The checked-out git branch of this repo, or None if it can't be told
+    (no git, not a checkout, or a detached HEAD)."""
+
+    try:
+        branch = subprocess.run(
+            ["git", "-C", str(_ENV_FILE.parent), "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True, text=True, timeout=5, check=True,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return None if branch in ("", "HEAD") else branch
+
+
+def check_branch_allows(env: str, branch: str | None) -> None:
+    """Refuse an ENVIRONMENT that isn't this branch's one."""
+
+    expected = environment_for_branch(branch)
+    if env == expected:
+        return
+    where = f"branch '{branch}'" if branch else "an unknown git branch"
+    if env == "production":
+        hint = f"production only runs on the '{PRODUCTION_BRANCH}' branch: merge {MAIN_BRANCH} into it, check it out, then run it there."
+    elif env == "development":
+        hint = f"development only runs on '{MAIN_BRANCH}': merge your PR, then git checkout {MAIN_BRANCH} && git pull."
+    else:
+        hint = f"on this branch use ENVIRONMENT={expected} (or leave ENVIRONMENT blank)."
+    raise PermissionError(f"ENVIRONMENT={env} isn't allowed on {where} (it runs {expected}) -- {hint}")
+
+
+# Wasabi folder each environment writes to (see ENVIRONMENTS). Anything other
+# than "local" is shared company data, which a feature branch must never touch.
+_COMPANY_FOLDERS = {"dev": "development", "prod": "production"}
+
+
+def check_sync_branch() -> None:
+    """Refuse a sync pointed at another branch's Wasabi folder.
+
+    load_env() already applies check_branch_allows() to every CLI, so this is
+    belt and braces -- but sync(storage, ...) can also be called directly,
+    with a storage built by storage_from_env() from a WASABI_BUCKET/WASABI_PREFIX
+    left in the shell by an earlier main session, and nothing would notice.
+    So the same rule is repeated at the point where the write happens:
+    development data is main's, production data is the production branch's,
+    and only local/ (a feature branch's own account) is unrestricted.
+
+    Reads the same facts load_env() did, so it is idempotent: on the CLI path
+    this passes because the earlier check already passed.
+    """
+
+    env = (os.environ.get("ENVIRONMENT") or "").strip().lower()
+    if not env:  # load_env() never ran -- the folder storage targets decides
+        env = _COMPANY_FOLDERS.get((os.environ.get("WASABI_PREFIX") or "").strip().lower(), "local")
+    if env == "local":
+        return
+    check_branch_allows(env, _current_branch())
+
+
+def load_env() -> str:
+    """Load .env for every CLI entry point, then apply the one switch that
+    says where this run reads and writes. Each git branch has one:
+
+        other branches -> local        Wasabi local/ folder, LOCAL_OPENMETADATA_*
+        main           -> development  Wasabi dev/ folder,   DEV_OPENMETADATA_*
+        production     -> production   Wasabi prod/ folder,  PROD_OPENMETADATA_*
+
+    ENVIRONMENT blank = the branch's one; any other value is refused
+    (check_branch_allows). main and production use the company Wasabi
+    (WASABI_...); local uses only LOCAL_WASABI_... (your own account) and
+    stops if those are blank, so a feature branch never touches company
+    data. With LOCAL_ONLY=1, local additionally refuses any address that
+    isn't this machine (localhost/127.0.0.1/host.docker.internal), so local
+    data can't reach a shared server even by a typo. Variables
+    already exported in the shell win over .env. Returns the environment used."""
+
+    load_dotenv(_ENV_FILE)
+
+    branch = _current_branch()
+    env = (os.environ.get("ENVIRONMENT") or "").strip().lower() or environment_for_branch(branch)
+    if env not in ENVIRONMENTS:
+        raise ValueError(f"ENVIRONMENT={env!r} -- must be one of: {', '.join(ENVIRONMENTS)}")
+    check_branch_allows(env, branch)
+    os.environ["ENVIRONMENT"] = env
+
+    prefix, wasabi_folder = ENVIRONMENTS[env]
+    for setting in ("OPENMETADATA_HOST_PORT", "OPENMETADATA_JWT_TOKEN"):
+        os.environ.setdefault(setting, os.environ.get(f"{prefix}_{setting}", ""))
+    for setting in _WASABI_SETTINGS:
+        own = os.environ.get(f"{prefix}_{setting}", "")
+        if env == "local" or own:  # local only ever uses its own account, never the company one
+            os.environ[setting] = own
+
+    if env == "local":
+        missing = [f"LOCAL_{s}" for s in _LOCAL_REQUIRED if not os.environ.get(s)]
+        if missing:
+            raise ValueError(
+                f"Feature branches use your own Wasabi account, but {', '.join(missing)} "
+                f"{'is' if len(missing) == 1 else 'are'} blank in .env -- fill in section 3b "
+                f"(the company Wasabi is only for main and production)"
+            )
+    elif not os.environ.get("WASABI_BUCKET"):
+        raise ValueError(
+            f"ENVIRONMENT={env} stores data in Wasabi, but WASABI_BUCKET is blank in .env -- fill it in "
+            f"(see .env.example)"
+        )
+    os.environ.setdefault("WASABI_PREFIX", wasabi_folder)
+
+    if env == "local" and _local_only():  # local storage + local OM may never leave this machine
+        _refuse_remote("WASABI_ENDPOINT_URL (LOCAL_WASABI_ENDPOINT_URL)",
+                       os.environ.get("WASABI_ENDPOINT_URL", ""))
+        _refuse_remote("OPENMETADATA_HOST_PORT (LOCAL_OPENMETADATA_HOST_PORT)",
+                       os.environ.get("OPENMETADATA_HOST_PORT", ""))
+
+    logger.info(
+        f"Config: ENVIRONMENT={env} | branch: {branch or 'unknown'} | "
+        f"storage: Wasabi {os.environ['WASABI_BUCKET']}/{os.environ['WASABI_PREFIX']}/ | "
+        f"OpenMetadata: {os.environ['OPENMETADATA_HOST_PORT'] or '(not set)'}"
+    )
+    return env

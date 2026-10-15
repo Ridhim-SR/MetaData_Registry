@@ -1,0 +1,14 @@
+name,business_description,tag
+id,Unique row identifier for the online booking window.,
+created_at,Timestamp when the record was created.,
+created_by,User who created the record.,
+modified_at,Timestamp when the record was last modified.,
+modified_by,User who last modified the record.,
+status,Lifecycle status of the booking window.,Status/Workflow
+end_date,End date of the online booking window.,
+maxno_booking_allowed_within_fy_in_selected_scheme,Maximum number of bookings allowed in the financial year under the selected scheme.,
+start_date,Start date of the online booking window.,
+way_of_booking_type,Type of channel used for the online booking.,
+financial_year_id,Identifier of the financial year the booking window belongs to.,
+booking_level,"Level at which the booking window applies, for example state, district or block.",
+booking_round,Round number of the booking window.,

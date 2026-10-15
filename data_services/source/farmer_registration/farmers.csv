@@ -1,0 +1,54 @@
+column_name,data_type
+id,character varying
+created_at,timestamp without time zone
+created_by,character varying
+modified_at,timestamp without time zone
+modified_by,character varying
+status,integer
+aadhar_no,character varying
+aadhar_response,text
+address,character varying
+date_of_birth,timestamp without time zone
+email_id,character varying
+father_name,character varying
+gender,character varying
+hindi_address,character varying
+hindi_father_name,character varying
+hindi_name,character varying
+image,bytea
+mobile_no,character varying
+mobile_verified,boolean
+name,character varying
+pin_code,integer
+rashan_card_no,character varying
+submission_date,timestamp without time zone
+uu_id,character varying
+benficiary_categories_id,character varying
+district_id,character varying
+f_id,character varying
+sr_no,integer
+application_no,character varying
+registration_no,character varying
+caste_application_no,character varying
+caste_date_of_issue,timestamp without time zone
+caste,character varying
+caste_id,character varying
+ifsc_code,character varying
+bank_id,character varying
+bank_name,character varying
+branch_id,character varying
+branch_name,character varying
+bank_district_id,character varying
+bank_district_name,character varying
+bank_account_no,character varying
+verified_from_aadhar,boolean
+district,character varying
+block_id,character varying
+block_name,character varying
+isp_request_id,character varying
+isp_applicant_id,character varying
+isp_service_code,character varying
+token,character varying
+ddo_beneficiary_creation_id,character varying
+sna_beneficiary_creation_id,character varying
+adhar_reference_no,character varying

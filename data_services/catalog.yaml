@@ -1,0 +1,139 @@
+# What should be in OpenMetadata. `sync` makes storage and OpenMetadata
+# match this file:   python3 -m src.schema_registry.sync
+#
+# To add or change data: upload the department's file to storage, edit this
+# file, open a PR, and run sync after it's merged. See README.
+#
+# Per dataset (all optional; blank = not set):
+#   category      CAT-1 | CAT-2 | CAT-3 | CAT-4
+#   owner, steward, frequency, timeline, api_available (Y/N), description
+# Per table:
+#   source        storage:<key> of the department's file (required)
+#   format        postgres_ddl (default) | csv
+#   schema        database schema name (default public)
+#   metadata      storage:<key> of a business-metadata CSV (optional)
+#   allow_column_removal: true   only for a deliberate full refresh that drops
+#                                columns -- remove it again after the sync
+# A dataset described by one multi-table Field Dictionary file uses
+#   field_dictionary: storage:<key>   instead of `tables`.
+
+departments:
+  # PWD (vishwakarma) is owned by another team. It is left active here exactly
+  # as main has it, so merging this branch into main never comments it out --
+  # the catalog is main's source of truth and this branch only adds agri_dept
+  # and rural_development_department below. Local runs that must not touch PWD
+  # scope themselves instead of editing this file:
+  #     python3 -m src.schema_registry.sync --department agri_dept
+  pwd:
+    name: Public Works Department
+    datasets:
+      vishwakarma:
+        category: CAT-3
+        owner:
+        steward:
+        frequency: Daily
+        timeline:
+        api_available: 
+        description: "Works managed by the Public Works Department under the Vishwakarma scheme: road and bridge works with their costs, year-wise funds, tenders, agreements, contractors, progress and locations."
+        tables:
+          vishwakarma_T:
+            source: storage:inputs/pwd/vishwakarma/pwd_vishwakarma_full_raw_columns.txt
+            format: postgres_ddl
+            metadata: storage:inputs/pwd/vishwakarma/pwd_vishwakarma_full_raw_columns_metadata.csv
+  agri_dept:
+    name: Agriculture Department
+    datasets:
+      distribution_record_dataset:
+        category: CAT-3
+        owner:
+        steward:
+        frequency:
+        timeline:
+        api_available:
+        description: >-
+          Crop sale and booking records for the department's distribution
+          schemes: crop sales with central and state subsidy (crop_sales),
+          farmer bookings and their repayment schedule (current_booking and
+          its farmer details), and the online booking windows that govern how
+          many bookings a crop or item may receive.
+        tables:
+          crop_sales:
+            source: storage:inputs/agri_dept/distribution_record_dataset/Distribution_Records_Dataset-12_13_52.csv
+            format: csv
+            metadata: storage:inputs/agri_dept/distribution_record_dataset/crop_sales_metadata.csv
+          current_booking:
+            source: storage:inputs/agri_dept/distribution_record_dataset/Distribution_Records_Dataset-12_13_52.csv
+            format: csv
+            metadata: storage:inputs/agri_dept/distribution_record_dataset/current_booking_metadata.csv
+          current_booking_farmer_details:
+            source: storage:inputs/agri_dept/distribution_record_dataset/Distribution_Records_Dataset-12_13_52.csv
+            format: csv
+            metadata: storage:inputs/agri_dept/distribution_record_dataset/current_booking_farmer_details_metadata.csv
+          online_booking:
+            source: storage:inputs/agri_dept/distribution_record_dataset/Distribution_Records_Dataset-12_13_52.csv
+            format: csv
+            metadata: storage:inputs/agri_dept/distribution_record_dataset/online_booking_metadata.csv
+          online_booking_details:
+            source: storage:inputs/agri_dept/distribution_record_dataset/Distribution_Records_Dataset-12_13_52.csv
+            format: csv
+            metadata: storage:inputs/agri_dept/distribution_record_dataset/online_booking_details_metadata.csv
+      farmer_registration_master_dataset:
+        category: CAT-3
+        owner:
+        steward:
+        frequency:
+        timeline:
+        api_available:
+        description: >-
+          Master record of registered farmers: identity and contact details,
+          caste and certificate references, Aadhaar verification status, land
+          and scheme eligibility, and the bank account used for direct benefit
+          transfers.
+        tables:
+          farmers:
+            source: storage:inputs/agri_dept/farmer_registration_master_dataset/Farmer_Registration_Master_Dataset-12_9_15.csv
+            format: csv
+            metadata: storage:inputs/agri_dept/farmer_registration_master_dataset/farmer_registration_field_dictionary.csv
+      scheme_physical_financial_progress_dataset:
+        category: CAT-3
+        owner:
+        steward:
+        frequency:
+        timeline:
+        api_available:
+        description: >-
+          Physical and financial progress of departmental schemes: target
+          allocations against each scheme, budgets received and still
+          unspent, and grant-wise bills raised for farmers and vendors
+          including their loan and direct benefit transfer details.
+        tables:
+          target_allocation_v2:
+            source: storage:inputs/agri_dept/scheme_physical_financial_progress_dataset/Scheme_Physical__Financial_Progress_Dataset-12_30_34.csv
+            format: csv
+            metadata: storage:inputs/agri_dept/scheme_physical_financial_progress_dataset/target_allocation_v2_metadata.csv
+          financial_budget_allocation:
+            source: storage:inputs/agri_dept/scheme_physical_financial_progress_dataset/Scheme_Physical__Financial_Progress_Dataset-12_30_34.csv
+            format: csv
+            metadata: storage:inputs/agri_dept/scheme_physical_financial_progress_dataset/financial_budget_allocation_metadata.csv
+          grant_wise_bill_generation:
+            source: storage:inputs/agri_dept/scheme_physical_financial_progress_dataset/Scheme_Physical__Financial_Progress_Dataset-12_30_34.csv
+            format: csv
+            metadata: storage:inputs/agri_dept/scheme_physical_financial_progress_dataset/grant_wise_bill_generation_metadata.csv
+  rural_development_department:
+    name: Rural Development Department
+    datasets:
+      mgnrega:
+        category: CAT-1
+        owner:
+        steward:
+        frequency: yearly
+        timeline: 2014-15 to 2025-26
+        api_available: N
+        description: >-
+          Gram Panchayat-level MGNREGA implementation data from the Ministry
+          of Rural Development's MIS: job-card registration and workers by
+          social category (category_wise_workers), employment demanded/offered
+          and persondays (employment_generated), women's bank-account coverage
+          (women_joint_accounts), and works, expenditure and persondays by
+          work type (work_structure).
+        field_dictionary: storage:inputs/rural_development_department/mgnrega/mgnrega_field_dictionary.csv

@@ -1,0 +1,14 @@
+column_name,data_type
+id,character varying
+created_at,timestamp without time zone
+created_by,character varying
+modified_at,timestamp without time zone
+modified_by,character varying
+status,integer
+end_date,timestamp without time zone
+maxno_booking_allowed_within_fy_in_selected_scheme,integer
+start_date,timestamp without time zone
+way_of_booking_type,integer
+financial_year_id,character varying
+booking_level,integer
+booking_round,integer

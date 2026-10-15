@@ -373,6 +373,57 @@ async def dataset_by_fqn(
     raise HTTPException(status_code=404, detail="Dataset not found")
 
 
+_EXTENSION_TO_INFO = {
+    "apiAvailable": "api_available",
+    "datasetOwner": "dataset_owner",
+    "frequency": "frequency",
+    "timeline": "timeline",
+}
+_API_TRUTHY = {"y": True, "yes": True, "true": True, "1": True}
+_API_FALSY = {"n": False, "no": False, "false": False, "0": False}
+
+
+def _info_from_extension(extension: dict | None) -> dict:
+    """Map an OM Database entity's custom properties -- what data_services
+    publishes as `extension` (openmetadata/publish.py's
+    _CUSTOM_PROPERTY_NAMES; apiAvailable arrives as free-text "Y"/"N") --
+    into the TableInfo sidecar's field names/types."""
+
+    ext = extension or {}
+    info: dict = {}
+    for om_key, info_key in _EXTENSION_TO_INFO.items():
+        value = ext.get(om_key)
+        if isinstance(value, str):
+            value = value.strip() or None
+        info[info_key] = value
+    api = info.get("api_available")
+    if isinstance(api, str):
+        lowered = api.lower()
+        info["api_available"] = _API_TRUTHY.get(lowered, _API_FALSY.get(lowered))
+    return info
+
+
+async def _dataset_info(session: AsyncSession, client: OpenMetadataClient, table_fqn: str) -> dict:
+    """Dataset-level docs for one table's page: frequency, timeline, API
+    availability, owner.
+
+    Source of truth is the OM database's custom properties (written by
+    data_services' publish step); the local `table_info` sidecar row -- only
+    ever written by the manual POST /openmetadata/metadata/tables flow --
+    overrides it field by field, so an admin edit wins over a stale publish.
+    """
+
+    info: dict = {key: None for key in _EXTENSION_TO_INFO.values()}
+    parts = table_fqn.split(".")
+    if len(parts) >= 4:  # service.database.schema.table -> the database FQN
+        database = await client.get_database_by_fqn(".".join(parts[:2]))
+        info.update(_info_from_extension(database.get("extension")))
+    sidecar = (await table_info_map(session, [table_fqn])).get(table_fqn)
+    if sidecar:
+        info.update({key: value for key, value in sidecar.items() if value is not None})
+    return info
+
+
 @router.get("/tables/{table_id}")
 async def registry_table(
     table_id: str,
@@ -386,6 +437,10 @@ async def registry_table(
     viewers without full access receive 200 with a locked table summary
     (name, description, column count, columns: []); there is no 403 for them.
     Used by the frontend only to resolve legacy table links to datasets.
+
+    Full-access responses carry `info`/`facts` -- the dataset documentation
+    rows (refresh frequency, timeline, API available, owner) sourced from
+    the OM database custom properties, see _dataset_info().
     """
     ctx = user_context(user)
     async with OpenMetadataClient() as client:

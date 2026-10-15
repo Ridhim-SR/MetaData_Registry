@@ -1,3 +1,5 @@
+import pytest
+
 from src.schema_registry.registry import lookups
 from src.storage.local import LocalObjectStorage
 
@@ -36,6 +38,7 @@ def test_upsert_dataset_links_to_department(tmp_path):
             "category": "",
             "api_available": "",
             "owner": "",
+            "steward": "",
             "frequency": "",
             "timeline": "",
             "dataset_description": "",
@@ -91,7 +94,13 @@ def test_upsert_table_links_to_dataset(tmp_path):
     lookups.upsert_table(storage, "pwd.vishwakarma.roads", "pwd.vishwakarma", "roads", "public")
     rows = storage.read_csv(lookups.TABLES_PATH)
     assert rows == [
-        {"table_id": "pwd.vishwakarma.roads", "dataset_id": "pwd.vishwakarma", "table_name": "roads", "schema_name": "public"}
+        {
+            "table_id": "pwd.vishwakarma.roads",
+            "dataset_id": "pwd.vishwakarma",
+            "table_name": "roads",
+            "schema_name": "public",
+            "deleted": "",
+        }
     ]
 
 
@@ -135,3 +144,39 @@ def test_upsert_dataset_update_does_not_disturb_other_datasets(tmp_path):
     srishti = next(r for r in rows if r["dataset_id"] == "pwd.srishti")
     assert vishwakarma["owner"] == "Someone"
     assert srishti["owner"] == ""
+
+
+def test_lookup_file_written_before_a_field_existed_accepts_new_rows(tmp_path):
+    """datasets.csv files created before category/owner/... existed used to
+    make every later upsert raise "dict contains fields not in fieldnames"."""
+
+    storage = LocalObjectStorage(tmp_path)
+    old_file = tmp_path / lookups.DATASETS_PATH
+    old_file.parent.mkdir(parents=True)
+    old_file.write_text("dataset_id,department_id,dataset_name\nold.ds,old,ds\n")
+
+    lookups.upsert_dataset(storage, "pwd.vishwakarma", "pwd", "vishwakarma", owner="PWD IT Cell")
+
+    rows = {r["dataset_id"]: r for r in storage.read_csv(lookups.DATASETS_PATH)}
+    assert rows["pwd.vishwakarma"]["owner"] == "PWD IT Cell"
+    assert rows["old.ds"]["owner"] == ""  # older row just gets a blank in the new column
+    assert rows["old.ds"]["dataset_name"] == "ds"
+
+
+def test_failed_write_leaves_previous_lookup_file_intact(tmp_path, monkeypatch):
+    storage = LocalObjectStorage(tmp_path)
+    lookups.register_department(storage, "pwd", "Public Works Department")
+
+    def _crash(fd):
+        raise OSError("disk full")
+
+    monkeypatch.setattr("src.storage.local.os.fsync", _crash)
+    with pytest.raises(OSError, match="disk full"):
+        lookups.register_department(storage, "welfare", "Social Welfare Department")
+    monkeypatch.undo()
+
+    assert storage.read_csv(lookups.DEPARTMENTS_PATH) == [
+        {"department_id": "pwd", "department_name": "Public Works Department"}
+    ]
+    leftovers = [p.name for p in (tmp_path / "_lookups").iterdir() if p.name.endswith(".tmp")]
+    assert leftovers == []

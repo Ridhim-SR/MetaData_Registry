@@ -1,0 +1,37 @@
+name,business_description,tag
+id,Unique row identifier for this grant-wise bill.,
+created_at,Timestamp when the record was created.,
+created_by,User who created the record.,
+modified_at,Timestamp when the record was last modified.,
+modified_by,User who last modified the record.,
+status,Lifecycle status of the bill.,Status/Workflow
+action_status,Action status of the bill generation workflow.,
+beneficiary_id,Identifier of the beneficiary the bill is raised for.,
+district_id,Identifier of the district the bill belongs to.,
+farmer_id,Identifier of the farmer the bill is raised for.,
+farmer_name,Full name of the farmer the bill is raised for.,PII
+father_name,Father's name of the farmer.,PII
+funding_pattern_id,Funding pattern applied to the grant.,
+record_id,Identifier of the record this bill belongs to.,
+record_type,Type of record this bill belongs to.,
+record_type_id,Numeric code for the type of record.,
+beneficiary_category_id,Beneficiary category of the person the bill is raised for.,
+departmental_scheme_id,Identifier of the departmental scheme the grant belongs to.,
+grant_id,Identifier of the grant the bill is raised against.,Financial
+email_id,Email address of the beneficiary or vendor.,PII
+mobile_no,Mobile number of the beneficiary or vendor.,PII
+registration_no,Registration number of the beneficiary or vendor.,PII
+vendor_address,Address of the vendor the bill is raised to.,PII
+vendor_name,Name of the vendor the bill is raised to.,PII
+vendor_registration_id,Registration reference of the vendor.,
+dbt_date,Date on which the direct benefit transfer was made.,
+dbt_no,Direct benefit transfer transaction number.,
+loan_bank_name,Name of the bank that disbursed the loan.,
+loan_branch_name,Name of the bank branch that disbursed the loan.,
+loan_ifsc,IFSC code of the bank branch holding the loan account.,Financial
+loan_account_no,Bank account number the loan is held against.,PII
+iswithloan,Whether the grant is linked to a loan.,Financial
+office_type_id,Type of office the bill was generated for.,
+unit_id,Identifier of the unit or centre the bill belongs to.,
+role_id,Identifier of the officer role that acted on the bill.,
+financial_year_id,Identifier of the financial year the bill belongs to.,
