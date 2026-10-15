@@ -124,7 +124,7 @@ departments:
     datasets:
       mgnrega:
         category: CAT-1
-        owner:
+        owner: Rural Development Department
         steward:
         frequency: yearly
         timeline: 2014-15 to 2025-26
