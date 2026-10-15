@@ -34,7 +34,12 @@ async def create_table_metadata(
             )
         raise HTTPException(status_code=502, detail=message[:500])
     # Record access metadata (FastAPI is the policy enforcement point).
-    from src.openmetadata.routers.registry import upsert_table_info, upsert_table_visibility
+    from src.openmetadata import visibility as vis
+    from src.openmetadata.routers.registry import (
+        upsert_dataset_info,
+        upsert_table_info,
+        upsert_table_visibility,
+    )
 
     await upsert_table_visibility(
         session,
@@ -50,6 +55,14 @@ async def create_table_metadata(
         frequency=payload.frequency,
         timeline=payload.timeline,
     )
+    if payload.dataset_info is not None:
+        values = payload.dataset_info.model_dump(exclude_none=True)
+        if values:
+            await upsert_dataset_info(
+                session,
+                fqn=vis.dataset_fqn(table["fully_qualified_name"]),
+                values=values,
+            )
     return DatasetResponse(
         success=True,
         message="Metadata stored successfully",

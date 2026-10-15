@@ -2,6 +2,7 @@
 export const en = {
   dataClassification: "Data classification",
   apiAvailable: "API available",
+  apiTablesCount: "{count} of {total} tables",
   yes: "Yes",
   no: "No",
   viewApiDocs: "View API docs →",

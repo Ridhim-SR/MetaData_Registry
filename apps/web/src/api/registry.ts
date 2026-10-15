@@ -43,14 +43,19 @@ export interface RegistryTag {
   labelType?: string;
 }
 
+/** Raw table sidecar row: API flag plus per-table overrides (may be empty). */
 export interface TableInfo {
   api_available?: boolean | null;
   /** URL of the API documentation, when the backend exposes one. */
   api_docs_url?: string | null;
+  /** Per-table owner override; empty means the dataset owner applies. */
   dataset_owner?: string | null;
   frequency?: string | null;
   timeline?: string | null;
 }
+
+/** Where a resolved fact came from: the table itself or its parent dataset. */
+export type FactOrigin = "table" | "dataset" | null;
 
 export interface RegistryTable {
   id: string;
@@ -72,13 +77,45 @@ export interface RegistryTable {
   facts?: TableFacts | null;
 }
 
+/** Table facts with dataset inheritance already applied by the backend. */
 export interface TableFacts {
   owner?: string | null;
   steward?: string | null;
   department_contact?: string | null;
   updated_at?: number | null;
   frequency?: string | null;
+  timeline?: string | null;
+  api_available?: boolean | null;
+  data_classification?: string | null;
+  /** Description of the classification tag (e.g. what CAT-3 means). */
+  data_classification_description?: string | null;
   source?: string | null;
+  origin?: {
+    owner?: FactOrigin;
+    steward?: FactOrigin;
+    frequency?: FactOrigin;
+    timeline?: FactOrigin;
+    api_available?: FactOrigin;
+    data_classification?: FactOrigin;
+  };
+}
+
+/** Dataset-level defaults plus summaries over the viewer's visible tables. */
+export interface DatasetInfo {
+  owner?: string | null;
+  steward?: string | null;
+  frequency?: string | null;
+  timeline?: string | null;
+  /** Dataset-level API flag (OM apiAvailable custom property). */
+  api_available?: boolean | null;
+  /** Tables marked as exposed via an API. */
+  api_tables: number;
+  /** Tables with a known (yes/no) API flag. */
+  api_known: number;
+  table_count: number;
+  /** Dataset classification tag, else the most restrictive among its tables. */
+  data_classification?: string | null;
+  data_classification_description?: string | null;
 }
 
 export interface DatasetCard {
@@ -90,6 +127,8 @@ export interface DatasetCard {
   description?: string | null;
   table_count: number;
   access_level: AccessLevel;
+  /** Dataset CAT category ("CAT-1".."CAT-4") from OM DataSensitivity tags; drives access. */
+  classification?: string | null;
   department?: string | null;
   department_display?: string | null;
   /** Teaser cards carry locked:true and no tables. Full cards carry tables. */
@@ -99,6 +138,8 @@ export interface DatasetCard {
   tags?: string[];
   /** Max member-table updatedAt (epoch ms), null when unknown/hidden. */
   updated_at?: number | null;
+  /** Dataset-level facts; only on unlocked cards from getDataset. */
+  info?: DatasetInfo | null;
 }
 
 export interface DatasetList {

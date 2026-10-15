@@ -22,15 +22,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database.database import get_session as db_get_session
 from database.models import (
     AccessRequest,
+    DatasetInfo,
     DatasetVisibility,
     TableInfo,
     User,
     Visibility,
 )
-from src.middleware.auth import get_optional_user, user_context
+from src.middleware.auth import get_optional_user, require_admin, user_context
+from src.openmetadata import facts as facts_mod
 from src.openmetadata import visibility as vis
 from src.openmetadata.client import OpenMetadataClient
-from src.openmetadata.schemas.dataset import AccessRequestCreate
+from src.openmetadata.schemas.dataset import AccessRequestCreate, DatasetInfoUpdate
 
 router = APIRouter(prefix="/registry", tags=["registry"])
 
@@ -120,8 +122,10 @@ async def _catalog_raw(session: AsyncSession, ctx: dict | None) -> dict:
             return hit[1]
         async with OpenMetadataClient() as client:
             tables, databases, services = await asyncio.gather(
-                client._fetch_all("tables", {"fields": "columns,tags,owners", "limit": 1000}),
-                client._fetch_all("databases", {"limit": 1000}),
+                # `extension` carries the OM Custom Properties (apiAvailable,
+                # datasetOwner, datasetSteward, frequency, timeline).
+                client._fetch_all("tables", {"fields": "columns,tags,owners,extension", "limit": 1000}),
+                client._fetch_all("databases", {"fields": "owners,tags,extension", "limit": 1000}),
                 client._fetch_all("services/databaseServices", {"limit": 100}),
             )
         payload = {"tables": tables, "databases": databases, "services": services}
@@ -139,7 +143,8 @@ async def _catalog_raw(session: AsyncSession, ctx: dict | None) -> dict:
 async def _viewer_catalog(session: AsyncSession, ctx: dict | None) -> tuple[list[dict], dict, list[dict], list[dict]]:
     """Cards the viewer sees + fresh vmap + databases + services (single source of truth)."""
     raw = await _catalog_raw(session, ctx)
-    vmap = await _visibility_map(session)
+    # OM CAT tags (dataset or table) override the sidecar visibility.
+    vmap = vis.effective_visibility_map(raw["tables"], raw["databases"], await _visibility_map(session))
     cards = vis.visible_catalog(raw["tables"], raw["databases"], vmap, ctx)
     return cards, vmap, raw["databases"], raw["services"]
 
@@ -290,6 +295,10 @@ async def list_datasets(
     return {"items": items, "teasers": teasers, "total": total, "page": page, "size": size}
 
 
+def _database_entity(databases: list[dict], dataset_fqn: str) -> dict | None:
+    return next((d for d in databases if (d.get("fullyQualifiedName") or "") == dataset_fqn), None)
+
+
 def _dataset_exists(raw_tables: list[dict], databases: list[dict], fqn: str) -> bool:
     if any((d.get("fullyQualifiedName") or "") == fqn for d in databases):
         return True
@@ -333,6 +342,18 @@ async def dataset_by_fqn(
     for card in cards:
         if card["dataset"] == key:
             _with_dept_display([card], profiles)
+            if not card.get("locked"):
+                # Summaries cover only the tables this viewer may open in full.
+                visible_ids = {t.get("id") for t in card.get("tables") or []}
+                raw = await _catalog_raw(session, ctx)
+                members = [t for t in raw["tables"] if t.get("id") in visible_ids]
+                fqns = [t.get("fullyQualifiedName") or "" for t in members]
+                card["info"] = facts_mod.resolve_dataset_info(
+                    (await dataset_info_map(session, [key])).get(key),
+                    _database_entity(databases, key),
+                    members,
+                    await table_info_map(session, fqns),
+                )
             return card
     # Not visible: confidential (non-admin) -> 404, never admit existence.
     raw = await _catalog_raw(session, ctx)
@@ -430,45 +451,51 @@ async def registry_table(
             if "404" in message or "not found" in message:
                 raise HTTPException(status_code=404, detail="Table not found")
             raise
-        fqn = table.get("fullyQualifiedName") or ""
-        rows = (await session.execute(
-            select(DatasetVisibility).where(DatasetVisibility.fqn == fqn)
-        )).scalars().all()
-        vmap = {r.fqn: {"visibility": r.visibility.value, "department": r.department} for r in rows}
-        visibility = vis.normalize_visibility(vmap.get(fqn, {}).get("visibility"))
-        if visibility == vis.CONFIDENTIAL and not (ctx and ctx.get("role") == "admin"):
-            raise HTTPException(status_code=404, detail="Table not found")
-        service, _, _, _ = vis.split_fqn(fqn)
-        owner = vmap.get(fqn, {}).get("department") or service
-        # Data classification is passed through only when OpenMetadata itself
-        # provides it; it is never guessed from tags (missing -> "Not provided").
-        annotated = {
-            **table,
-            "access_level": visibility,
-            "department": owner,
-            "data_classification": table.get("data_classification"),
+    fqn = table.get("fullyQualifiedName") or ""
+    rows = (await session.execute(
+        select(DatasetVisibility).where(DatasetVisibility.fqn == fqn)
+    )).scalars().all()
+    vmap = {r.fqn: {"visibility": r.visibility.value, "department": r.department} for r in rows}
+    raw = await _catalog_raw(session, ctx)
+    vmap = vis.effective_visibility_map([table], raw["databases"], vmap)
+    visibility = vis.normalize_visibility(vmap.get(fqn, {}).get("visibility"))
+    if visibility == vis.CONFIDENTIAL and not (ctx and ctx.get("role") == "admin"):
+        raise HTTPException(status_code=404, detail="Table not found")
+    service, _, _, _ = vis.split_fqn(fqn)
+    owner = vmap.get(fqn, {}).get("department") or service
+    # Data classification comes only from an explicit OM value or a
+    # dedicated classification tag (DataSensitivity.* / MDSF.*), never
+    # guessed from other tags (missing -> "Not provided").
+    annotated = {
+        **table,
+        "access_level": visibility,
+        "department": owner,
+        "data_classification": facts_mod.classification_of(table),
+    }
+    full, _ = vis.visible_tables([table], vmap, ctx)
+    if full:
+        info = (await table_info_map(session, [fqn])).get(fqn)
+        info = info or {
+            "api_available": None, "dataset_owner": None, "frequency": None, "timeline": None,
         }
-        full, _ = vis.visible_tables([table], vmap, ctx)
-        if full:
-            info = await _dataset_info(session, client, fqn)
-            annotated["info"] = info
-            owners = table.get("owners") or []
-            first_owner = owners[0] if owners else {}
-            annotated["facts"] = {
-                "owner": first_owner.get("displayName") or first_owner.get("name"),
-                "steward": None,
-                "department_contact": None,
-                "updated_at": table.get("updatedAt"),
-                "frequency": info.get("frequency"),
-                "source": None,
-            }
-            return annotated
-        if user is None:
-            # Anonymous + existing non-public table: unauthorized, no metadata.
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Sign in to view this table.",
-            )
+        annotated["info"] = info
+        # Table values win; the dataset (OM database + DatasetInfo) fills gaps.
+        dataset_key = vis.dataset_fqn(fqn)
+        facts = facts_mod.resolve_table_facts(
+            table,
+            info,
+            (await dataset_info_map(session, [dataset_key])).get(dataset_key),
+            _database_entity(raw["databases"], dataset_key),
+        )
+        annotated["facts"] = facts
+        annotated["data_classification"] = facts["data_classification"]
+        return annotated
+    if user is None:
+        # Anonymous + existing non-public table: unauthorized, no metadata.
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Sign in to view this table.",
+        )
     columns = table.get("columns") or []
     return {
         "id": table.get("id"),
@@ -517,6 +544,8 @@ async def table_dictionary(
         select(DatasetVisibility).where(DatasetVisibility.fqn == fqn)
     )).scalars().all()
     vmap = {r.fqn: {"visibility": r.visibility.value, "department": r.department} for r in rows}
+    raw = await _catalog_raw(session, ctx)
+    vmap = vis.effective_visibility_map([table], raw["databases"], vmap)
     visibility = vis.normalize_visibility(vmap.get(fqn, {}).get("visibility"))
     if visibility == vis.CONFIDENTIAL and not (ctx and ctx.get("role") == "admin"):
         raise HTTPException(status_code=404, detail="Table not found")
@@ -534,12 +563,18 @@ async def table_dictionary(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Sign in with an authorized account to download this dictionary.",
         )
-    info = (await table_info_map(session, [fqn])).get(fqn) or {}
-    api_available = info.get("api_available")
+    dataset_key = vis.dataset_fqn(fqn)
+    facts = facts_mod.resolve_table_facts(
+        table,
+        (await table_info_map(session, [fqn])).get(fqn),
+        (await dataset_info_map(session, [dataset_key])).get(dataset_key),
+        _database_entity(raw["databases"], dataset_key),
+    )
+    api_available = facts["api_available"]
     lines = [
         f"# table: {table.get('name') or ''}",
-        f"# dataset: {vis.dataset_fqn(fqn)}",
-        f"# data_classification: {table.get('data_classification') or 'Not provided'}",
+        f"# dataset: {dataset_key}",
+        f"# data_classification: {facts['data_classification'] or 'Not provided'}",
         "# api_available: "
         + ("Yes" if api_available is True else "No" if api_available is False else "Not provided"),
         "column_name,data_type,description,tags,data_classification",
@@ -754,6 +789,8 @@ async def registry_search(
                     if tag.get("tagFQN") or tag.get("name")
                 ],
                 "updated_at": t.get("updatedAt"),
+                "data_classification": facts_mod.classification_of(t)
+                or facts_mod.classification_of(_database_entity(databases, key)),
             }
         )
         for col_name in col_hits:
@@ -868,6 +905,56 @@ async def upsert_table_visibility(
     await session.commit()
 
 
+async def upsert_dataset_info(
+    session: AsyncSession,
+    *,
+    fqn: str,
+    values: dict,
+) -> None:
+    """Set dataset-level defaults; only the keys present in `values` change."""
+    allowed = {k: v for k, v in values.items() if k in ("owner", "steward", "frequency", "timeline")}
+    existing = (
+        await session.execute(select(DatasetInfo).where(DatasetInfo.fqn == fqn))
+    ).scalar_one_or_none()
+    if existing:
+        for k, v in allowed.items():
+            setattr(existing, k, v)
+    else:
+        session.add(DatasetInfo(fqn=fqn, **allowed))
+    await session.commit()
+
+
+async def dataset_info_map(session: AsyncSession, fqns: list[str]) -> dict[str, dict]:
+    """Dataset FQN -> {"owner", "steward", "frequency", "timeline"} from the sidecar."""
+    if not fqns:
+        return {}
+    rows = (
+        await session.execute(select(DatasetInfo).where(DatasetInfo.fqn.in_(fqns)))
+    ).scalars().all()
+    return {
+        r.fqn: {
+            "owner": r.owner,
+            "steward": r.steward,
+            "frequency": r.frequency,
+            "timeline": r.timeline,
+        }
+        for r in rows
+    }
+
+
+@router.put("/datasets/info")
+async def update_dataset_info(
+    payload: DatasetInfoUpdate,
+    session: AsyncSession = Depends(db_get_session),
+    _admin: User = Depends(require_admin),
+) -> dict:
+    """Admin: replace the dataset-level defaults its tables inherit."""
+    key = vis.normalize_dataset_fqn(payload.fqn)
+    values = payload.model_dump(exclude={"fqn"})
+    await upsert_dataset_info(session, fqn=key, values=values)
+    return {"fqn": key, **values}
+
+
 async def upsert_table_info(
     session: AsyncSession,
     *,
@@ -877,7 +964,7 @@ async def upsert_table_info(
     frequency: str | None,
     timeline: str | None,
 ) -> None:
-    """Record dataset information tags after a successful OM table write."""
+    """Record table information (API flag + per-table overrides) after an OM table write."""
     existing = (
         await session.execute(select(TableInfo).where(TableInfo.fqn == fqn))
     ).scalar_one_or_none()
@@ -918,4 +1005,11 @@ async def table_info_map(session: AsyncSession, fqns: list[str] | None = None) -
     }
 
 
-__all__ = ["router", "upsert_table_visibility", "upsert_table_info", "table_info_map"]
+__all__ = [
+    "router",
+    "upsert_table_visibility",
+    "upsert_table_info",
+    "table_info_map",
+    "upsert_dataset_info",
+    "dataset_info_map",
+]

@@ -112,72 +112,39 @@ class AccessRequest(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
-class RegistryTable(Base):
-    """A dataset table's processed schema, ingested from data_services'
-    curated CSV snapshots (POST /registry/ingest).
+class DatasetInfo(Base):
+    """Dataset-level information per OpenMetadata database (sidecar).
 
-    One row per ``table_id`` ("department.dataset.table"); the snapshot's
-    column rows live in ``registry.columns``. OpenMetadata stays the
-    catalogue of record -- these tables are the shared, queryable copy of
-    our pipeline's output so the backend never needs the CSVs mailed over.
+    Keyed by the dataset FQN (service.database). These are the defaults
+    every member table inherits: accountable owner, data steward, refresh
+    frequency and covered timeline. A table's own TableInfo value, when
+    set, overrides the dataset value. API availability and classification
+    are table-level only and are summarized on the dataset, never stored.
     """
 
-    __tablename__ = "tables"
+    __tablename__ = "dataset_info"
     __table_args__ = (
-        Index("idx_registry_tables_dataset", "department", "dataset"),
-        {"schema": "registry"},
+        Index("idx_dataset_info_fqn", "fqn", unique=True),
+        {"schema": "users"},
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    table_id: Mapped[str] = mapped_column(String(300), unique=True, nullable=False)
-    department: Mapped[str] = mapped_column(String(100), nullable=False)
-    dataset: Mapped[str] = mapped_column(String(200), nullable=False)
-    schema_name: Mapped[str] = mapped_column(String(200), nullable=False, default="public")
-    table_name: Mapped[str] = mapped_column(String(200), nullable=False)
-    column_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    # ingestion_timestamp copied from the snapshot itself (provenance)
-    source_timestamp: Mapped[str | None] = mapped_column(String(40), nullable=True, default=None)
-    uploaded_by: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    fqn: Mapped[str] = mapped_column(String(500), nullable=False)
+    owner: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None)
+    steward: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None)
+    frequency: Mapped[str | None] = mapped_column(String(100), nullable=True, default=None)
+    timeline: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
-class RegistryColumn(Base):
-    """One column of an ingested table -- a curated snapshot row."""
-
-    __tablename__ = "columns"
-    __table_args__ = (
-        Index("idx_registry_columns_table", "table_id", "position"),
-        {"schema": "registry"},
-    )
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    table_id: Mapped[str] = mapped_column(
-        String(300), ForeignKey("registry.tables.table_id", ondelete="CASCADE"), nullable=False
-    )
-    position: Mapped[int] = mapped_column(Integer, nullable=False)
-    name: Mapped[str] = mapped_column(String(200), nullable=False)
-    data_type: Mapped[str] = mapped_column(String(50), nullable=False)
-    length: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
-    scale: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
-    nullable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    default_value: Mapped[str | None] = mapped_column(String(500), nullable=True, default=None)
-    business_description: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
-    tag: Mapped[str | None] = mapped_column(String(200), nullable=True, default=None)
-    classification: Mapped[str | None] = mapped_column(String(50), nullable=True, default=None)
-    glossary_term: Mapped[str | None] = mapped_column(String(200), nullable=True, default=None)
-    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    validation_warning: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
-
-
 class TableInfo(Base):
-    """Dataset information tags per OpenMetadata table (sidecar).
+    """Table-level information per OpenMetadata table (sidecar).
 
-    Mirrors the OM Custom Properties panel: whether the dataset is exposed
-    via an API, who owns it (free text), refresh frequency and covered
-    timeline. Stored here (not in OM) so reads work without OM custom
-    property definitions and stay under our access policy. Tables without
-    a row render as "Not set".
+    Whether the table is exposed via an API, plus optional per-table
+    overrides of the dataset defaults in DatasetInfo (owner as free text,
+    refresh frequency, covered timeline). Stored here (not in OM) so reads
+    work without OM custom property definitions and stay under our access
+    policy. Tables without a row inherit everything from their dataset.
     """
 
     __tablename__ = "table_info"

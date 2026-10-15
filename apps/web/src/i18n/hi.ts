@@ -2,6 +2,7 @@
 export const hi = {
   dataClassification: "डेटा वर्गीकरण",
   apiAvailable: "API उपलब्ध",
+  apiTablesCount: "{total} में से {count} तालिकाएँ",
   yes: "हाँ",
   no: "नहीं",
   viewApiDocs: "API दस्तावेज़ देखें →",
