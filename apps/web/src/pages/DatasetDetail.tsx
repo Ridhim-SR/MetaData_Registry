@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { getDataset, requestAccess } from "../api/registry";
-import { humanizeRaw } from "../utils/format";
+import { getDataset, requestAccess, type DatasetInfo } from "../api/registry";
+import { catAccessNote, catLabel, classificationBadgeClass, humanizeRaw, normalizeClassification } from "../utils/format";
+import { t } from "../i18n";
 import { ApiError } from "../api/client";
 import { EmptyBlock, ErrorBlock, LoadingBlock } from "../components/registry/StateBlocks";
+import { CatBadge } from "../components/registry/CatBadge";
 import { useAuth } from "../contexts/AuthContext";
 
 function LockedPanel({ datasetFqn }: { datasetFqn: string }) {
@@ -145,6 +147,7 @@ export function DatasetDetailPage() {
                 </h1>
               </div>
               <div className="flex items-center gap-2">
+                <CatBadge value={query.data.classification} />
                 <span className="badge badge-neutral">
                   {query.data.table_count} {query.data.table_count === 1 ? "table" : "tables"}
                 </span>
@@ -159,6 +162,7 @@ export function DatasetDetailPage() {
                 No description
               </p>
             )}
+            {!query.data.locked && query.data.info && <DatasetFacts info={query.data.info} />}
           </div>
 
           {query.data.locked || !query.data.tables ? (
@@ -183,6 +187,63 @@ export function DatasetDetailPage() {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Dataset-level facts (OM database custom properties and tags). Owner,
+ * steward, frequency and timeline are the defaults every table inherits.
+ * Without a dataset-level API flag or classification, they are summarized
+ * over the tables this viewer can open.
+ */
+function DatasetFacts({ info }: { info: DatasetInfo }) {
+  const level = normalizeClassification(info.data_classification);
+  const api =
+    info.api_available != null
+      ? info.api_available
+        ? t("yes")
+        : t("no")
+      : info.api_known === 0
+        ? null
+        : t("apiTablesCount", { count: String(info.api_tables), total: String(info.table_count) });
+  return (
+    <dl
+      className="mt-4 grid grid-cols-1 gap-x-6 gap-y-2 p-4 sm:grid-cols-2"
+      style={{ border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg-alt)", fontSize: "0.9375rem" }}
+    >
+      <DatasetFact label="Owner" value={info.owner} />
+      <DatasetFact label="Data steward" value={info.steward} />
+      <DatasetFact label="Update frequency" value={info.frequency} />
+      <DatasetFact label="Timeline" value={info.timeline} />
+      <DatasetFact label={t("apiAvailable")} value={api} />
+      <div>
+        <dt className="metadata-fact-label">{t("dataClassification")}</dt>
+        <dd className="mt-0.5">
+          {level ? (
+            <span
+              className={`badge ${classificationBadgeClass(level)}`}
+              title={catAccessNote(info.data_classification) ?? info.data_classification_description ?? undefined}
+            >
+              {catLabel(info.data_classification) ?? t(`classification${level}`)}
+            </span>
+          ) : (
+            <span className="not-provided">Not provided</span>
+          )}
+        </dd>
+      </div>
+    </dl>
+  );
+}
+
+function DatasetFact({ label, value }: { label: string; value: string | null | undefined }) {
+  const text = value && value.trim() ? value : null;
+  return (
+    <div>
+      <dt className="metadata-fact-label">{label}</dt>
+      <dd className="mt-0.5" style={{ color: "var(--text)" }}>
+        {text ?? <span className="not-provided">Not provided</span>}
+      </dd>
     </div>
   );
 }

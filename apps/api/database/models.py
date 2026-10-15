@@ -112,14 +112,39 @@ class AccessRequest(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
-class TableInfo(Base):
-    """Dataset information tags per OpenMetadata table (sidecar).
+class DatasetInfo(Base):
+    """Dataset-level information per OpenMetadata database (sidecar).
 
-    Mirrors the OM Custom Properties panel: whether the dataset is exposed
-    via an API, who owns it (free text), refresh frequency and covered
-    timeline. Stored here (not in OM) so reads work without OM custom
-    property definitions and stay under our access policy. Tables without
-    a row render as "Not set".
+    Keyed by the dataset FQN (service.database). These are the defaults
+    every member table inherits: accountable owner, data steward, refresh
+    frequency and covered timeline. A table's own TableInfo value, when
+    set, overrides the dataset value. API availability and classification
+    are table-level only and are summarized on the dataset, never stored.
+    """
+
+    __tablename__ = "dataset_info"
+    __table_args__ = (
+        Index("idx_dataset_info_fqn", "fqn", unique=True),
+        {"schema": "users"},
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    fqn: Mapped[str] = mapped_column(String(500), nullable=False)
+    owner: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None)
+    steward: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None)
+    frequency: Mapped[str | None] = mapped_column(String(100), nullable=True, default=None)
+    timeline: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class TableInfo(Base):
+    """Table-level information per OpenMetadata table (sidecar).
+
+    Whether the table is exposed via an API, plus optional per-table
+    overrides of the dataset defaults in DatasetInfo (owner as free text,
+    refresh frequency, covered timeline). Stored here (not in OM) so reads
+    work without OM custom property definitions and stay under our access
+    policy. Tables without a row inherit everything from their dataset.
     """
 
     __tablename__ = "table_info"

@@ -63,7 +63,12 @@ TABLES = [
 
 DATABASES = [
     {"name": "db", "displayName": "Db", "description": "Public database",
-     "fullyQualifiedName": "pub.db"},
+     "fullyQualifiedName": "pub.db",
+     # OM Custom Properties + DataSensitivity tag, as OM returns them.
+     "extension": {"frequency": "lll", "datasetSteward": "Pub Steward",
+                   "apiAvailable": ["Yes"], "timeline": "2019-2024"},
+     "tags": [{"tagFQN": "DataSensitivity.CAT-1", "name": "CAT-1",
+               "description": "Open Access"}]},
     {"name": "vishwakarma", "displayName": "Vishwakarma", "description": None,
      "fullyQualifiedName": "pwd.vishwakarma"},
     {"name": "db", "displayName": "Db", "description": None, "fullyQualifiedName": "res.db"},
@@ -84,6 +89,21 @@ VMAP = {
     # The agriculture_department tables deliberately have no rows either:
     # production users.dataset_visibility is empty, so every table is
     # unclassified (department-by-default, owned by its FQN service).
+}
+
+# Sidecar dataset defaults (users.dataset_info) and table rows (users.table_info).
+DATASET_INFO = {
+    "pwd.vishwakarma": {
+        "owner": "PWD Data Cell", "steward": "Steward S", "frequency": "Monthly", "timeline": "2020-2025",
+    },
+}
+TABLE_INFO = {
+    "pwd.vishwakarma.public.dep_table": {
+        "api_available": True, "dataset_owner": None, "frequency": None, "timeline": "2024 only",
+    },
+    "pub.db.s.pub_table": {
+        "api_available": False, "dataset_owner": None, "frequency": "Daily", "timeline": None,
+    },
 }
 
 PROFILES = None  # OM-only: departments come from OM services, not a local table.
@@ -135,8 +155,10 @@ class _FakeSession:
                 for fqn, meta in self._vmap.items()
             ]
             return _Result(rows)
+        if "dataset_info" in text:
+            return _Result([types.SimpleNamespace(fqn=f, **v) for f, v in DATASET_INFO.items()])
         if "table_info" in text:
-            return _Result([])
+            return _Result([types.SimpleNamespace(fqn=f, **v) for f, v in TABLE_INFO.items()])
         raise AssertionError(f"unexpected query in guest test: {text}")
 
 
@@ -246,7 +268,7 @@ def test_guest_department_restricted_teaser_locked_no_columns(client):
     assert set(card) <= {
         "dataset", "service", "database", "name", "description",
         "department", "department_display", "table_count", "access_level", "locked",
-        "tags", "updated_at",
+        "tags", "updated_at", "classification",
     }
     assert card["tags"] == [] and card["updated_at"] is None
 
@@ -547,3 +569,98 @@ def test_csv_download_full_access(client):
     assert lines[3].startswith("# api_available: ")
     assert lines[4] == "column_name,data_type,description,tags,data_classification"
     assert any(l.startswith("id,varchar,") for l in lines[5:])
+
+
+def test_admin_table_facts_inherit_dataset_defaults(client):
+    _as_viewer(client, "admin", None)
+    try:
+        body = _get(client, "/registry/tables/t-dep")
+    finally:
+        app.dependency_overrides.pop(get_optional_user, None)
+    facts = body["facts"]
+    # OM table owner wins over the dataset owner.
+    assert facts["owner"] == "Data Owner" and facts["origin"]["owner"] == "table"
+    # Steward and frequency are inherited from the dataset.
+    assert facts["steward"] == "Steward S" and facts["origin"]["steward"] == "dataset"
+    assert facts["frequency"] == "Monthly" and facts["origin"]["frequency"] == "dataset"
+    # The table's own timeline overrides the dataset timeline.
+    assert facts["timeline"] == "2024 only" and facts["origin"]["timeline"] == "table"
+    assert facts["api_available"] is True
+    # Classification comes from the table's MDSF.* tag.
+    assert body["data_classification"] == "Public"
+    assert facts["data_classification"] == "Public"
+
+
+def test_table_override_without_dataset_defaults(client):
+    body = _get(client, "/registry/tables/t-pub")
+    facts = body["facts"]
+    assert facts["frequency"] == "Daily" and facts["origin"]["frequency"] == "table"
+    assert facts["api_available"] is False
+
+
+def test_admin_dataset_info_summary(client):
+    _as_viewer(client, "admin", None)
+    try:
+        card = _get(client, "/registry/datasets/by-fqn", fqn="pwd.vishwakarma")
+    finally:
+        app.dependency_overrides.pop(get_optional_user, None)
+    info = card["info"]
+    assert info["owner"] == "PWD Data Cell"
+    assert info["steward"] == "Steward S"
+    assert info["frequency"] == "Monthly"
+    assert info["table_count"] == 2
+    assert info["api_tables"] == 1 and info["api_known"] == 1
+
+
+def test_guest_locked_dataset_has_no_info(client):
+    card = _get(client, "/registry/datasets/by-fqn", fqn="pwd.vishwakarma")
+    assert card["locked"] is True
+    assert "info" not in card
+
+
+def test_dataset_info_update_requires_admin(client):
+    resp = client.put("/registry/datasets/info", json={"fqn": "pwd.vishwakarma", "owner": "X"})
+    assert resp.status_code in (401, 403)
+
+
+def test_om_custom_properties_flow_to_dataset_and_table(client):
+    card = _get(client, "/registry/datasets/by-fqn", fqn="pub.db")
+    info = card["info"]
+    assert info["frequency"] == "lll"
+    assert info["steward"] == "Pub Steward"
+    assert info["timeline"] == "2019-2024"
+    assert info["api_available"] is True
+    assert info["data_classification"] == "CAT-1"
+    assert info["data_classification_description"] == "Open Access"
+
+    facts = _get(client, "/registry/tables/t-pub")["facts"]
+    # Table sidecar frequency overrides; the rest is inherited from OM.
+    assert facts["frequency"] == "Daily" and facts["origin"]["frequency"] == "table"
+    assert facts["steward"] == "Pub Steward" and facts["origin"]["steward"] == "dataset"
+    assert facts["timeline"] == "2019-2024" and facts["origin"]["timeline"] == "dataset"
+    # The table's own MDSF tag and API flag win over the dataset's.
+    assert facts["data_classification"] == "Public"
+    assert facts["api_available"] is False
+
+
+def _tag_database(monkeypatch, fqn, level):
+    db = next(d for d in DATABASES if d["fullyQualifiedName"] == fqn)
+    monkeypatch.setitem(db, "tags", [{"tagFQN": f"DataSensitivity.CAT-{level}", "name": f"CAT-{level}"}])
+
+
+def test_guest_cat1_dataset_is_open_without_login(client, monkeypatch):
+    # unc.db has no sidecar row (department by default); CAT-1 opens it.
+    _tag_database(monkeypatch, "unc.db", 1)
+    card = _get(client, "/registry/datasets/by-fqn", fqn="unc.db")
+    assert card["locked"] is False
+    assert card["access_level"] == "public"
+    assert card["classification"] == "CAT-1"
+    assert [t["name"] for t in card["tables"]] == ["unc_table"]
+    public = _get(client, "/registry/datasets/public")
+    assert "unc.db" in {c["dataset"] for c in public["items"]}
+
+
+def test_cat4_dataset_hidden_from_guests(client, monkeypatch):
+    _tag_database(monkeypatch, "pub.db", 4)
+    assert client.get("/registry/datasets/by-fqn", params={"fqn": "pub.db"}).status_code == 404
+    assert client.get("/registry/tables/t-pub").status_code == 404

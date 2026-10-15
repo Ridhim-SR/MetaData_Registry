@@ -41,13 +41,20 @@ module.exports = {
     },
     {
       // OpenMetadata UI/API is published on 8585 by the compose file.
+      // NOTE: never run foreground `compose up` under PM2 — every PM2
+      // restart SIGTERMs the compose process, which then stops all
+      // containers ("Gracefully stopping...") and loops forever.
+      // This entry brings the stack up detached (idempotent) and then
+      // tails logs so PM2 has a stable foreground process that owns
+      // no containers; restarts only re-attach the log tail.
       name: "openmetadata",
       cwd: ROOT,
-      script: "docker",
-      args: "compose -f infrastructure/openmetadata/docker-compose.yml up",
+      script: "bash",
+      args: `-c "docker compose -f infrastructure/openmetadata/docker-compose.yml up -d --wait && exec docker compose -f infrastructure/openmetadata/docker-compose.yml logs -f --tail=50"`,
       interpreter: "none",
       ...common,
       restart_delay: 15000,
+      kill_timeout: 10000,
     },
   ],
 };

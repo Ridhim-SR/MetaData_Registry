@@ -163,7 +163,7 @@ def test_visible_catalog_guest_teaser_fields_only():
     assert set(card) == {
         "dataset", "service", "database", "name", "description",
         "department", "table_count", "access_level", "locked",
-        "tags", "updated_at",
+        "tags", "updated_at", "classification",
     }
     assert card["tags"] == [] and card["updated_at"] is None
 
@@ -195,3 +195,28 @@ def test_viewer_key_classes():
 
 
 
+
+
+def test_cat_tags_drive_effective_visibility():
+    from src.openmetadata.visibility import effective_visibility_map
+
+    def tagged(level):
+        return [{"tagFQN": f"DataSensitivity.CAT-{level}"}]
+
+    tables = [
+        {"fullyQualifiedName": "a.d1.s.open"},
+        {"fullyQualifiedName": "a.d1.s.raised", "tags": tagged(3)},
+        {"fullyQualifiedName": "a.d2.s.plain"},
+    ]
+    databases = [{"fullyQualifiedName": "a.d1", "tags": tagged(1)}]
+    sidecar = {
+        "a.d1.s.open": {"visibility": "department", "department": "agri"},
+        "a.d2.s.plain": {"visibility": "restricted", "department": "agri"},
+    }
+    vmap = effective_visibility_map(tables, databases, sidecar)
+    # Dataset CAT-1 opens the table; the owning department is kept.
+    assert vmap["a.d1.s.open"] == {"visibility": "public", "department": "agri"}
+    # A higher table-level CAT wins over the dataset's CAT-1.
+    assert vmap["a.d1.s.raised"]["visibility"] == "restricted"
+    # Untagged tables keep their sidecar visibility.
+    assert vmap["a.d2.s.plain"]["visibility"] == "restricted"

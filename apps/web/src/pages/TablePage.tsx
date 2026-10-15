@@ -13,6 +13,8 @@ import { displayName } from "../api/auth";
 import { EmptyBlock, ErrorBlock, LoadingBlock } from "../components/registry/StateBlocks";
 import { t } from "../i18n";
 import {
+  catLabel,
+  classificationBadgeClass,
   humanizeRaw,
   isSensitiveTag,
   normalizeClassification,
@@ -21,22 +23,9 @@ import {
 } from "../utils/format";
 import { useAuth } from "../contexts/AuthContext";
 
-type Tab = "schema" | "about" | "docs" | "lineage";
+type Tab = "schema" | "about" | "lineage";
 
 const COLS_PER_PAGE = 50;
-
-function formatDate(ms: number | null | undefined): string | null {
-  if (!ms) return null;
-  try {
-    return new Date(ms).toLocaleDateString("en-IN", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    });
-  } catch {
-    return null;
-  }
-}
 
 function AccessStateButton({ datasetFqn, tableName }: { datasetFqn: string; tableName: string }) {
   const { isAuthenticated } = useAuth();
@@ -150,15 +139,13 @@ export function TablePage() {
     [table],
   );
 
-  // Data classification comes only from an explicit backend/OM value
-  // (e.g. CAT levels once exposed). Tags are never guessed from — missing
-  // or unrecognized values render as "Not provided".
+  // Data classification comes only from the backend (an explicit OM value
+  // or a DataSensitivity/MDSF classification tag on the table, else on its
+  // dataset). Missing or unrecognized values render as "Not provided".
   const classification = useMemo<DataClassification | null>(() => {
     if (!isFull || !table) return null;
     return normalizeClassification(table.data_classification);
   }, [table, isFull]);
-
-  const displayTableName = humanizeRaw(isFull ? table?.name : tname);
 
   // Card visibility: admin, or the signed-in table owner/steward (matched
   // against username, email, or display name). Only these viewers get the
@@ -173,6 +160,7 @@ export function TablePage() {
     const steward = table && !table.locked ? table.facts?.steward : null;
     const candidates = [
       ...owners.flatMap((o) => [o.name, o.displayName, o.fullyQualifiedName]),
+      table && !table.locked ? table.facts?.owner : null,
       steward,
     ];
     return candidates.some(
@@ -243,26 +231,13 @@ export function TablePage() {
     datasetQuery.isFetching ||
     (tableEnabled && (tableQuery.isPending || tableQuery.isFetching));
   const info = table && !table.locked ? table.info ?? null : null;
-  const apiAvailable: boolean | null = isFull ? (info?.api_available ?? null) : null;
-  const apiDocsUrl = useMemo(() => {
-    if (!isFull || !info) return null;
-    const extra = info as unknown as Record<string, unknown>;
-    const raw = info.api_docs_url ?? extra.apiDocsUrl ?? extra.api_url ?? extra.apiUrl;
-    const url = typeof raw === "string" ? raw.trim() : "";
-    return url ? url : null;
-  }, [info, isFull]);
   const facts = table && !table.locked ? table.facts ?? null : null;
+  const apiAvailable: boolean | null = isFull ? (facts?.api_available ?? info?.api_available ?? null) : null;
   const tableTags = table && !table.locked ? (table.tags ?? []) : [];
   const datasetTagNames: string[] = !isFull && card ? ((card as { tags?: string[] }).tags ?? []) : [];
 
   const hasAbout =
     Boolean(table?.description) || owners.length > 0 || tableTags.length > 0;
-  const hasDocs =
-    info != null &&
-    (info.api_available != null ||
-      Boolean(info.dataset_owner) ||
-      Boolean(info.frequency) ||
-      Boolean(info.timeline));
   const upstream: string[] = [];
   const downstream: string[] = [];
   for (const e of lineageQuery.data?.edges ?? []) {
@@ -276,20 +251,20 @@ export function TablePage() {
   const tabs: Array<{ id: Tab; label: string; show: boolean }> = [
     { id: "schema", label: "Schema", show: true },
     { id: "about", label: "About", show: hasAbout },
-    { id: "docs", label: "Documentation", show: hasDocs },
     { id: "lineage", label: "Lineage", show: hasLineage },
   ];
 
   const describedCols = (table?.columns ?? []).filter((c) => (c.description ?? "").trim()).length;
   const totalCols = table?.columns?.length ?? 0;
 
-  // Completeness is computed from 4 strict items: a column-descriptions
-  // item counts as done only when every column has a description.
+  // Completeness is computed from 4 strict table-level items (owner and
+  // steward are dataset-level): a column-descriptions item counts as done
+  // only when every column has a description.
   const completenessItems = useMemo(
     () => [
       { key: "description", label: "Description", done: Boolean(table?.description), count: null as string | null },
-      { key: "owner", label: "Owner", done: owners.length > 0, count: null as string | null },
-      { key: "steward", label: "Steward", done: Boolean(facts?.steward), count: null as string | null },
+      { key: "classification", label: "Data classification", done: Boolean(classification), count: null as string | null },
+      { key: "api", label: "API availability", done: apiAvailable != null, count: null as string | null },
       {
         key: "columns",
         label: "Column descriptions",
@@ -297,7 +272,7 @@ export function TablePage() {
         count: `${describedCols} / ${totalCols}`,
       },
     ],
-    [table, owners.length, facts, describedCols, totalCols],
+    [table, classification, apiAvailable, describedCols, totalCols],
   );
   const completenessDone = completenessItems.filter((i) => i.done).length;
   const completenessPct = Math.round((completenessDone / completenessItems.length) * 100);
@@ -388,24 +363,14 @@ export function TablePage() {
                 </span>
               )}
               {isFull && classification && (
-                <span className={`badge ${classificationBadgeClass(classification)}`}>
-                  {classificationLabel(classification)}
+                <span
+                  className={`badge ${classificationBadgeClass(classification)}`}
+                  title={table?.facts?.data_classification_description ?? undefined}
+                >
+                  {catLabel(table?.data_classification) ?? classificationLabel(classification)}
                 </span>
               )}
             </div>
-
-            {/* FACTS STRIP */}
-            <dl
-              className="mt-4 grid grid-cols-1 gap-x-6 gap-y-2 p-4 sm:grid-cols-2"
-              style={{ border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", fontSize: "0.9375rem" }}
-            >
-              <Fact label="Owner" value={owners[0] ? owners[0].displayName || owners[0].name : null} />
-              <Fact label="Data steward" value={facts?.steward ?? null} />
-              <Fact label="Last updated" value={facts?.updated_at ? formatDate(facts.updated_at) : null} />
-              <Fact label="Update frequency" value={facts?.frequency ?? info?.frequency ?? null} />
-              <ClassificationFact level={classification} />
-              <ApiAvailableFact available={apiAvailable} docsUrl={apiDocsUrl} tableName={displayTableName} />
-            </dl>
 
             {/* TABS / SECTION HEADING */}
             {(() => {
@@ -604,19 +569,6 @@ export function TablePage() {
               </div>
             )}
 
-            {tab === "docs" && hasDocs && info && (
-              <dl className="mt-4 divide-y rounded-md" role="tabpanel" aria-label="Documentation"
-                style={{ border: "1px solid var(--border)", background: "var(--bg)" }}>
-                <DocRow label="Dataset owner" value={info.dataset_owner} hint="Who owns/is accountable for this dataset." />
-                <DocRow label="Refresh frequency" value={info.frequency} hint="How often this dataset is refreshed." />
-                <DocRow label="Timeline" value={info.timeline} hint="The period this dataset covers." />
-                <DocRow
-                  label="API available"
-                  value={info.api_available == null ? null : info.api_available ? "Yes" : "No"}
-                  hint="Whether this dataset is exposed via an API."
-                />
-              </dl>
-            )}
 
             {tab === "lineage" && hasLineage && (
               <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2" role="tabpanel" aria-label="Lineage">
@@ -867,19 +819,6 @@ export function TablePage() {
   );
 }
 
-function classificationBadgeClass(level: DataClassification): string {
-  switch (level) {
-    case "Public":
-      return "badge-public";
-    case "Internal":
-      return "badge-department";
-    case "Restricted":
-      return "badge-restricted";
-    case "Sensitive":
-      return "badge-confidential";
-  }
-}
-
 function classificationLabel(level: DataClassification): string {
   switch (level) {
     case "Public":
@@ -891,83 +830,6 @@ function classificationLabel(level: DataClassification): string {
     case "Sensitive":
       return t("classificationSensitive");
   }
-}
-
-function ClassificationFact({ level }: { level: DataClassification | null }) {
-  return (
-    <div>
-      <dt className="metadata-fact-label">{t("dataClassification")}</dt>
-      <dd className="mt-0.5" style={{ color: "var(--text)", fontSize: "0.9375rem" }}>
-        {level ? (
-          <span className={`badge ${classificationBadgeClass(level)}`}>{classificationLabel(level)}</span>
-        ) : (
-          <span className="not-provided">Not provided</span>
-        )}
-      </dd>
-    </div>
-  );
-}
-
-function ApiAvailableFact({
-  available,
-  docsUrl,
-  tableName,
-}: {
-  available: boolean | null;
-  docsUrl: string | null;
-  tableName: string;
-}) {
-  return (
-    <div>
-      <dt className="metadata-fact-label">{t("apiAvailable")}</dt>
-      <dd className="mt-0.5" style={{ color: "var(--text)", fontSize: "0.9375rem" }}>
-        {available === null ? (
-          <span className="not-provided">Not provided</span>
-        ) : (
-          <span style={{ display: "inline-flex", flexWrap: "wrap", alignItems: "center", gap: "0.5rem" }}>
-            <span className={`badge ${available ? "badge-public" : "badge-neutral"}`}>
-              {available ? t("yes") : t("no")}
-            </span>
-            {available && docsUrl ? (
-              <a
-                href={docsUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label={t("viewApiDocsFor", { name: tableName })}
-                style={{ color: "var(--blue-700)", fontSize: "0.875rem", fontWeight: 600 }}
-              >
-                {t("viewApiDocs")}
-              </a>
-            ) : null}
-          </span>
-        )}
-      </dd>
-    </div>
-  );
-}
-
-function Fact({ label, value }: { label: string; value: string | null | undefined }) {
-  const text = value && String(value).trim() ? String(value) : null;
-  return (
-    <div>
-      <dt className="metadata-fact-label">{label}</dt>
-      <dd className="mt-0.5" style={{ color: "var(--text)", fontSize: "0.9375rem" }}>
-        {text ?? <span className="not-provided">Not provided</span>}
-      </dd>
-    </div>
-  );
-}
-
-function DocRow({ label, value, hint }: { label: string; value: string | null | undefined; hint: string }) {
-  return (
-    <div className="px-4 py-3">
-      <dt className="text-sm font-medium" style={{ color: "var(--text)" }}>{label}</dt>
-      <dd style={{ color: "var(--text-muted)", fontSize: "0.8125rem" }}>{hint}</dd>
-      <dd className="mt-1 text-sm" style={{ color: "var(--text)" }}>
-        {value || <span className="not-provided">Not provided</span>}
-      </dd>
-    </div>
-  );
 }
 
 function DatabaseIcon() {

@@ -5,6 +5,7 @@ import { requestAccess } from "../../api/registry";
 import { formatUpdatedAt, humanizeRaw, orNotProvided } from "../../utils/format";
 import { useAuth } from "../../contexts/AuthContext";
 import { AccessBadge } from "./AccessBadge";
+import { CatBadge } from "./CatBadge";
 
 export function DatasetCard({ card, hideEmptyFields = false }: { card: Card; hideEmptyFields?: boolean }) {
   const dept = card.department_display ?? card.department ?? "Not provided";
@@ -44,6 +45,7 @@ export function DatasetCard({ card, hideEmptyFields = false }: { card: Card; hid
         </p>
       )}
       <div className="mt-3 flex flex-wrap items-center gap-2">
+        <CatBadge value={card.classification} />
         <span className="text-sm" style={{ color: "var(--text-muted)", fontSize: "0.8125rem" }}>
           {card.table_count} {card.table_count === 1 ? "table" : "tables"}
         </span>

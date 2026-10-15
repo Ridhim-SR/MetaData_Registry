@@ -26,6 +26,62 @@ def normalize_visibility(raw: str | None) -> str:
     return value if value in VALID_VISIBILITIES else DEPARTMENT
 
 
+# Data classification categories (MeitY Model Data Sharing Framework, s.5.1),
+# tagged in OpenMetadata as DataSensitivity.CAT-1..CAT-4 on a dataset (OM
+# database) or a table. A CAT tag decides the table's visibility; when the
+# table and its dataset differ, the higher (more restrictive) category wins.
+CAT_TAG_PREFIX = "DataSensitivity.CAT-"
+CAT_VISIBILITY = {
+    1: PUBLIC,        # Open Access: no login required
+    2: DEPARTMENT,    # Registered Access: sign-in required
+    3: RESTRICTED,    # Restricted Access: teaser + access request
+    4: CONFIDENTIAL,  # Non-Shareable: admins only
+}
+
+
+def cat_level(entity: dict | None) -> int | None:
+    """Highest DataSensitivity CAT level tagged on an OM entity, if any."""
+    levels = []
+    for tag in (entity or {}).get("tags") or []:
+        fqn = tag.get("tagFQN") or ""
+        if fqn.startswith(CAT_TAG_PREFIX):
+            try:
+                level = int(fqn[len(CAT_TAG_PREFIX):])
+            except ValueError:
+                continue
+            if level in CAT_VISIBILITY:
+                levels.append(level)
+    return max(levels) if levels else None
+
+
+def _max_level(*levels: int | None) -> int | None:
+    known = [lvl for lvl in levels if lvl is not None]
+    return max(known) if known else None
+
+
+def effective_visibility_map(
+    tables: list[dict],
+    databases: list[dict],
+    visibility_by_fqn: dict[str, dict],
+) -> dict[str, dict]:
+    """Sidecar visibility map with OM CAT classification applied.
+
+    Tables whose own or dataset CAT tag is known take the CAT visibility
+    (the owning department from the sidecar is kept). Untagged tables keep
+    their sidecar visibility, defaulting to department as before.
+    """
+    dbs = {d.get("fullyQualifiedName") or "": d for d in databases or []}
+    out = dict(visibility_by_fqn)
+    for table in tables:
+        fqn = table.get("fullyQualifiedName") or ""
+        level = _max_level(cat_level(table), cat_level(dbs.get(dataset_fqn(fqn))))
+        if level is None:
+            continue
+        meta = visibility_by_fqn.get(fqn, {})
+        out[fqn] = {**meta, "visibility": CAT_VISIBILITY[level], "department": meta.get("department")}
+    return out
+
+
 def split_fqn(fqn: str) -> tuple[str, str, str, str]:
     """Split an OM table FQN into (service, database, schema, table)."""
     parts = (fqn or "").split(".")
@@ -228,8 +284,11 @@ def visible_catalog(
         if decision == "hidden":
             continue
         entry = per_dataset.setdefault(
-            key, {"service": service, "database": database, "owner": owner, "full": [], "teasers": 0, "level": PUBLIC}
+            key,
+            {"service": service, "database": database, "owner": owner, "full": [], "teasers": 0,
+             "level": PUBLIC, "cat": None},
         )
+        entry["cat"] = _max_level(entry["cat"], cat_level(table))
         if decision == "full":
             entry["full"].append({**table, "access_level": visibility, "department": owner})
         else:
@@ -237,10 +296,14 @@ def visible_catalog(
         if _RANK[visibility] > _RANK[entry["level"]]:
             entry["level"] = visibility
 
+    dbs = {d.get("fullyQualifiedName") or "": d for d in databases or []}
     cards: list[dict] = []
     for key in sorted(per_dataset):
         entry = per_dataset[key]
         info = _database_info(databases or [], entry["service"], entry["database"])
+        # Dataset CAT badge: the dataset tag, raised by any listed table's tag.
+        level = _max_level(cat_level(dbs.get(key)), entry["cat"])
+        classification = f"CAT-{level}" if level is not None else None
         table_count = len(entry["full"]) + entry["teasers"]
         if entry["full"]:
             slim = [
@@ -270,6 +333,7 @@ def visible_catalog(
                     "department": entry["owner"],
                     "table_count": table_count,
                     "access_level": entry["level"],
+                    "classification": classification,
                     "locked": False,
                     "tables": slim,
                     "tags": tag_set,
@@ -287,6 +351,7 @@ def visible_catalog(
                     "department": entry["owner"],
                     "table_count": table_count,
                     "access_level": entry["level"],
+                    "classification": classification,
                     "locked": True,
                     "tags": [],
                     "updated_at": None,

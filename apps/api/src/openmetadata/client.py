@@ -217,7 +217,7 @@ class OpenMetadataClient:
 
         Returns {"data": [...], "paging": {"total": int, "after": str|None}}.
         """
-        params: dict[str, Any] = {"fields": "columns,tags,owners", "limit": limit}
+        params: dict[str, Any] = {"fields": "columns,tags,owners,extension", "limit": limit}
         if after:
             params["after"] = after
         data = await self.get("tables", params=params)
@@ -242,10 +242,10 @@ class OpenMetadataClient:
         return {"data": result, "paging": {"total": paging.get("total"), "after": paging.get("after")}}
 
     async def get_table(self, table_id: str) -> dict:
-        return await self.get(f"tables/{table_id}", params={"fields": "columns,tags,owners"})
+        return await self.get(f"tables/{table_id}", params={"fields": "columns,tags,owners,extension"})
 
     async def get_table_by_fqn(self, fqn: str) -> dict:
-        return await self.get(f"tables/name/{fqn}", params={"fields": "columns,tags,owners"})
+        return await self.get(f"tables/name/{fqn}", params={"fields": "columns,tags,owners,extension"})
 
     async def get_table_lineage(self, fqn: str) -> dict:
         return await self.get(f"lineage/table/name/{fqn}")

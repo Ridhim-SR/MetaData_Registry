@@ -12,8 +12,9 @@ import {
 } from "../api/registry";
 import { Fragment } from "react";
 import { ErrorBlock, Skeleton } from "../components/registry/StateBlocks";
+import { CatBadge } from "../components/registry/CatBadge";
 import { t } from "../i18n";
-import { formatUpdatedAt, humanizeRaw, normalizeClassification, readableTag } from "../utils/format";
+import { catLabel, formatUpdatedAt, humanizeRaw, normalizeClassification, readableTag } from "../utils/format";
 import { useAuth } from "../contexts/AuthContext";
 
 type Scope = "" | "departments" | "datasets" | "tables" | "columns";
@@ -1389,6 +1390,7 @@ function DatasetRow({ card, tokens }: { card: Card; tokens: string[] }) {
         </p>
       ) : null}
       <div className="mt-2 flex flex-wrap gap-2">
+        <CatBadge value={card.classification} />
         <span className="badge badge-neutral">
           {card.table_count} {card.table_count === 1 ? "table" : "tables"}
         </span>
@@ -1441,7 +1443,7 @@ function TableResultCard({
   if (level) {
     chips.push(
       <span key="classification" className={`badge ${classificationBadgeClass(level)}`}>
-        {classificationLabel(level)}
+        {catLabel(hit.data_classification) ?? classificationLabel(level)}
       </span>,
     );
   }

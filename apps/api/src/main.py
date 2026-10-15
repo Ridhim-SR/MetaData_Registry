@@ -59,6 +59,16 @@ async def lifespan(app: FastAPI):
         await warm_shared_client()
     except Exception:
         pass
+    # Prewarm the guest catalog cache in each worker so the first real
+    # request is a cache hit, not a full OM fetch. Failures are ignored:
+    # OM may still be booting when the API starts.
+    try:
+        from src.openmetadata.routers.registry import _catalog_raw
+
+        async with async_session() as _s:
+            await _catalog_raw(_s, None)
+    except Exception:
+        pass
     yield
     try:
         await aclose_shared_client()
