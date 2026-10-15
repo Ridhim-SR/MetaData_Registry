@@ -25,9 +25,9 @@ departments:
         category: CAT-3
         owner:
         steward:
-        frequency:
+        frequency: Daily
         timeline:
-        api_available:
+        api_available: 
         description: "Works managed by the Public Works Department under the Vishwakarma scheme: road and bridge works with their costs, year-wise funds, tenders, agreements, contractors, progress and locations."
         tables:
           vishwakarma_T:
