@@ -1,6 +1,6 @@
 import pytest
 
-from src.schema_registry.curate import KNOWN_TAGS, auto_classify, curate_schema
+from src.schema_registry.curate import KNOWN_TAGS, auto_classify, curate_schema, validate_schema
 
 
 def _col(name, data_type="integer", **overrides):
@@ -230,3 +230,8 @@ def test_a_word_inside_a_longer_word_does_not_trigger_a_rule(name, level):
 ])
 def test_the_real_cases_still_match(name, level):
     assert auto_classify(name) == level
+
+
+def test_a_file_with_no_columns_is_rejected():
+    with pytest.raises(ValueError, match="the file has no columns"):
+        validate_schema("pwd.d.t", [])

@@ -1,7 +1,7 @@
 import pytest
 
-from src.schema_registry.add import add
-from src.schema_registry.catalog import load_catalog
+from src.schema_registry.add import add, update_catalog_text
+from src.schema_registry.catalog import load_catalog, parse_catalog as load_catalog_from_text
 from src.schema_registry.sync import sync
 from src.storage.local import LocalObjectStorage
 
@@ -168,3 +168,51 @@ def test_empty_or_broken_file_is_refused_before_upload(setup):
             add(storage, catalog, str(bad), "pwd", "vishwakarma", table="works")
         assert storage.read_bytes("inputs/pwd/vishwakarma/works.txt") == good
         assert catalog.read_text() == before
+
+
+def test_dataset_fields_are_written_and_blanks_leave_values_alone():
+    text, changes = update_catalog_text(
+        "departments:\n", "pwd", "vishwakarma", "storage:inputs/pwd/vishwakarma/t.txt",
+        department_name="Public Works", table="t",
+        dataset_fields={"category": "CAT-3", "steward": "A Steward", "owner": ""},
+    )
+    assert "category: CAT-3" in text and "steward: A Steward" in text
+    assert "set category of pwd/vishwakarma" in changes and "set owner of pwd/vishwakarma" not in changes
+
+    again, changes = update_catalog_text(
+        text, "pwd", "vishwakarma", "storage:inputs/pwd/vishwakarma/t.txt", table="t", dataset_fields={"category": ""}
+    )
+    assert "category: CAT-3" in again and changes == []
+
+
+def test_unknown_dataset_field_is_refused():
+    with pytest.raises(ValueError, match="Unknown dataset field 'colour'"):
+        update_catalog_text("departments:\n", "pwd", "d", "storage:x", department_name="P", table="t",
+                            dataset_fields={"colour": "red"})
+
+
+@pytest.mark.parametrize("bad", ["../evil", "a/b", "a.b", ".hidden", "-x", ""])
+def test_dataset_and_table_names_with_odd_characters_are_refused(bad):
+    with pytest.raises(ValueError, match="isn't allowed"):
+        update_catalog_text("departments:\n", "pwd", bad, "storage:x", department_name="P", table="t")
+    with pytest.raises(ValueError, match="isn't allowed"):
+        update_catalog_text("departments:\n", "pwd", "ds", "storage:x", department_name="P", table=bad)
+
+
+def test_values_a_yaml_reader_would_change_are_quoted_and_read_back_exactly():
+    values = {"owner": "yes", "steward": "no", "frequency": "1:30", "timeline": "null", "description": "Works: roads"}
+    text, _ = update_catalog_text("departments:\n", "pwd", "ds", "storage:x", department_name="P", table="t",
+                                  dataset_fields=values)
+    fields = load_catalog_from_text(text)[0].datasets[0].fields
+    assert fields["owner"] == "yes" and fields["steward"] == "no" and fields["frequency"] == "1:30"
+    assert fields["timeline"] == "null" and fields["dataset_description"] == "Works: roads"
+
+
+def test_two_tables_cannot_share_one_file_name():
+    text, _ = update_catalog_text("departments:\n", "pwd", "ds", "storage:inputs/pwd/ds/same.txt",
+                                  department_name="P", table="first")
+    with pytest.raises(ValueError, match="already the file of table 'first'"):
+        update_catalog_text(text, "pwd", "ds", "storage:inputs/pwd/ds/same.txt", table="second")
+    # the same table re-sending its own file name is fine
+    again, changes = update_catalog_text(text, "pwd", "ds", "storage:inputs/pwd/ds/same.txt", table="first")
+    assert changes == []
