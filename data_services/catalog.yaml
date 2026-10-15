@@ -45,7 +45,7 @@ departments:
     datasets:
       distribution_record_dataset:
         category: CAT-3
-        owner:
+        owner: Agriculture Department
         steward:
         frequency:
         timeline:
@@ -79,7 +79,7 @@ departments:
             metadata: storage:inputs/agri_dept/distribution_record_dataset/online_booking_details_metadata.csv
       farmer_registration_master_dataset:
         category: CAT-3
-        owner:
+        owner: Agriculture Department
         steward:
         frequency:
         timeline:
@@ -96,7 +96,7 @@ departments:
             metadata: storage:inputs/agri_dept/farmer_registration_master_dataset/farmer_registration_field_dictionary.csv
       scheme_physical_financial_progress_dataset:
         category: CAT-3
-        owner:
+        owner: Agriculture Department
         steward:
         frequency:
         timeline:
