@@ -101,6 +101,21 @@ class S3ObjectStorage(ObjectStorage):
     def read_csv(self, path: str) -> list[dict]:
         return list(csv.DictReader(io.StringIO(self.read_bytes(path).decode("utf-8"))))
 
+    def write_bytes(self, path: str, data: bytes) -> None:
+        try:
+            self.client.put_object(Bucket=self.bucket, Key=self._key(path), Body=data)
+        except ClientError as exc:
+            self._log_client_error(exc, "write", path)
+            raise
+
+    def read_bytes(self, path: str) -> bytes:
+        try:
+            obj = self.client.get_object(Bucket=self.bucket, Key=self._key(path))
+        except ClientError as exc:
+            self._log_client_error(exc, "read", path)
+            raise
+        return obj["Body"].read()
+
     def exists(self, path: str) -> bool:
         try:
             self.client.head_object(Bucket=self.bucket, Key=self._key(path))

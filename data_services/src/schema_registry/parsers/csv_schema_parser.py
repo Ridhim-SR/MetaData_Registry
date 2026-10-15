@@ -73,6 +73,10 @@ def parse_csv_text(text: str, label: str = "<text>") -> list[dict]:
                 "name": row[header_map["name"]].strip(),
                 "data_type": row[header_map["data_type"]].strip(),
                 "length": int(length) if length.isdigit() else None,
+                # `scale` stays None for a submitted CSV: it is a storage-side
+                # detail (numeric(p,s) of a DDL dump, written to Wasabi with
+                # the snapshot), never part of what a column CSV carries to
+                # OpenMetadata.
                 "scale": None,
                 "nullable": _to_bool(row.get(header_map.get("nullable", ""))),
                 "default": (row.get(header_map.get("default", ""), "") or "").strip() or None,

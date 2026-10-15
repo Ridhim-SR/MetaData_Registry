@@ -352,6 +352,57 @@ async def dataset_by_fqn(
     raise HTTPException(status_code=404, detail="Dataset not found")
 
 
+_EXTENSION_TO_INFO = {
+    "apiAvailable": "api_available",
+    "datasetOwner": "dataset_owner",
+    "frequency": "frequency",
+    "timeline": "timeline",
+}
+_API_TRUTHY = {"y": True, "yes": True, "true": True, "1": True}
+_API_FALSY = {"n": False, "no": False, "false": False, "0": False}
+
+
+def _info_from_extension(extension: dict | None) -> dict:
+    """Map an OM Database entity's custom properties -- what data_services
+    publishes as `extension` (openmetadata/publish.py's
+    _CUSTOM_PROPERTY_NAMES; apiAvailable arrives as free-text "Y"/"N") --
+    into the TableInfo sidecar's field names/types."""
+
+    ext = extension or {}
+    info: dict = {}
+    for om_key, info_key in _EXTENSION_TO_INFO.items():
+        value = ext.get(om_key)
+        if isinstance(value, str):
+            value = value.strip() or None
+        info[info_key] = value
+    api = info.get("api_available")
+    if isinstance(api, str):
+        lowered = api.lower()
+        info["api_available"] = _API_TRUTHY.get(lowered, _API_FALSY.get(lowered))
+    return info
+
+
+async def _dataset_info(session: AsyncSession, client: OpenMetadataClient, table_fqn: str) -> dict:
+    """Dataset-level docs for one table's page: frequency, timeline, API
+    availability, owner.
+
+    Source of truth is the OM database's custom properties (written by
+    data_services' publish step); the local `table_info` sidecar row -- only
+    ever written by the manual POST /openmetadata/metadata/tables flow --
+    overrides it field by field, so an admin edit wins over a stale publish.
+    """
+
+    info: dict = {key: None for key in _EXTENSION_TO_INFO.values()}
+    parts = table_fqn.split(".")
+    if len(parts) >= 4:  # service.database.schema.table -> the database FQN
+        database = await client.get_database_by_fqn(".".join(parts[:2]))
+        info.update(_info_from_extension(database.get("extension")))
+    sidecar = (await table_info_map(session, [table_fqn])).get(table_fqn)
+    if sidecar:
+        info.update({key: value for key, value in sidecar.items() if value is not None})
+    return info
+
+
 @router.get("/tables/{table_id}")
 async def registry_table(
     table_id: str,
@@ -365,6 +416,10 @@ async def registry_table(
     viewers without full access receive 200 with a locked table summary
     (name, description, column count, columns: []); there is no 403 for them.
     Used by the frontend only to resolve legacy table links to datasets.
+
+    Full-access responses carry `info`/`facts` -- the dataset documentation
+    rows (refresh frequency, timeline, API available, owner) sourced from
+    the OM database custom properties, see _dataset_info().
     """
     ctx = user_context(user)
     async with OpenMetadataClient() as client:
@@ -375,48 +430,45 @@ async def registry_table(
             if "404" in message or "not found" in message:
                 raise HTTPException(status_code=404, detail="Table not found")
             raise
-    fqn = table.get("fullyQualifiedName") or ""
-    rows = (await session.execute(
-        select(DatasetVisibility).where(DatasetVisibility.fqn == fqn)
-    )).scalars().all()
-    vmap = {r.fqn: {"visibility": r.visibility.value, "department": r.department} for r in rows}
-    visibility = vis.normalize_visibility(vmap.get(fqn, {}).get("visibility"))
-    if visibility == vis.CONFIDENTIAL and not (ctx and ctx.get("role") == "admin"):
-        raise HTTPException(status_code=404, detail="Table not found")
-    service, _, _, _ = vis.split_fqn(fqn)
-    owner = vmap.get(fqn, {}).get("department") or service
-    # Data classification is passed through only when OpenMetadata itself
-    # provides it; it is never guessed from tags (missing -> "Not provided").
-    annotated = {
-        **table,
-        "access_level": visibility,
-        "department": owner,
-        "data_classification": table.get("data_classification"),
-    }
-    full, _ = vis.visible_tables([table], vmap, ctx)
-    if full:
-        info = (await table_info_map(session, [fqn])).get(fqn)
-        info = info or {
-            "api_available": None, "dataset_owner": None, "frequency": None, "timeline": None,
+        fqn = table.get("fullyQualifiedName") or ""
+        rows = (await session.execute(
+            select(DatasetVisibility).where(DatasetVisibility.fqn == fqn)
+        )).scalars().all()
+        vmap = {r.fqn: {"visibility": r.visibility.value, "department": r.department} for r in rows}
+        visibility = vis.normalize_visibility(vmap.get(fqn, {}).get("visibility"))
+        if visibility == vis.CONFIDENTIAL and not (ctx and ctx.get("role") == "admin"):
+            raise HTTPException(status_code=404, detail="Table not found")
+        service, _, _, _ = vis.split_fqn(fqn)
+        owner = vmap.get(fqn, {}).get("department") or service
+        # Data classification is passed through only when OpenMetadata itself
+        # provides it; it is never guessed from tags (missing -> "Not provided").
+        annotated = {
+            **table,
+            "access_level": visibility,
+            "department": owner,
+            "data_classification": table.get("data_classification"),
         }
-        annotated["info"] = info
-        owners = table.get("owners") or []
-        first_owner = owners[0] if owners else {}
-        annotated["facts"] = {
-            "owner": first_owner.get("displayName") or first_owner.get("name"),
-            "steward": None,
-            "department_contact": None,
-            "updated_at": table.get("updatedAt"),
-            "frequency": info.get("frequency"),
-            "source": None,
-        }
-        return annotated
-    if user is None:
-        # Anonymous + existing non-public table: unauthorized, no metadata.
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Sign in to view this table.",
-        )
+        full, _ = vis.visible_tables([table], vmap, ctx)
+        if full:
+            info = await _dataset_info(session, client, fqn)
+            annotated["info"] = info
+            owners = table.get("owners") or []
+            first_owner = owners[0] if owners else {}
+            annotated["facts"] = {
+                "owner": first_owner.get("displayName") or first_owner.get("name"),
+                "steward": None,
+                "department_contact": None,
+                "updated_at": table.get("updatedAt"),
+                "frequency": info.get("frequency"),
+                "source": None,
+            }
+            return annotated
+        if user is None:
+            # Anonymous + existing non-public table: unauthorized, no metadata.
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Sign in to view this table.",
+            )
     columns = table.get("columns") or []
     return {
         "id": table.get("id"),

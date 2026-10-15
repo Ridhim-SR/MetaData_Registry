@@ -53,4 +53,8 @@ def test_shipped_catalog_is_valid():
     from src.schema_registry.catalog import load_catalog
 
     departments = load_catalog("catalog.yaml")
-    assert any(d.id == "pwd" for d in departments)
+    # All three live departments, pwd first exactly as main has it. pwd is
+    # another team's; commenting it out here would silently disable their
+    # data the moment this branch merges into main, so the list is asserted
+    # in full rather than by membership.
+    assert [d.id for d in departments] == ["pwd", "agri_dept", "rural_development_department"]

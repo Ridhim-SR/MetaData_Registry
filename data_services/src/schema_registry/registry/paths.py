@@ -12,6 +12,28 @@ def raw_schema_path(department_id: str, dataset_slug: str, table_slug: str, time
     return f"{table_prefix(department_id, dataset_slug, table_slug)}/raw/schemas/{timestamp}.csv"
 
 
+def raw_source_path(department_id: str, dataset_slug: str, table_slug: str, timestamp: str, ext: str) -> str:
+    """The department's submission exactly as it arrived, kept next to the
+    parser's own raw output: raw/schemas/ is derived data, so a parser bug
+    there would otherwise destroy the only evidence of what was submitted."""
+
+    return f"{table_prefix(department_id, dataset_slug, table_slug)}/raw/source/{timestamp}{ext}"
+
+
+def raw_source_hash_path(department_id: str, dataset_slug: str, table_slug: str, timestamp: str) -> str:
+    """SHA-256 sidecar for the stored submission -- lets anyone verify the
+    stored copy still matches what the department sent."""
+
+    return f"{table_prefix(department_id, dataset_slug, table_slug)}/raw/source/{timestamp}.sha256"
+
+
+def diff_path(department_id: str, dataset_slug: str, table_slug: str, timestamp: str) -> str:
+    """Per-run change diff (added/removed/changed columns) so a run's effect
+    is reviewable without diffing two snapshot CSVs by hand."""
+
+    return f"{table_prefix(department_id, dataset_slug, table_slug)}/diffs/{timestamp}.csv"
+
+
 def curated_schema_path(department_id: str, dataset_slug: str, table_slug: str, timestamp: str) -> str:
     return f"{table_prefix(department_id, dataset_slug, table_slug)}/curated/schemas/{timestamp}.csv"
 

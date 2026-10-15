@@ -1,0 +1,23 @@
+column_name,data_type
+id,character varying
+created_at,timestamp without time zone
+created_by,character varying
+modified_at,timestamp without time zone
+modified_by,character varying
+status,integer
+allocation_date,timestamp without time zone
+allocation_type,integer
+assign_by,integer
+assign_to,integer
+project_budget_amount,numeric
+project_remaining_amount,numeric
+total_hysical,numeric
+departmental_scheme_id,character varying
+financial_year_id,character varying
+module_type_id,character varying
+office_type_id,character varying
+parent_id,character varying
+umbrella_scheme_id,character varying
+district_id,character varying
+booking_level,integer
+store_type_id,character varying

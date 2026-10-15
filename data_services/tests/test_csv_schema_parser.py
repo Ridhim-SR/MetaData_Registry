@@ -57,3 +57,38 @@ def test_required_column_is_not_silently_aliased_to_nullable(tmp_path):
     path = _write(tmp_path, "dept_d.csv", "Column,Type,Required\npatient_id,integer,Yes\n")
     cols = parse_csv_columns(path)
     assert cols[0]["nullable"] is True
+
+
+def test_scale_column_present_is_still_carried_as_none(tmp_path):
+    """The CSV schema parser always emits scale=None (see csv_schema_parser):
+    only a Field Dictionary carries a field's scale, so a `scale`/`Decimal
+    Scale` column in a plain schema CSV is ignored rather than guessed at."""
+    path = _write(
+        tmp_path,
+        "dept_scale.csv",
+        "name,data_type,length,scale,nullable\ncost,numeric,18,2,No\n",
+    )
+    assert parse_csv_columns(path)[0]["scale"] is None
+
+
+def test_scale_column_alias_is_still_carried_as_none(tmp_path):
+    path = _write(
+        tmp_path,
+        "dept_scale_alias.csv",
+        "Field,Type,Decimal Scale\namount,numeric,4\n",
+    )
+    assert parse_csv_columns(path)[0]["scale"] is None
+
+
+def test_missing_scale_column_defaults_to_none(tmp_path):
+    path = _write(tmp_path, "dept_no_scale.csv", "name,data_type\namount,numeric\n")
+    assert parse_csv_columns(path)[0]["scale"] is None
+
+
+def test_non_numeric_scale_value_defaults_to_none(tmp_path):
+    path = _write(
+        tmp_path,
+        "dept_bad_scale.csv",
+        "name,data_type,scale\namount,numeric,two\n",
+    )
+    assert parse_csv_columns(path)[0]["scale"] is None

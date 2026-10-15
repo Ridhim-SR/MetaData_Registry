@@ -1,0 +1,3 @@
+# Pipeline runtime state (watermarks, outputs)
+state/
+configs/state/

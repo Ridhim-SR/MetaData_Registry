@@ -18,6 +18,12 @@ def test_writes_metadata_csv_next_to_raw_file(tmp_path, monkeypatch, capsys):
         }
 
     monkeypatch.setattr(ai_metadata, "draft", fake_draft)
+    # _main() calls load_dotenv() to find ANTHROPIC_API_KEY. Left alone that
+    # reads the real .env into os.environ for the rest of the pytest session,
+    # where its WASABI_BUCKET makes every later storage_from_env() build an
+    # S3 client instead of the local storage these tests set up -- draft() is
+    # faked above, so nothing here needs the real file.
+    monkeypatch.setattr(ai_metadata, "load_dotenv", lambda *a, **k: None)
     defs = tmp_path / "cat.txt"
     defs.write_text("CAT-3: restricted")
 

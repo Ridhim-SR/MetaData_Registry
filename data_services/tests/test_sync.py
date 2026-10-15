@@ -7,6 +7,7 @@ from src.schema_registry.openmetadata.publish import _unwrap
 from src.schema_registry.registry import lookups
 from src.schema_registry.sync import sync
 from src.storage.local import LocalObjectStorage
+from src.utils import config
 
 _CATALOG = """
 departments:
@@ -92,6 +93,59 @@ def test_second_sync_changes_nothing_in_storage_but_still_publishes(storage):
     assert {o.ingest for o in outcomes.values()} == {"unchanged"}
     assert storage.list("department/") == files_before
     assert _published_tables(client) == ["tenders", "works"]
+
+
+def test_reclassify_reingests_unchanged_files(storage):
+    """--reclassify forces the ingest step even when the source SHA hasn't
+    changed, so pipeline.run's reclassify=True can re-derive stored
+    classifications under the current curate.py rules."""
+
+    sync(storage, parse_catalog(_CATALOG), client=_fake_client())
+
+    outcomes = _by_table(sync(
+        storage, parse_catalog(_CATALOG), client=_fake_client(),
+        only_department="pwd", reclassify=True,
+    ))
+
+    assert {o.ingest for o in outcomes.values()} == {"ingested"}
+    assert all("reclassify requested" in o.detail for o in outcomes.values())
+    assert all(o.publish == "published" for o in outcomes.values())
+
+
+def test_reclassify_requires_a_department(storage):
+    """Re-deriving classifications for every department would rewrite other
+    teams' snapshots, so the scope must be explicit."""
+
+    with pytest.raises(ValueError, match="reclassify needs --department"):
+        sync(storage, parse_catalog(_CATALOG), client=_fake_client(), reclassify=True)
+
+
+def test_sync_refuses_company_wasabi_off_its_own_branch(storage, monkeypatch):
+    """sync() writes to whatever Wasabi folder this process is pointed at, so
+    the branch that owns it must be checked out. Caught here as well as in
+    load_env(), because sync() can be called directly -- with settings left
+    in the shell by an earlier main session -- and would otherwise push to
+    the company Wasabi from a feature branch."""
+
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.delenv("WASABI_PREFIX", raising=False)
+    monkeypatch.setattr(config, "_current_branch", lambda: "department/agriculture_department")
+
+    with pytest.raises(PermissionError, match="development only runs on 'main'"):
+        sync(storage, parse_catalog(_CATALOG), client=_fake_client())
+
+
+def test_sync_allows_the_account_belonging_to_its_own_branch(storage, monkeypatch):
+    """local/ is this branch's own account -- syncing to it is the whole point,
+    and no other branch's data is reachable from it."""
+
+    monkeypatch.setenv("ENVIRONMENT", "local")
+    monkeypatch.delenv("WASABI_PREFIX", raising=False)
+    monkeypatch.setattr(config, "_current_branch", lambda: "department/agriculture_department")
+
+    sync(storage, parse_catalog(_CATALOG), client=_fake_client())
+
+    assert lookups.department_exists(storage, "pwd")
 
 
 def test_only_the_changed_file_is_reingested(storage):
@@ -188,11 +242,10 @@ def test_table_dropped_from_catalog_is_not_published(storage):
     assert _published_tables(client) == ["works"]
 
 
-def test_category_below_columns_fails_that_publish_only(storage):
+def test_category_below_columns_still_publishes(storage):
     catalog = _CATALOG.replace("CAT-3", "CAT-1")  # tenders has firm_pannumber (auto CAT-3)
     outcomes = _by_table(sync(storage, parse_catalog(catalog), client=_fake_client()))
-    assert outcomes["pwd.vishwakarma.tenders"].publish == "failed"
-    assert "Under MDSF" in outcomes["pwd.vishwakarma.tenders"].detail
+    assert outcomes["pwd.vishwakarma.tenders"].publish == "published"
 
 
 def test_field_dictionary_dataset(storage):
@@ -213,3 +266,47 @@ def test_field_dictionary_dataset(storage):
     assert first[0].ingest == "ingested" and "2 table(s)" in first[0].detail
     assert second[0].ingest == "unchanged"
     assert _published_tables(client) == ["cmsvy_bank", "cmsvy_bride"]
+
+
+def test_sync_records_the_publish_outcome_on_the_run_row(storage):
+    """sync() ingests through run() *without* a client -- so the run row is
+    written as `unpublished` -- and publishes afterwards, itself. That publish
+    has to land on the row, or runs.csv forever claims the snapshot never
+    reached OpenMetadata and republish keeps offering a table that is live."""
+
+    sync(storage, parse_catalog(_CATALOG), client=_fake_client())
+
+    runs = {r["table_id"]: r for r in storage.read_csv(lookups.RUNS_PATH)}
+    assert runs["pwd.vishwakarma.works"]["publish_status"] == "published"
+    assert runs["pwd.vishwakarma.works"]["error"] == ""
+    assert runs["pwd.vishwakarma.tenders"]["publish_status"] == "published"
+
+
+def test_sync_records_a_failed_publish_on_the_run_row(storage):
+    """A publish that blows up is recorded as `failed` (with the error), the
+    vocabulary pipeline.run() uses -- so republish picks the snapshot up."""
+
+    client = _fake_client()
+    client.create_or_update.side_effect = RuntimeError("server said no")
+
+    outcomes = _by_table(sync(storage, parse_catalog(_CATALOG), client=client))
+
+    assert outcomes["pwd.vishwakarma.works"].publish == "failed"
+    runs = {r["table_id"]: r for r in storage.read_csv(lookups.RUNS_PATH)}
+    assert runs["pwd.vishwakarma.works"]["publish_status"] == "failed"
+    assert "server said no" in runs["pwd.vishwakarma.works"]["error"]
+    # the snapshot itself survived, so `republish` can still fix it
+    assert lookups.latest_snapshot_run(storage, "pwd.vishwakarma.works")["publish_status"] == "failed"
+
+
+def test_publish_outcome_is_recorded_for_unchanged_tables_too(storage):
+    """An unchanged table is still republished (that is how a wiped server is
+    refilled), so its row -- written by an earlier storage-only run -- must be
+    corrected as well."""
+
+    sync(storage, parse_catalog(_CATALOG))  # storage-only: every row unpublished
+    assert {r["publish_status"] for r in storage.read_csv(lookups.RUNS_PATH)} == {"unpublished"}
+
+    sync(storage, parse_catalog(_CATALOG), client=_fake_client())
+
+    assert {r["publish_status"] for r in storage.read_csv(lookups.RUNS_PATH)} == {"published"}

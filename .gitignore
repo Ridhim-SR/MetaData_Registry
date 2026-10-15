@@ -183,6 +183,9 @@ infrastructure/openmetadata/docker-volume/db-data/
 # Raw department schema dumps (contain real production column names/data)
 data_services/samples/*.txt
 
+# Raw dataset drop folder at the repo root (CSVs already caught by *.csv)
+/Datasets/
+
 # Working/scratch notes kept for context while developing, not for commit
 data_services/NOTES_MDSF.md
 
@@ -192,6 +195,15 @@ data_services/NOTES_MDSF.md
 # ============================================================
 
 docker-compose.override.yml
+
+# MinIO (local S3 stand-in for Wasabi). The image itself lives in Docker's
+# own storage; its DATA and any saved image export must never enter git --
+# the bucket holds department snapshots + _lookups, i.e. real registry state.
+infrastructure/minio/data/
+minio-data/
+*.minio*
+minio*.tar
+*.tar
 
 
 # ============================================================
@@ -251,3 +263,26 @@ config/local/
 
 # Claude Code project instructions
 CLAUDE.md
+
+# ============================================================
+# Local scratch / accidental artifacts (not part of the repo)
+# ============================================================
+
+# Stray virtualenv created at repo root
+/Lib/
+/Scripts/
+
+# Scratch files
+/test.py
+/openmetadata_ingest.py
+/sda_baseline_quality_test_suite.yaml
+/sda_dcat_ndsap_schema.json
+
+# Team working notes -- kept on disk, not committed
+/progress.md
+
+# Separate ingestion pipeline (not wired into schema_registry)
+/data_services/src/ingestion/
+/data_services/data/
+/data_services/src/utils/env.py
+/data_services/configs/sample.yaml
