@@ -58,3 +58,20 @@ def test_shipped_catalog_is_valid():
     # data the moment this branch merges into main, so the list is asserted
     # in full rather than by membership.
     assert [d.id for d in departments] == ["pwd", "agri_dept", "rural_development_department"]
+
+
+@pytest.mark.parametrize("given,stored", [("Y", "Y"), ("N", "N"), ("yes", "Y"), ("no", "N"), ("true", "Y"), ("", "")])
+def test_api_available_is_normalised_to_y_or_n(given, stored):
+    text = _VALID.replace("owner: PWD IT Cell", f"owner: PWD IT Cell\n        api_available: \"{given}\"")
+    assert parse_catalog(text)[0].datasets[0].fields["api_available"] == stored
+
+
+def test_api_available_bare_yaml_boolean_is_read_as_y():
+    text = _VALID.replace("owner: PWD IT Cell", "owner: PWD IT Cell\n        api_available: yes")
+    assert parse_catalog(text)[0].datasets[0].fields["api_available"] == "Y"
+
+
+def test_api_available_rejects_anything_else():
+    text = _VALID.replace("owner: PWD IT Cell", "owner: PWD IT Cell\n        api_available: maybe")
+    with pytest.raises(CatalogError, match="must be Y or N"):
+        parse_catalog(text)

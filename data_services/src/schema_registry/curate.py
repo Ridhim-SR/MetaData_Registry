@@ -170,6 +170,9 @@ def validate_schema(table_id: str, columns: list[dict]) -> None:
 
     problems: list[str] = []
 
+    if not columns:
+        problems.append("the file has no columns")
+
     empty_positions = [str(i) for i, col in enumerate(columns, start=1) if not col["name"]]
     if empty_positions:
         problems.append(f"column(s) at position {', '.join(empty_positions)} have no name")

@@ -1,6 +1,6 @@
 import pytest
 
-from src.schema_registry.curate import KNOWN_TAGS, curate_schema
+from src.schema_registry.curate import KNOWN_TAGS, curate_schema, validate_schema
 
 
 def _col(name, data_type="integer", **overrides):
@@ -161,3 +161,8 @@ def test_unknown_classification_override_falls_back_to_rules():
     business_metadata = {"mobile_number": {"classification": "CAT-2"}}
     curated = curate_schema([_col("mobile_number", "character varying")], business_metadata)
     assert curated[0]["classification"] == "PII"
+
+
+def test_a_file_with_no_columns_is_rejected():
+    with pytest.raises(ValueError, match="the file has no columns"):
+        validate_schema("pwd.d.t", [])

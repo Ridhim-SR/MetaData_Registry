@@ -23,11 +23,14 @@ Then commit catalog.yaml (open a PR) and run sync.
 
 import argparse
 import io
+import re
 import sys
 from pathlib import Path
 
+import yaml
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap
+from ruamel.yaml.scalarstring import DoubleQuotedScalarString
 
 from src.schema_registry import inputs
 from src.schema_registry.catalog import parse_catalog
@@ -38,6 +41,7 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 DEFAULT_CATALOG = Path(__file__).resolve().parents[2] / "catalog.yaml"
+_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_ -]{0,99}$")
 _DATASET_FIELD_KEYS = ("category", "owner", "steward", "frequency", "timeline", "api_available", "description")
 
 
@@ -47,6 +51,26 @@ def input_key(department: str, dataset: str, file_name: str) -> str:
 
 def guess_format(path: str) -> str:
     return "csv" if path.lower().endswith(".csv") else "postgres_ddl"
+
+
+def _check_name(kind: str, value: str) -> None:
+    """Dataset and table names become folder names and catalog keys, so '/', '.', '..' and the like are refused."""
+
+    if not _NAME_RE.match(value or ""):
+        raise ValueError(
+            f"{kind} name '{value}' isn't allowed -- use letters, digits, _ - and spaces only (up to 100 characters)"
+        )
+
+
+def _yaml_safe(value: str):
+    """Quote a value that catalog.yaml's reader would turn into something else
+    ("yes" -> True, "1:30" -> 90, "null" -> None, "a: b" -> a mapping)."""
+
+    try:
+        same = yaml.safe_load(value) == value
+    except yaml.YAMLError:
+        same = False
+    return value if same else DoubleQuotedScalarString(value)
 
 
 def _yaml() -> YAML:
@@ -67,11 +91,17 @@ def update_catalog_text(
     file_format: str | None = None,
     schema: str | None = None,
     metadata_ref: str | None = None,
+    dataset_fields: dict | None = None,
 ) -> tuple[str, list[str]]:
     """Return catalog.yaml text with the entry added or updated, plus a
     list of what changed (empty = already up to date). Comments and the
     order of everything else are kept. table=None means `source_ref` is the
-    dataset's field dictionary."""
+    dataset's field dictionary. `dataset_fields` ({category: ..., owner: ...}):
+    non-blank values are written to the dataset; blanks leave it as it is."""
+
+    _check_name("Dataset", dataset)
+    if table is not None:
+        _check_name("Table", table)
 
     y = _yaml()
     data = y.load(text)
@@ -103,6 +133,13 @@ def update_catalog_text(
         ds = datasets[dataset] = CommentedMap((key, None) for key in _DATASET_FIELD_KEYS)
         changes.append(f"added dataset {department}/{dataset} (fill in category, owner, steward, ... when known)")
 
+    for key, value in (dataset_fields or {}).items():
+        if key not in _DATASET_FIELD_KEYS:
+            raise ValueError(f"Unknown dataset field '{key}' -- use one of {', '.join(_DATASET_FIELD_KEYS)}")
+        if value and ds.get(key) != value:
+            ds[key] = _yaml_safe(value)
+            changes.append(f"set {key} of {department}/{dataset}")
+
     if table is None:
         if ds.get("field_dictionary") != source_ref:
             ds["field_dictionary"] = source_ref
@@ -111,6 +148,14 @@ def update_catalog_text(
         tables = ds.get("tables")
         if tables is None:
             tables = ds["tables"] = CommentedMap()
+        for other, other_entry in tables.items():  # two tables must never share one stored file
+            used = {other_entry.get("source"), other_entry.get("metadata")}
+            if other != table and (source_ref in used or (metadata_ref and metadata_ref in used)):
+                shared = source_ref if source_ref in used else metadata_ref
+                raise ValueError(
+                    f"'{shared.rsplit('/', 1)[-1]}' is already the file of table '{other}' in {department}/{dataset}, "
+                    f"and uploading it again would overwrite it -- give this table's file its own name"
+                )
         wanted = {"source": source_ref, "format": file_format or guess_format(source_ref)}
         if schema:
             wanted["schema"] = schema
@@ -144,6 +189,7 @@ def add(
     file_format: str | None = None,
     schema: str | None = None,
     metadata_file: str | None = None,
+    dataset_fields: dict | None = None,
 ) -> list[str]:
     """Upload `file` (and `metadata_file`) and update catalog.yaml. The
     catalog change is worked out and checked first, so a mistake (unknown
@@ -163,6 +209,7 @@ def add(
         department_name=department_name, table=table,
         file_format=file_format or (guess_format(file) if table else None), schema=schema,
         metadata_ref=f"{inputs.STORAGE_SCHEME}{metadata_key}" if metadata_key else None,
+        dataset_fields=dataset_fields,
     )
 
     for local, key in [(file, source_key), (metadata_file, metadata_key)]:

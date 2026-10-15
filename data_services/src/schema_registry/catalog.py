@@ -80,6 +80,22 @@ def _text(value) -> str:
     return "" if value is None else str(value).strip()
 
 
+_YES, _NO = {"y", "yes", "true", "on"}, {"n", "no", "false", "off"}
+
+
+def _yes_no(value, where: str) -> str:
+    """api_available: Y or N (YAML itself reads a bare yes/no as True/False)."""
+
+    text = _text(value).lower()
+    if not text:
+        return ""
+    if text in _YES:
+        return "Y"
+    if text in _NO:
+        return "N"
+    raise CatalogError(f"{where}.api_available: '{value}' must be Y or N (or left blank)")
+
+
 def parse_catalog(text: str) -> list[DepartmentEntry]:
     data = yaml.safe_load(text) or {}
     _check_keys("catalog", data, {"departments"})
@@ -103,7 +119,8 @@ def parse_catalog(text: str) -> list[DepartmentEntry]:
                 raise CatalogError(f"{ds_where}.category: '{category}' must be CAT-1, CAT-2, CAT-3 or CAT-4 (or left blank)")
             dataset = DatasetEntry(
                 name=str(ds_name),
-                fields={csv_field: _text(ds.get(key)) for key, csv_field in _DATASET_FIELD_KEYS.items()},
+                fields={csv_field: _text(ds.get(key)) for key, csv_field in _DATASET_FIELD_KEYS.items()
+                        if key != "api_available"} | {"api_available": _yes_no(ds.get("api_available"), ds_where)},
                 field_dictionary=_text(ds.get("field_dictionary")) or None,
                 allow_category_below_columns=bool(ds.get("allow_category_below_columns", False)),
             )
