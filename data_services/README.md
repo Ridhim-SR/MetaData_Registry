@@ -14,6 +14,7 @@ the UI. If a server is wiped or a new one is set up, **one command rebuilds it**
 [Environments](#environments-local-development-production) ·
 [Adding a department's file](#adding-a-departments-file) ·
 [Changing data later](#changing-data-later) ·
+[Blank fields in catalog.yaml are cleared, not kept](#blank-fields-in-catalogyaml-are-cleared-not-kept) ·
 [Publish to OpenMetadata](#publish-to-open-metadata) ·
 [Tests](#tests) ·
 [Backups](#backups) ·
@@ -259,7 +260,7 @@ They come from a metadata file: `add … --metadata <file>`, then `sync`.
 ### Dataset details (category, owner, steward, frequency, timeline, api_available, description)
 
 Edit them in `catalog.yaml` → PR → merge → `sync`. No new file or `add` needed.
-- **Deleting a value in `catalog.yaml` clears it** in OpenMetadata. The catalog is the truth.
+- **Deleting a value in `catalog.yaml` clears it** in OpenMetadata. The catalog is the truth — but read [Blank fields in `catalog.yaml` are cleared, not kept](#blank-fields-in-catalogyaml-are-cleared-not-kept) first: a blank also wipes a value that only exists in storage.
 - **`category` is optional.** Leave it blank until the governance meeting answers: a blank value just means the Database entity carries no CAT tag. When it is set, only `CAT-1`..`CAT-4` are accepted — an unknown value is rejected rather than published as a new tag.
 - **`category` must be at least as high as the most sensitive column** (e.g. not CAT-1 when a phone-number column is CAT-3), or publishing is refused. Only if those columns are removed before sharing, add `allow_category_below_columns: true` to the dataset.
 
@@ -269,6 +270,77 @@ Edit them in `catalog.yaml` → PR → merge → `sync`. No new file or `add` ne
 - **Every change goes through `catalog.yaml` and a PR**, so we know what's on the server and who changed it.
 - **Departments' files stay out of git.** They live in storage: the company Wasabi on `main`/`production`, your local MinIO on feature branches (`infrastructure/minio/`). The git-ignored `data_services/storage/` folder is only a restore point.
 - Old versions are never lost: Wasabi keeps every snapshot, and OpenMetadata keeps its own version history.
+
+---
+
+## Blank fields in `catalog.yaml` are cleared, not kept
+
+**This is the one thing here that can destroy another team's data and exit `0` doing it.** Read this before deleting a line from `catalog.yaml`, and before running `sync` without `--department`.
+
+### The issue
+
+Two functions write a dataset's fields into `_lookups/datasets.csv`, and they read a blank in exactly opposite ways:
+
+| Called by | Function | A blank field means |
+|---|---|---|
+| `add`, `batch`, `pipeline` | `upsert_dataset()` | **"not supplied"** — keep whatever is already stored |
+| **`sync`** | `set_dataset_fields()` | **"cleared"** — empty the stored value |
+
+`sync` uses the second one deliberately: `catalog.yaml` is reviewed in git, so it *is* the truth, and a field deleted there should disappear from storage too. That reasoning holds **only as long as the catalog is the sole place a value can come from.**
+
+It isn't. Storage can hold values the catalog has never recorded — an `owner` another team set out of band, or one written by a `batch` CSV from before the dataset had a catalog entry. In that case the catalog's blank does not mean *"we decided to clear this"*, it means *"nobody wrote this down yet"* — and `sync` cannot tell the two apart.
+
+### What `sync` does with a blank
+
+`set_dataset_fields()` rebuilds the row from the catalog and replaces the stored one. It never merges:
+
+```python
+new_row.update({field: (fields.get(field) or "") for field in DATASET_FIELDS})
+_upsert(storage, DATASETS_PATH, "dataset_id", dataset_id, lambda _: new_row)
+```
+
+That `lambda _: new_row` is the whole problem: the existing row is discarded, not consulted. Compare `upsert_dataset()`, which keeps it — `"owner": owner or existing.get("owner", "")`.
+
+All seven dataset fields behave this way:
+
+```
+category   api_available   owner   steward   frequency   timeline   dataset_description
+```
+
+### The implications
+
+Measured against a throwaway local store, so this is observed rather than inferred:
+
+```
+1. after their write   owner=[Public Works Department (PWD)]
+2. after a bare sync   owner=[]
+```
+
+Nothing in that run looks wrong. `sync` exits `0`, the summary says `0 failed`, and the audit row is normal. The only trace is one log line — `Dataset fields set from catalog: pwd.vishwakarma` — identical in form to a legitimate update.
+
+### What breaks as a result
+
+| Issue | Why |
+|---|---|
+| **Ownership silently vanishes** | The Database's built-in **Owners** field is filled from `owner`. Once cleared, ownership-based access rules, "my assets" filters and ownership reports stop applying to that dataset. |
+| **Another team's work is lost** | An out-of-band value existed only in storage. `catalog.yaml` never recorded it, so there is nothing in git to restore from. |
+| **The damage stays invisible** | `sync` reports success. You learn about it from a user who lost access, or from a diff of `_lookups/datasets.csv` — never from the run itself. |
+| **The obvious repair doesn't hold** | Retyping the value in the OpenMetadata UI is undone by the next `sync`. The catalog is the only durable place for it. |
+| **It recurs** | Every later sync clears it again, until the value is written into `catalog.yaml`. |
+
+Wasabi keeps every version for 90 days and the backup bucket keeps the newest copy forever, so the old `_lookups/datasets.csv` can be brought back. That is a rescue, not a workflow.
+
+### How to avoid it
+
+- **Scope every `sync`.** The department filter is applied before anything is written, so other departments are never in scope:
+  ```
+  sync --department agri_dept   ✅ never reaches pwd
+  sync                          ⚠️ every dataset in the catalog
+  ```
+- **Never set a dataset field out of band.** If a value must change, change it in `catalog.yaml` through a PR. A value living only in storage has a countdown on it.
+- **Reconcile before the first bare `sync` in a new environment.** Diff storage against the catalog, and record any value storage holds that the catalog does not — as a deliberate entry, not a blank.
+- **A dry run will not warn you.** Dataset fields are written only `if not dry_run` (`sync.py`), so `--dry-run` always looks clean here. It says nothing about a wipe that a real run would perform.
+- **If you didn't put a value in the catalog, assume it isn't there.** The catalog's blank is authoritative — that is the design, and it is also the hazard.
 
 ---
 
