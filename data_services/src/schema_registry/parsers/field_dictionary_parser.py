@@ -162,14 +162,23 @@ def parse_field_dictionary_text(text: str, label: str = "<text>") -> dict[str, d
         # NOT NULL, not just a bare one.
         nullable = not mandatory.startswith("Y")
 
-        personal = (row.get("Personal Data (Y/N)") or "").strip().upper()
+        # A `tag` column is the only thing that sets a FieldTag. Blank stays
+        # blank: curate_schema() treats an unanswered `tag` as carry-forward,
+        # so a dictionary that doesn't answer it leaves an existing hand-set
+        # value alone rather than clearing it.
+        #
+        # `Personal Data (Y/N)` deliberately does NOT become a tag. It is a
+        # statement about the field at the MDSF level, and per the ingest
+        # policy (see test_personal_data_column_is_classified_but_not_tagged_
+        # by_ingest) the tag axis only carries an answer the department gave
+        # in the tag vocabulary. PII still lands where it belongs -- in
+        # `classification`, derived by curate.auto_classify()'s MDSF s5.1
+        # rules, which is what governs access. curate.validate_tag() rejects
+        # any tag outside KNOWN_TAGS at ingest rather than silently creating
+        # a new one under OpenMetadata's FieldTag classification.
         metadata: dict = {
             "business_description": (row.get("Data Description") or "").strip(),
-            # Recorded here as what the department said, but NOT written into
-            # the per-table business-metadata file by field_dictionary_ingest
-            # (that writes name + business_description only) -- tags are set
-            # by curate's auto-tag, per the decision to leave ingest blank.
-            "tag": "PII" if personal.startswith("Y") else "",
+            "tag": (row.get("tag") or "").strip(),
         }
         if format_note:
             metadata["format_note"] = format_note

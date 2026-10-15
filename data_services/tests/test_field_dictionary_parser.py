@@ -510,7 +510,7 @@ def test_blank_mandatory_is_nullable(tmp_path):
     assert parse_field_dictionary(source)["t1"]["columns"][0]["nullable"] is True
 
 
-# --- parse_field_dictionary: Personal Data (Y/N) becomes the tag -------
+# --- parse_field_dictionary: only a `tag` column sets the tag ----------
 
 
 def _with_personal(tmp_path, personal):
@@ -518,14 +518,19 @@ def _with_personal(tmp_path, personal):
     return _write_csv(tmp_path, headers, [("t1", "col", "d", "Text", "Y", personal)])
 
 
-def test_personal_data_yes_becomes_pii_tag(tmp_path):
+def test_personal_data_yes_does_not_set_a_tag(tmp_path):
+    """Personal Data (Y/N) is a statement about the field at the MDSF level,
+    not an answer in the tag vocabulary, so it must not become a FieldTag.
+    PII still lands in `classification`, which is what governs access -- see
+    the ingest policy test
+    test_personal_data_column_is_classified_but_not_tagged_by_ingest."""
     meta = parse_field_dictionary(_with_personal(tmp_path, "Y"))["t1"]["business_metadata"]["col"]
-    assert meta["tag"] == "PII"
+    assert meta["tag"] == ""
 
 
-def test_personal_data_lowercase_yes_becomes_pii_tag(tmp_path):
+def test_personal_data_lowercase_yes_does_not_set_a_tag(tmp_path):
     meta = parse_field_dictionary(_with_personal(tmp_path, "y"))["t1"]["business_metadata"]["col"]
-    assert meta["tag"] == "PII"
+    assert meta["tag"] == ""
 
 
 def test_personal_data_no_leaves_the_tag_empty(tmp_path):
@@ -541,6 +546,43 @@ def test_blank_personal_data_leaves_the_tag_empty(tmp_path):
 def test_absent_personal_data_column_leaves_the_tag_empty(tmp_path):
     meta = parse_field_dictionary(_single(tmp_path, "col", "d", "Text"))["t1"]["business_metadata"]["col"]
     assert meta["tag"] == ""
+
+
+def test_tag_column_sets_the_tag(tmp_path):
+    """The whole point of the optional `tag` column: a department's answer in
+    the KNOWN_TAGS vocabulary reaches curate_schema(). Validation against
+    KNOWN_TAGS is curate.validate_tag()'s job, at ingest, so this only has to
+    pass the value through unchanged."""
+    headers = BASE_HEADERS + ["tag"]
+    path = _write_csv(tmp_path, headers, [("t1", "tender_cost", "Cost of the tender", "Text", "Y", "Financial")])
+    meta = parse_field_dictionary(path)["t1"]["business_metadata"]["tender_cost"]
+    assert meta["tag"] == "Financial"
+
+
+def test_tag_column_blank_leaves_the_tag_empty(tmp_path):
+    """A blank cell means "not answered": it must stay blank so that
+    _business_metadata_from_rows drops it and carry-forward keeps whatever an
+    earlier run set, rather than clearing it."""
+    headers = BASE_HEADERS + ["tag"]
+    path = _write_csv(tmp_path, headers, [("t1", "col", "d", "Text", "Y", "")])
+    meta = parse_field_dictionary(path)["t1"]["business_metadata"]["col"]
+    assert meta["tag"] == ""
+
+
+def test_tag_column_is_trimmed(tmp_path):
+    headers = BASE_HEADERS + ["tag"]
+    path = _write_csv(tmp_path, headers, [("t1", "col", "d", "Text", "Y", " Date/Timestamp ")])
+    meta = parse_field_dictionary(path)["t1"]["business_metadata"]["col"]
+    assert meta["tag"] == "Date/Timestamp"
+
+
+def test_tag_column_wins_over_personal_data(tmp_path):
+    """Both present: the tag column is the answer in the tag vocabulary, and
+    Personal Data never contributes one regardless."""
+    headers = BASE_HEADERS + ["Personal Data (Y/N)", "tag"]
+    path = _write_csv(tmp_path, headers, [("t1", "col", "d", "Text", "Y", "Y", "Geospatial")])
+    meta = parse_field_dictionary(path)["t1"]["business_metadata"]["col"]
+    assert meta["tag"] == "Geospatial"
 
 
 # --- parse_field_dictionary: unrecognised Format inside a real file ----
@@ -579,9 +621,13 @@ def test_recognised_format_records_no_format_note(tmp_path):
     assert "format_note" not in parse_field_dictionary(source)["t1"]["business_metadata"]["col"]
 
 
-def test_unrecognised_format_row_still_gets_its_pii_tag(tmp_path):
+def test_unrecognised_format_row_is_still_parsed(tmp_path):
+    """The subject here is the unknown Format value: the row must still be
+    ingested with a fallback type and a format_note, rather than being
+    dropped. (The `tag` stays blank -- Personal Data (Y/N) is not a source of
+    tags; see test_personal_data_yes_does_not_set_a_tag.)"""
     headers = BASE_HEADERS + ["Personal Data (Y/N)"]
     source = _write_csv(tmp_path, headers, [("t1", "weird", "d", "Blob", "Y", "Y")])
     meta = parse_field_dictionary(source)["t1"]["business_metadata"]["weird"]
-    assert meta["tag"] == "PII"
+    assert meta["tag"] == ""
     assert "format_note" in meta
