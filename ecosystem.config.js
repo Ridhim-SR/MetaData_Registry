@@ -47,10 +47,13 @@ module.exports = {
       // This entry brings the stack up detached (idempotent) and then
       // tails logs so PM2 has a stable foreground process that owns
       // no containers; restarts only re-attach the log tail.
+      // No `--wait` and `;` not `&&`: --wait fails when a one-shot service
+      // (e.g. the migration container) exits, which skipped the log tail
+      // and made PM2 crash-loop this entry.
       name: "openmetadata",
       cwd: ROOT,
       script: "bash",
-      args: `-c "docker compose -f infrastructure/openmetadata/docker-compose.yml up -d --wait && exec docker compose -f infrastructure/openmetadata/docker-compose.yml logs -f --tail=50"`,
+      args: `-c "docker compose -f infrastructure/openmetadata/docker-compose.yml up -d; exec docker compose -f infrastructure/openmetadata/docker-compose.yml logs -f --tail=50"`,
       interpreter: "none",
       ...common,
       restart_delay: 15000,
