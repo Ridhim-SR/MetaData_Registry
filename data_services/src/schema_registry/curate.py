@@ -92,15 +92,32 @@ AUTO_TAG_RULES: list[tuple[str, re.Pattern]] = [
     ("Date/Timestamp", re.compile(r"(_date|_at)$", re.IGNORECASE)),
 ]
 
-# The controlled vocabulary for a column's `tag`: everything AUTO_TAG_RULES
-# can assign, plus the values real Field Dictionaries already use (PII) and
-# the MDSF s5.1 sensitive attributes ai_metadata's apply_rules() writes
-# (Sensitive). Anything outside it is a typo or an invented value, and
-# publishing it would silently create a brand-new tag under the FieldTag
-# Classification in OpenMetadata -- which is how "cat3" ended up as a tag
-# next to CAT-3. ai_metadata.KNOWN_TAGS must stay a subset of this set or
-# a drafted file fails at ingest rather than at review.
-KNOWN_TAGS = sorted({tag for tag, _ in AUTO_TAG_RULES} | {"PII", "Sensitive"})
+# The controlled vocabulary for a column's `tag`. Two kinds of value live
+# here, and only the first kind may ever be auto-assigned:
+#
+#   * everything AUTO_TAG_RULES can detect from a field name. Adding a rule
+#     rewrites tagging for every department, so a new entry there is a
+#     behaviour change, not a vocabulary change.
+#
+#   * values that are real but not name-inferable -- a human supplied them
+#     and the vocabulary merely permits them. PII (already used by real
+#     Field Dictionaries), Sensitive (the MDSF s5.1 sensitive attributes
+#     ai_metadata's apply_rules() writes), and PWD's own field dictionary:
+#     Remarks, Identifier, Administrative-Unit and Quantity. That file was
+#     curated on 2026-10-13, before validate_tag() existed, so all four are
+#     already published under OpenMetadata's FieldTag Classification. They
+#     are allowed here so a republish passes, and deliberately kept out of
+#     AUTO_TAG_RULES so the auto-tagger never starts inventing them.
+#
+# Anything outside this set is a typo or an invented value, and publishing
+# it would silently create a brand-new tag under the FieldTag Classification
+# in OpenMetadata -- which is how "cat3" ended up as a tag next to CAT-3.
+# ai_metadata.KNOWN_TAGS must stay a subset of this set or a drafted file
+# fails at ingest rather than at review.
+KNOWN_TAGS = sorted({tag for tag, _ in AUTO_TAG_RULES} | {
+    "PII", "Sensitive",
+    "Remarks", "Identifier", "Administrative-Unit", "Quantity",
+})
 
 # MDSF dataset-level categories (the axis curate_schema()'s per-column
 # `classification` is NOT part of -- this one is per dataset, see
