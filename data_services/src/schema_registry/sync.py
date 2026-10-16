@@ -249,7 +249,7 @@ def sync(
                 _record_publish(storage, table_id, "failed", error=f"{type(exc).__name__}: {exc}")
 
     if not publish_only and not only_department:
-        listed = set(targets)
+        listed = {table_id for table_id, _ in targets}
         extra = sorted(r["table_id"] for r in (storage.read_csv(lookups.TABLES_PATH) if storage.exists(lookups.TABLES_PATH) else [])
                        if r["table_id"] not in listed)
         if extra:

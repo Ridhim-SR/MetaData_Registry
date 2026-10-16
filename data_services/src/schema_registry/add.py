@@ -31,6 +31,8 @@ from ruamel.yaml.comments import CommentedMap
 
 from src.schema_registry import inputs
 from src.schema_registry.catalog import parse_catalog
+from src.schema_registry.curate import validate_schema
+from src.schema_registry.pipeline import parse_source
 from src.schema_registry.registry import lookups
 from src.storage.base import ObjectStorage
 from src.utils.logger import get_logger
@@ -153,6 +155,12 @@ def add(
         raise ValueError(f"--department must be lowercase letters, digits and _ (try '{lookups.slugify(department)}')")
     if not Path(file).is_file():
         raise FileNotFoundError(f"No such file: {file} -- check the path and file name (run the command from data_services/)")
+
+    if table:
+        # Same parse + check sync runs, so a bad file is refused here and
+        # never replaces the good one already in inputs/.
+        text = inputs.decode(Path(file).read_bytes())
+        validate_schema(f"{department}.{dataset}.{table}", parse_source(department, table, file_format or guess_format(file), text))
 
     source_key = input_key(department, dataset, Path(file).name)
     metadata_key = input_key(department, dataset, Path(metadata_file).name) if metadata_file else None
