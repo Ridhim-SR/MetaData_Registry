@@ -153,3 +153,18 @@ def test_header_comments_kept_when_catalog_has_no_departments_yet():
     new, _ = update_catalog_text("# keep me\n", "pwd", "ds", "storage:inputs/x.txt", department_name="PWD", table="t")
     assert new.startswith("# keep me")
     assert parse_catalog(new)[0].id == "pwd"
+
+
+def test_empty_or_broken_file_is_refused_before_upload(setup):
+    storage, catalog, ddl, tmp_path = setup
+    add(storage, catalog, str(ddl), "pwd", "vishwakarma", table="works")
+    good = storage.read_bytes("inputs/pwd/vishwakarma/works.txt")
+    before = catalog.read_text()
+
+    bad = tmp_path / "works.txt"  # same name: would overwrite the good upload
+    for content in ("", "work_id weirdtype"):
+        bad.write_text(content)
+        with pytest.raises(ValueError, match="schema rejected"):
+            add(storage, catalog, str(bad), "pwd", "vishwakarma", table="works")
+        assert storage.read_bytes("inputs/pwd/vishwakarma/works.txt") == good
+        assert catalog.read_text() == before
