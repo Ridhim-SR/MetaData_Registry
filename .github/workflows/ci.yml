@@ -28,7 +28,7 @@ concurrency:
 
 jobs:
   data-services:
-    name: data_services (502 tests)
+    name: data_services (pytest)
     runs-on: ubuntu-latest
     timeout-minutes: 25
     defaults:
@@ -57,7 +57,7 @@ jobs:
         run: python -m pytest -q --no-header -rs
 
   apps-api:
-    name: apps/api (64 tests)
+    name: apps/api (pytest)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
