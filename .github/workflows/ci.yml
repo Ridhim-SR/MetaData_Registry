@@ -35,9 +35,9 @@ jobs:
       run:
         working-directory: data_services
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -48,8 +48,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      # -rs prints the reason for each skipped test. Without it a dependency
+      # gap is invisible: the first CI run reported "462 passed, 11 skipped"
+      # against 502 locally, because openpyxl was missing from
+      # requirements.txt and 36 workbook tests skipped without saying why.
+      # Skipping is fine; skipping silently is not.
       - name: Run tests
-        run: python -m pytest -q --no-header
+        run: python -m pytest -q --no-header -rs
 
   apps-api:
     name: apps/api (64 tests)
@@ -59,9 +64,9 @@ jobs:
       run:
         working-directory: apps/api
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -73,4 +78,4 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run tests
-        run: python -m pytest -q --no-header
+        run: python -m pytest -q --no-header -rs
