@@ -1,6 +1,6 @@
 import pytest
 
-from src.schema_registry.curate import KNOWN_TAGS, curate_schema
+from src.schema_registry.curate import KNOWN_TAGS, auto_classify, curate_schema
 
 
 def _col(name, data_type="integer", **overrides):
@@ -103,9 +103,9 @@ def test_auto_classifies_pii_fields_as_pii():
     assert all(row["classification"] == "PII" for row in curated)
 
 
-def test_non_pii_field_defaults_to_internal():
+def test_a_field_no_rule_recognises_is_left_blank_not_guessed_internal():
     curated = curate_schema([_col("sno", "integer")])
-    assert curated[0]["classification"] == "Internal"
+    assert curated[0]["classification"] == ""
 
 
 def test_geographic_place_names_are_public_not_pii():
@@ -161,3 +161,43 @@ def test_unknown_classification_override_falls_back_to_rules():
     business_metadata = {"mobile_number": {"classification": "CAT-2"}}
     curated = curate_schema([_col("mobile_number", "character varying")], business_metadata)
     assert curated[0]["classification"] == "PII"
+
+
+# --- auto_classify: whole-token matching for the short, ambiguous words ----------------------------
+
+@pytest.mark.parametrize("name,level", [
+    # a trigger word that only sits INSIDE a longer word must not fire (no rule left -> blank)
+    ("cancel_by_logic", ""),      # log in "logic"
+    ("catalog_no", ""),           # log in "catalog"
+    ("hotmix_plant", ""),         # plan in "plant"
+    ("company_code", "Internal"),         # pan in "company"
+    ("expansion_date", ""),       # pan in "expansion"
+    ("author", ""),               # auth in "author"
+    ("monkey", ""),               # key in "monkey"
+    ("migrant_count", ""),        # grant in "migrant"
+    ("capacity", ""),             # city in "capacity" -- must not become Public
+    ("statement_date", ""),       # state in "statement" -- must not become Public
+    ("name_of_work", "Internal"),         # a title, not a person
+    ("name_of_scheme", "Internal"),
+    ("crop_noncrop_name_id", "Internal"),  # an id, "name" is in the middle
+])
+def test_a_word_inside_a_longer_word_does_not_trigger_a_rule(name, level):
+    assert auto_classify(name) == level
+
+
+@pytest.mark.parametrize("name,level", [
+    ("audit_log", "Restricted"), ("change_log", "Restricted"), ("access_logs", "Restricted"),
+    ("api_key", "Restricted"), ("auth_token", "Restricted"), ("password", "Restricted"),
+    ("forecast_plan", "Confidential"), ("plan", "Confidential"),
+    ("aadhaar", "PII"), ("aadhaar_no", "PII"), ("aadhaarnumber", "PII"), ("pan", "PII"),
+    ("pan_number", "PII"), ("firm_pannumber", "PII"), ("pancard", "PII"),
+    ("name", "PII"), ("full_name", "PII"), ("farmername", "PII"), ("sansthaname", "PII"),
+    ("name_of_applicant", "PII"), ("mobile_no", "PII"), ("email", "PII"), ("dob", "PII"),
+    ("total_cost", "Financial"), ("v19_20extraamount", "Financial"), ("v20_21surrenderamount", "Financial"),
+    ("emi", "Financial"), ("grant_amount", "Financial"),
+    ("state", "Public"), ("states", "Public"), ("emp_avail_states_persondays", "Public"),
+    ("district", "Internal"), ("latitude", "Public"),  # district: the Internal rule is first -- unchanged
+    ("change_mainschemeid", "Internal"), ("sno", ""), ("tender_date", ""),
+])
+def test_the_real_cases_still_match(name, level):
+    assert auto_classify(name) == level
