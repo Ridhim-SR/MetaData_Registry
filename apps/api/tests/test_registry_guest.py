@@ -753,3 +753,12 @@ def test_cat4_dataset_hidden_from_guests(client, monkeypatch):
     _tag_database(monkeypatch, "pub.db", 4)
     assert client.get("/registry/datasets/by-fqn", params={"fqn": "pub.db"}).status_code == 404
     assert client.get("/registry/tables/t-pub").status_code == 404
+
+
+def test_responses_carry_server_timing_breakdown(client):
+    resp = client.get("/registry/stats")
+    assert resp.status_code == 200
+    header = resp.headers["Server-Timing"]
+    for metric in ("db;dur=", "dbconn;dur=", "om;dur=", "app;dur=", "total;dur="):
+        assert metric in header
+    assert "Timing-Allow-Origin" in resp.headers

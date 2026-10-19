@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { getDataset, requestAccess, type DatasetInfo } from "../api/registry";
-import { catAccessNote, catLabel, classificationBadgeClass, humanizeRaw, normalizeClassification } from "../utils/format";
+import { catLabel, classificationBadgeClass, humanizeRaw, normalizeClassification } from "../utils/format";
 import { t } from "../i18n";
 import { ApiError } from "../api/client";
 import { EmptyBlock, ErrorBlock, LoadingBlock } from "../components/registry/StateBlocks";
@@ -146,12 +146,17 @@ export function DatasetDetailPage() {
                   {humanizeRaw(query.data.name)}
                 </h1>
               </div>
-              <div className="flex items-center gap-2">
-                <CatBadge value={query.data.classification} />
-                <span className="badge badge-neutral">
-                  {query.data.table_count} {query.data.table_count === 1 ? "table" : "tables"}
-                </span>
-              </div>
+              {/* Unlocked datasets already show the category in the facts box
+                  and the count in "Tables (n)"; only locked teasers, which
+                  have neither, show them here. */}
+              {query.data.locked && (
+                <div className="flex items-center gap-2">
+                  <CatBadge value={query.data.classification} />
+                  <span className="badge badge-neutral">
+                    {query.data.table_count} {query.data.table_count === 1 ? "table" : "tables"}
+                  </span>
+                </div>
+              )}
             </div>
             {query.data.description ? (
               <p className="mt-4 text-sm" style={{ color: "var(--text)", fontSize: "0.9375rem" }}>
@@ -220,12 +225,14 @@ function DatasetFacts({ info }: { info: DatasetInfo }) {
       <div>
         <dt className="metadata-fact-label">{t("dataClassification")}</dt>
         <dd className="mt-0.5">
-          {level ? (
+          {catLabel(info.data_classification) ? (
+            <CatBadge value={info.data_classification} />
+          ) : level ? (
             <span
               className={`badge ${classificationBadgeClass(level)}`}
-              title={catAccessNote(info.data_classification) ?? info.data_classification_description ?? undefined}
+              title={info.data_classification_description ?? undefined}
             >
-              {catLabel(info.data_classification) ?? t(`classification${level}`)}
+              {t(`classification${level}`)}
             </span>
           ) : (
             <span className="not-provided">Not provided</span>
