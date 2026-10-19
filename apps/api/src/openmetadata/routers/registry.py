@@ -58,17 +58,48 @@ def _catalog_lock(key: str) -> asyncio.Lock:
 
 # ---- sidecar helpers ----
 
-async def _visibility_map(session: AsyncSession, fqns: list[str] | None = None) -> dict[str, dict]:
-    """FQN -> {"visibility": str, "department": str|None} from the sidecar table."""
-    stmt = select(DatasetVisibility)
-    if fqns is not None:
-        if not fqns:
-            return {}
-        stmt = stmt.where(DatasetVisibility.fqn.in_(fqns))
-    rows = (await session.execute(stmt)).scalars().all()
+# The dataset_visibility table, cached in this worker's memory. Every
+# registry endpoint needs it and the database is ~1.4 s away, while the
+# table is tiny and only changes on uploads. Each uvicorn worker keeps its
+# own copy: reloaded at most once per TTL, and cleared immediately by
+# upsert_table_visibility in the worker that handled the write (the other
+# worker catches up within the TTL). Direct edits to the table outside this
+# API (seed scripts, SQL) also show up within the TTL.
+VISIBILITY_TTL_SECONDS = 60
+_visibility_cache: tuple[float, dict[str, dict]] | None = None
+_visibility_lock = asyncio.Lock()
+
+
+def clear_visibility_cache() -> None:
+    global _visibility_cache
+    _visibility_cache = None
+
+
+async def _load_visibility(session: AsyncSession) -> dict[str, dict]:
+    rows = (await session.execute(select(DatasetVisibility))).scalars().all()
     return {
         r.fqn: {"visibility": r.visibility.value, "department": r.department} for r in rows
     }
+
+
+async def _visibility_map(session: AsyncSession, fqns: list[str] | None = None) -> dict[str, dict]:
+    """FQN -> {"visibility": str, "department": str|None} from the sidecar table.
+
+    Served from the per-worker cache; at most one reload per TTL (concurrent
+    requests wait for that single load instead of each querying).
+    """
+    global _visibility_cache
+    hit = _visibility_cache
+    if hit is None or time.monotonic() - hit[0] >= VISIBILITY_TTL_SECONDS:
+        async with _visibility_lock:
+            hit = _visibility_cache
+            if hit is None or time.monotonic() - hit[0] >= VISIBILITY_TTL_SECONDS:
+                hit = (time.monotonic(), await _load_visibility(session))
+                _visibility_cache = hit
+    vmap = hit[1]
+    if fqns is None:
+        return dict(vmap)
+    return {fqn: vmap[fqn] for fqn in fqns if fqn in vmap}
 
 
 def _profiles_from_services(services: list[dict]) -> list[dict]:
@@ -451,10 +482,7 @@ async def registry_table(
                 raise HTTPException(status_code=404, detail="Table not found")
             raise
     fqn = table.get("fullyQualifiedName") or ""
-    rows = (await session.execute(
-        select(DatasetVisibility).where(DatasetVisibility.fqn == fqn)
-    )).scalars().all()
-    vmap = {r.fqn: {"visibility": r.visibility.value, "department": r.department} for r in rows}
+    vmap = await _visibility_map(session, [fqn])
     raw = await _catalog_raw(session, ctx)
     vmap = vis.effective_visibility_map([table], raw["databases"], vmap)
     visibility = vis.normalize_visibility(vmap.get(fqn, {}).get("visibility"))
@@ -537,10 +565,7 @@ async def table_dictionary(
                 raise HTTPException(status_code=404, detail="Table not found")
             raise
     fqn = table.get("fullyQualifiedName") or ""
-    rows = (await session.execute(
-        select(DatasetVisibility).where(DatasetVisibility.fqn == fqn)
-    )).scalars().all()
-    vmap = {r.fqn: {"visibility": r.visibility.value, "department": r.department} for r in rows}
+    vmap = await _visibility_map(session, [fqn])
     raw = await _catalog_raw(session, ctx)
     vmap = vis.effective_visibility_map([table], raw["databases"], vmap)
     visibility = vis.normalize_visibility(vmap.get(fqn, {}).get("visibility"))
@@ -900,6 +925,7 @@ async def upsert_table_visibility(
             )
         )
     await session.commit()
+    clear_visibility_cache()
 
 
 async def upsert_dataset_info(

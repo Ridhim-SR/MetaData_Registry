@@ -72,9 +72,10 @@ async def lifespan(app: FastAPI):
     # Failures are ignored.
     async def _prewarm_catalog() -> None:
         try:
-            from src.openmetadata.routers.registry import _catalog_raw
+            from src.openmetadata.routers.registry import _catalog_raw, _visibility_map
 
             async with async_session() as _s:
+                await _visibility_map(_s)  # fills the visibility cache too
                 await _catalog_raw(_s, None)
         except Exception:
             pass
