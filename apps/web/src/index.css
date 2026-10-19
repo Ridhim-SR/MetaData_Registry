@@ -299,6 +299,59 @@ input[type="search"]::-webkit-search-decoration {
   display: block;
 }
 
+/* Data category (CAT) info icon + tooltip: shows on hover and keyboard
+   focus. Raised above card "stretched links" so hovering it works. */
+.cat-info {
+  position: relative;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1px solid var(--text-muted);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: default;
+}
+.cat-info-tip {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: -8px;
+  width: min(300px, calc(100vw - 32px));
+  background: var(--navy-900);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 400;
+  line-height: 1.4;
+  text-align: left;
+  padding: 0.5rem 0.65rem;
+  border-radius: 6px;
+  z-index: 20;
+}
+.cat-info:hover .cat-info-tip,
+.cat-info:focus-visible .cat-info-tip {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.cat-info-title {
+  font-weight: 700;
+}
+.cat-info-row {
+  display: flex;
+  flex-direction: column;
+  opacity: 0.8;
+}
+.cat-info-current {
+  opacity: 1;
+  border-left: 2px solid #fff;
+  padding-left: 0.4rem;
+}
+
 /* Clamp dataset descriptions to 2 lines */
 .clamp-2 {
   display: -webkit-box;

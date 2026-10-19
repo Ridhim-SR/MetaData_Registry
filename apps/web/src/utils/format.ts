@@ -90,34 +90,52 @@ export function normalizeClassification(value: string | null | undefined): DataC
 
 /**
  * Data classification categories (MeitY Model Data Sharing Framework,
- * s.5.1), tagged in OpenMetadata as DataSensitivity.CAT-1..CAT-4. The
- * access notes describe how this portal applies each category.
+ * s.5.1), tagged in OpenMetadata as DataSensitivity.CAT-1..CAT-4.
+ * `meaning` summarizes the framework definition; `access` describes how
+ * this portal applies each category.
  */
-const CAT_CATEGORIES: Record<number, { name: string; access: string }> = {
-  1: { name: "Open Access", access: "Open to everyone; no login required." },
-  2: { name: "Registered Access", access: "Sign in with your department account to view." },
-  3: { name: "Restricted Access", access: "Personal or sensitive data; details are shared only on an approved access request." },
-  4: { name: "Non-Shareable", access: "Not shared; internal government use only." },
-};
+export const CAT_CATEGORIES: Array<{ level: number; name: string; meaning: string; access: string }> = [
+  {
+    level: 1,
+    name: "Open Access",
+    meaning: "Anonymised, aggregated or non-personal data.",
+    access: "Open to everyone; no login required.",
+  },
+  {
+    level: 2,
+    name: "Registered Access",
+    meaning: "De-identified data; individual identity is not exposed.",
+    access: "Sign in with your department account to view.",
+  },
+  {
+    level: 3,
+    name: "Restricted Access",
+    meaning: "Personal or sensitive data at individual or entity level.",
+    access: "Shared only on an approved access request.",
+  },
+  {
+    level: 4,
+    name: "Non-Shareable",
+    meaning: "Classified or legally restricted data.",
+    access: "Not shared; internal government use only.",
+  },
+];
 
-function catNumber(value: string | null | undefined): number | null {
+function catCategory(value: string | null | undefined) {
   const m = /^cat-(\d+)$/i.exec((value ?? "").trim());
-  return m && CAT_CATEGORIES[Number(m[1])] ? Number(m[1]) : null;
+  return m ? CAT_CATEGORIES.find((c) => c.level === Number(m[1])) ?? null : null;
 }
 
-/**
- * User-facing name for a DataSensitivity level ("Restricted Access"), else
- * null. The internal CAT-n code is never shown to users.
- */
+/** Badge text for a DataSensitivity level ("CAT-3"), else null. */
 export function catLabel(value: string | null | undefined): string | null {
-  const n = catNumber(value);
-  return n ? CAT_CATEGORIES[n].name : null;
+  const c = catCategory(value);
+  return c ? `CAT-${c.level}` : null;
 }
 
 /** How this portal shares data of the given CAT level (tooltip text), else null. */
 export function catAccessNote(value: string | null | undefined): string | null {
-  const n = catNumber(value);
-  return n ? `${CAT_CATEGORIES[n].name}: ${CAT_CATEGORIES[n].access}` : null;
+  const c = catCategory(value);
+  return c ? `CAT-${c.level} (${c.name}): ${c.access}` : null;
 }
 
 /** Badge colour class for a normalized data classification. */
