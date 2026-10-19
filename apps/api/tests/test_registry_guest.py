@@ -218,6 +218,7 @@ def client(monkeypatch):
     monkeypatch.setattr(OpenMetadataClient, "get_table", _fake_get_table)
     monkeypatch.setattr(OpenMetadataClient, "get_database_by_fqn", _fake_get_database_by_fqn)
     registry_router._catalog_cache.clear()
+    registry_router.clear_visibility_cache()
 
     async def _fake_session():
         yield _FakeSession()
@@ -228,6 +229,7 @@ def client(monkeypatch):
     finally:
         app.dependency_overrides.pop(db_get_session, None)
         registry_router._catalog_cache.clear()
+        registry_router.clear_visibility_cache()
         assert routers is not None  # keep import used
 
 
@@ -762,3 +764,59 @@ def test_responses_carry_server_timing_breakdown(client):
     for metric in ("db;dur=", "dbconn;dur=", "om;dur=", "app;dur=", "total;dur="):
         assert metric in header
     assert "Timing-Allow-Origin" in resp.headers
+
+
+class _CountingSession(_FakeSession):
+    """Fake session that counts dataset_visibility reads."""
+
+    visibility_reads = 0
+
+    async def execute(self, stmt):
+        if "dataset_visibility" in str(stmt):
+            _CountingSession.visibility_reads += 1
+        return await super().execute(stmt)
+
+    def add(self, obj):
+        pass
+
+    async def commit(self):
+        pass
+
+
+def _use_counting_session():
+    _CountingSession.visibility_reads = 0
+
+    async def _session():
+        yield _CountingSession()
+
+    app.dependency_overrides[db_get_session] = _session
+
+
+def test_visibility_loaded_once_for_many_requests(client):
+    _use_counting_session()
+    for path in ("/registry/stats", "/registry/departments", "/registry/datasets/public", "/registry/stats"):
+        assert client.get(path).status_code == 200
+    assert client.get("/registry/tables/t-pub").status_code == 200
+    assert _CountingSession.visibility_reads == 1
+
+
+def test_visibility_reloaded_after_ttl(client, monkeypatch):
+    _use_counting_session()
+    monkeypatch.setattr(registry_router, "VISIBILITY_TTL_SECONDS", 0)
+    client.get("/registry/stats")
+    client.get("/registry/stats")
+    assert _CountingSession.visibility_reads == 2
+
+
+def test_visibility_write_clears_cache(client):
+    import asyncio
+
+    _use_counting_session()
+    client.get("/registry/stats")
+    assert registry_router._visibility_cache is not None
+    asyncio.run(registry_router.upsert_table_visibility(
+        _CountingSession(), fqn="pub.db.s.new_table", visibility="public", department=None,
+    ))
+    assert registry_router._visibility_cache is None
+    client.get("/registry/stats")
+    assert _CountingSession.visibility_reads == 3  # first load, the write's own lookup, reload
