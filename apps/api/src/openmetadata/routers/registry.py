@@ -28,7 +28,12 @@ from database.models import (
     User,
     Visibility,
 )
-from src.middleware.auth import get_optional_user, require_admin, user_context
+from src.middleware.auth import (
+    get_optional_user,
+    get_optional_user_verified,
+    require_admin,
+    user_context,
+)
 from src.openmetadata import facts as facts_mod
 from src.openmetadata import visibility as vis
 from src.openmetadata.client import OpenMetadataClient
@@ -58,21 +63,43 @@ def _catalog_lock(key: str) -> asyncio.Lock:
 
 # ---- sidecar helpers ----
 
-# The dataset_visibility table, cached in this worker's memory. Every
-# registry endpoint needs it and the database is ~1.4 s away, while the
-# table is tiny and only changes on uploads. Each uvicorn worker keeps its
-# own copy: reloaded at most once per TTL, and cleared immediately by
-# upsert_table_visibility in the worker that handled the write (the other
-# worker catches up within the TTL). Direct edits to the table outside this
-# API (seed scripts, SQL) also show up within the TTL.
-VISIBILITY_TTL_SECONDS = 60
-_visibility_cache: tuple[float, dict[str, dict]] | None = None
-_visibility_lock = asyncio.Lock()
+# The sidecar tables (dataset_visibility, table_info, dataset_info) are
+# cached in this worker's memory. Nearly every registry endpoint reads them
+# and the database is ~1.5-4 s away, while the tables are tiny and only
+# change on uploads/admin edits. Each uvicorn worker keeps its own copy:
+# reloaded at most once per TTL, and cleared immediately by the upsert_*
+# helpers in the worker that handled the write (the other worker catches
+# up within the TTL). Direct edits outside this API (seed scripts, SQL)
+# also show up within the TTL.
+SIDECAR_TTL_SECONDS = 60
 
 
-def clear_visibility_cache() -> None:
-    global _visibility_cache
-    _visibility_cache = None
+class _SidecarCache:
+    """One whole sidecar table ({fqn: row dict}) cached per worker."""
+
+    def __init__(self, loader):
+        self._loader = loader
+        self._hit: tuple[float, dict[str, dict]] | None = None
+        self._lock = asyncio.Lock()
+
+    def clear(self) -> None:
+        self._hit = None
+
+    @property
+    def loaded(self) -> bool:
+        return self._hit is not None
+
+    async def get(self, session: AsyncSession) -> dict[str, dict]:
+        """The cached table; at most one reload per TTL (concurrent requests
+        wait for that single load instead of each querying)."""
+        hit = self._hit
+        if hit is None or time.monotonic() - hit[0] >= SIDECAR_TTL_SECONDS:
+            async with self._lock:
+                hit = self._hit
+                if hit is None or time.monotonic() - hit[0] >= SIDECAR_TTL_SECONDS:
+                    hit = (time.monotonic(), await self._loader(session))
+                    self._hit = hit
+        return hit[1]
 
 
 async def _load_visibility(session: AsyncSession) -> dict[str, dict]:
@@ -82,24 +109,51 @@ async def _load_visibility(session: AsyncSession) -> dict[str, dict]:
     }
 
 
-async def _visibility_map(session: AsyncSession, fqns: list[str] | None = None) -> dict[str, dict]:
-    """FQN -> {"visibility": str, "department": str|None} from the sidecar table.
+async def _load_table_info(session: AsyncSession) -> dict[str, dict]:
+    rows = (await session.execute(select(TableInfo))).scalars().all()
+    return {
+        r.fqn: {
+            "api_available": r.api_available,
+            "dataset_owner": r.dataset_owner,
+            "frequency": r.frequency,
+            "timeline": r.timeline,
+        }
+        for r in rows
+    }
 
-    Served from the per-worker cache; at most one reload per TTL (concurrent
-    requests wait for that single load instead of each querying).
-    """
-    global _visibility_cache
-    hit = _visibility_cache
-    if hit is None or time.monotonic() - hit[0] >= VISIBILITY_TTL_SECONDS:
-        async with _visibility_lock:
-            hit = _visibility_cache
-            if hit is None or time.monotonic() - hit[0] >= VISIBILITY_TTL_SECONDS:
-                hit = (time.monotonic(), await _load_visibility(session))
-                _visibility_cache = hit
-    vmap = hit[1]
+
+async def _load_dataset_info(session: AsyncSession) -> dict[str, dict]:
+    rows = (await session.execute(select(DatasetInfo))).scalars().all()
+    return {
+        r.fqn: {
+            "owner": r.owner,
+            "steward": r.steward,
+            "frequency": r.frequency,
+            "timeline": r.timeline,
+        }
+        for r in rows
+    }
+
+
+_visibility_cache = _SidecarCache(_load_visibility)
+_table_info_cache = _SidecarCache(_load_table_info)
+_dataset_info_cache = _SidecarCache(_load_dataset_info)
+
+
+def clear_sidecar_caches() -> None:
+    for cache in (_visibility_cache, _table_info_cache, _dataset_info_cache):
+        cache.clear()
+
+
+def _pick(rows: dict[str, dict], fqns: list[str] | None) -> dict[str, dict]:
     if fqns is None:
-        return dict(vmap)
-    return {fqn: vmap[fqn] for fqn in fqns if fqn in vmap}
+        return dict(rows)
+    return {fqn: rows[fqn] for fqn in fqns if fqn in rows}
+
+
+async def _visibility_map(session: AsyncSession, fqns: list[str] | None = None) -> dict[str, dict]:
+    """FQN -> {"visibility": str, "department": str|None} (cached sidecar)."""
+    return _pick(await _visibility_cache.get(session), fqns)
 
 
 def _profiles_from_services(services: list[dict]) -> list[dict]:
@@ -878,7 +932,8 @@ def _matches(table: dict, needle: str) -> bool:
 async def create_access_request(
     payload: AccessRequestCreate,
     session: AsyncSession = Depends(db_get_session),
-    user: User | None = Depends(get_optional_user),
+    # Records the requester's email, so the user must come from the database.
+    user: User | None = Depends(get_optional_user_verified),
 ) -> dict:
     record = AccessRequest(
         fqn=payload.fqn,
@@ -925,7 +980,7 @@ async def upsert_table_visibility(
             )
         )
     await session.commit()
-    clear_visibility_cache()
+    _visibility_cache.clear()
 
 
 async def upsert_dataset_info(
@@ -945,24 +1000,14 @@ async def upsert_dataset_info(
     else:
         session.add(DatasetInfo(fqn=fqn, **allowed))
     await session.commit()
+    _dataset_info_cache.clear()
 
 
-async def dataset_info_map(session: AsyncSession, fqns: list[str]) -> dict[str, dict]:
-    """Dataset FQN -> {"owner", "steward", "frequency", "timeline"} from the sidecar."""
-    if not fqns:
+async def dataset_info_map(session: AsyncSession, fqns: list[str] | None = None) -> dict[str, dict]:
+    """Dataset FQN -> {"owner", "steward", "frequency", "timeline"} (cached sidecar)."""
+    if fqns is not None and not fqns:
         return {}
-    rows = (
-        await session.execute(select(DatasetInfo).where(DatasetInfo.fqn.in_(fqns)))
-    ).scalars().all()
-    return {
-        r.fqn: {
-            "owner": r.owner,
-            "steward": r.steward,
-            "frequency": r.frequency,
-            "timeline": r.timeline,
-        }
-        for r in rows
-    }
+    return _pick(await _dataset_info_cache.get(session), fqns)
 
 
 @router.put("/datasets/info")
@@ -1007,25 +1052,14 @@ async def upsert_table_info(
             )
         )
     await session.commit()
+    _table_info_cache.clear()
 
 
 async def table_info_map(session: AsyncSession, fqns: list[str] | None = None) -> dict[str, dict]:
-    """FQN -> {"api_available": bool|None, ...} from the sidecar table."""
-    stmt = select(TableInfo)
-    if fqns is not None:
-        if not fqns:
-            return {}
-        stmt = stmt.where(TableInfo.fqn.in_(fqns))
-    rows = (await session.execute(stmt)).scalars().all()
-    return {
-        r.fqn: {
-            "api_available": r.api_available,
-            "dataset_owner": r.dataset_owner,
-            "frequency": r.frequency,
-            "timeline": r.timeline,
-        }
-        for r in rows
-    }
+    """FQN -> {"api_available": bool|None, ...} (cached sidecar)."""
+    if fqns is not None and not fqns:
+        return {}
+    return _pick(await _table_info_cache.get(session), fqns)
 
 
 __all__ = [
