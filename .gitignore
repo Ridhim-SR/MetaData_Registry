@@ -281,6 +281,9 @@ CLAUDE.md
 # Team working notes -- kept on disk, not committed
 /progress.md
 
+# Repository review findings -- working record of modularity issues, not for commit
+/REPO_REVIEW_ISSUES.txt
+
 # Separate ingestion pipeline (not wired into schema_registry)
 /data_services/src/ingestion/
 /data_services/data/
