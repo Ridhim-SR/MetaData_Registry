@@ -3,7 +3,12 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.models import AuthProvider, User, UserRole
-from src.middleware.auth import create_access_token, hash_password_async, verify_password_async
+from src.middleware.auth import (
+    _store_user_cache,
+    create_access_token,
+    hash_password_async,
+    verify_password_async,
+)
 from src.schemas.auth import LoginRequest, RegisterRequest, TokenResponse
 
 
@@ -71,5 +76,8 @@ async def login_user(body: LoginRequest, session: AsyncSession) -> TokenResponse
     if not await verify_password_async(body.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
+    # The browser calls /auth/me right after login: cache the user we just
+    # loaded so that call skips a database round-trip (in this worker).
+    _store_user_cache(user)
     token = create_access_token({"sub": user.id, "role": user.role.value, "department": user.department})
     return TokenResponse(access_token=token)

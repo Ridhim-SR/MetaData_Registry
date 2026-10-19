@@ -19,7 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.models import AuthProvider, User, UserRole
-from src.middleware.auth import create_access_token
+from src.middleware.auth import _store_user_cache, create_access_token
 from src.schemas.auth import TokenResponse
 from src.services.auth import _unique_username, _username_from_email
 
@@ -203,5 +203,8 @@ async def handle_callback(
         await session.commit()
         await session.refresh(user)
 
+    # The browser calls /auth/me right after sign-in: cache the user so that
+    # call skips a database round-trip (in this worker).
+    _store_user_cache(user)
     token = create_access_token({"sub": user.id, "role": user.role.value, "department": user.department})
     return TokenResponse(access_token=token)
