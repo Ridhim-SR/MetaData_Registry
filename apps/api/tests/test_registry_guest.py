@@ -218,7 +218,7 @@ def client(monkeypatch):
     monkeypatch.setattr(OpenMetadataClient, "get_table", _fake_get_table)
     monkeypatch.setattr(OpenMetadataClient, "get_database_by_fqn", _fake_get_database_by_fqn)
     registry_router._catalog_cache.clear()
-    registry_router.clear_visibility_cache()
+    registry_router.clear_sidecar_caches()
 
     async def _fake_session():
         yield _FakeSession()
@@ -229,7 +229,7 @@ def client(monkeypatch):
     finally:
         app.dependency_overrides.pop(db_get_session, None)
         registry_router._catalog_cache.clear()
-        registry_router.clear_visibility_cache()
+        registry_router.clear_sidecar_caches()
         assert routers is not None  # keep import used
 
 
@@ -802,7 +802,7 @@ def test_visibility_loaded_once_for_many_requests(client):
 
 def test_visibility_reloaded_after_ttl(client, monkeypatch):
     _use_counting_session()
-    monkeypatch.setattr(registry_router, "VISIBILITY_TTL_SECONDS", 0)
+    monkeypatch.setattr(registry_router, "SIDECAR_TTL_SECONDS", 0)
     client.get("/registry/stats")
     client.get("/registry/stats")
     assert _CountingSession.visibility_reads == 2
@@ -813,10 +813,95 @@ def test_visibility_write_clears_cache(client):
 
     _use_counting_session()
     client.get("/registry/stats")
-    assert registry_router._visibility_cache is not None
+    assert registry_router._visibility_cache.loaded
     asyncio.run(registry_router.upsert_table_visibility(
         _CountingSession(), fqn="pub.db.s.new_table", visibility="public", department=None,
     ))
-    assert registry_router._visibility_cache is None
+    assert not registry_router._visibility_cache.loaded
     client.get("/registry/stats")
     assert _CountingSession.visibility_reads == 3  # first load, the write's own lookup, reload
+
+
+def _bearer(role, department, user_id=7):
+    from src.middleware.auth import create_access_token
+
+    token = create_access_token({"sub": user_id, "role": role, "department": department})
+    return {"Authorization": f"Bearer {token}"}
+
+
+def test_signed_in_reads_use_token_claims_without_db_user_lookup(client):
+    # _FakeSession raises on any unexpected query (e.g. users.users), so
+    # this fails if a signed-in read still loads the user from the DB.
+    resp = client.get("/registry/datasets/by-fqn", params={"fqn": "con.db"},
+                      headers=_bearer("admin", None))
+    assert resp.status_code == 200  # confidential: admin only -> role came from the token
+    resp = client.get("/registry/datasets/by-fqn", params={"fqn": "pwd.vishwakarma"},
+                      headers=_bearer("user", "pwd"))
+    assert resp.status_code == 200 and resp.json()["locked"] is False  # own department
+    assert client.get("/registry/datasets/by-fqn", params={"fqn": "con.db"},
+                      headers=_bearer("user", "pwd")).status_code == 404
+
+
+def test_invalid_token_is_anonymous_on_reads(client):
+    resp = client.get("/registry/datasets/by-fqn", params={"fqn": "con.db"},
+                      headers={"Authorization": "Bearer not-a-token"})
+    assert resp.status_code == 404
+
+
+def test_user_cache_keeps_every_field_auth_me_returns():
+    from database.models import AuthProvider, User, UserRole
+    from src.middleware import auth
+    from src.schemas.auth import MeResponse
+
+    user = User(id=99, username="ann", email="ann@x", first_name="Ann", last_name="Lee",
+                role=UserRole.user, department="agri", auth_provider=AuthProvider.google)
+    auth._store_user_cache(user)
+    try:
+        cached = auth._cached_user(99)
+        me = MeResponse(id=cached.id, username=cached.username, email=cached.email,
+                        first_name=cached.first_name, last_name=cached.last_name,
+                        role=cached.role, department=cached.department,
+                        auth_provider=cached.auth_provider)
+        assert me.first_name == "Ann" and me.auth_provider == AuthProvider.google
+    finally:
+        auth.invalidate_user_cache(99)
+
+
+class _InfoCountingSession(_CountingSession):
+    info_reads = 0
+
+    async def execute(self, stmt):
+        text = str(stmt)
+        if "table_info" in text or "dataset_info" in text:
+            _InfoCountingSession.info_reads += 1
+        return await super().execute(stmt)
+
+
+def test_table_and_dataset_info_cached_across_pages(client):
+    _InfoCountingSession.info_reads = 0
+
+    async def _session():
+        yield _InfoCountingSession()
+
+    app.dependency_overrides[db_get_session] = _session
+    _as_viewer(client, "admin", None)
+    try:
+        for _ in range(3):
+            assert client.get("/registry/datasets/by-fqn", params={"fqn": "pwd.vishwakarma"}).status_code == 200
+            assert client.get("/registry/tables/t-dep").status_code == 200
+    finally:
+        app.dependency_overrides.pop(get_optional_user, None)
+    assert _InfoCountingSession.info_reads == 2  # one load each of table_info and dataset_info
+
+
+def test_table_info_write_clears_cache(client):
+    import asyncio
+
+    _use_counting_session()
+    client.get("/registry/tables/t-pub")
+    assert registry_router._table_info_cache.loaded
+    asyncio.run(registry_router.upsert_table_info(
+        _CountingSession(), fqn="pub.db.s.pub_table", api_available=True,
+        dataset_owner=None, frequency=None, timeline=None,
+    ))
+    assert not registry_router._table_info_cache.loaded

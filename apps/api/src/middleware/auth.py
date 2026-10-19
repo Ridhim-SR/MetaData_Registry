@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.database import get_session
-from database.models import User, UserRole
+from database.models import AuthProvider, User, UserRole
 
 SECRET_KEY = os.getenv("SECRET_KEY", "change-me-in-production")
 ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
@@ -21,11 +21,12 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer()
 optional_security = HTTPBearer(auto_error=False)
 
-# user_id -> (expires_at, {username, email, role, department}).
-# Skips 1 Neon US round-trip per authenticated request on hot path.
-# Invalidated on PUT /users/{id}; 60s staleness max for role/department.
+# user_id -> (expires_at, profile fields). Per worker process. Skips one
+# Neon US round-trip (~1.5-4 s) per DB-verified request. Invalidated on
+# PUT /users/{id} in the worker that handled it; otherwise at most
+# _USER_CACHE_TTL stale for role/department/profile. Never holds passwords.
 _USER_CACHE: dict[int, tuple[float, dict]] = {}
-_USER_CACHE_TTL = 60.0
+_USER_CACHE_TTL = 600.0
 
 
 def invalidate_user_cache(user_id: int) -> None:
@@ -45,8 +46,13 @@ def _cached_user(user_id: int) -> User | None:
             id=user_id,
             username=data["username"],
             email=data["email"],
+            first_name=data.get("first_name"),
+            last_name=data.get("last_name"),
             role=UserRole(data["role"]),
             department=data.get("department"),
+            # Every field /auth/me returns must be cached: a missing
+            # auth_provider made MeResponse fail (500) on cache hits.
+            auth_provider=AuthProvider(data.get("auth_provider") or AuthProvider.local.value),
         )
     except Exception:
         _USER_CACHE.pop(user_id, None)
@@ -60,8 +66,15 @@ def _store_user_cache(user: User) -> None:
             {
                 "username": user.username,
                 "email": user.email,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
                 "role": user.role.value if isinstance(user.role, UserRole) else str(user.role),
                 "department": user.department,
+                "auth_provider": (
+                    user.auth_provider.value
+                    if isinstance(user.auth_provider, AuthProvider)
+                    else user.auth_provider
+                ),
             },
         )
     except Exception:
@@ -135,11 +148,40 @@ async def get_optional_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(optional_security),
     session: AsyncSession = Depends(get_session),
 ) -> User | None:
-    """Authenticated user when a valid Bearer token is present, else None.
+    """Viewer for read-only public registry endpoints, from the token alone.
 
-    Used by public registry endpoints so anonymous users see public metadata
-    while logged-in users additionally see their department's metadata.
-    Invalid tokens are treated as anonymous (not 401) on public routes.
+    Anonymous (no/invalid token) -> None. Otherwise the signed token's own
+    claims (sub, role, department -- set at login) decide visibility, with
+    no database round-trip. The returned User is transient: only id, role
+    and department are set. Trade-off: a role/department change reaches
+    these read endpoints when the user next logs in or the token expires
+    (ACCESS_TOKEN_EXPIRE_MINUTES). Tokens without these claims fall back
+    to the DB-verified lookup. Endpoints that write or need the profile
+    use get_optional_user_verified / get_current_user instead.
+    """
+    if credentials is None:
+        return None
+    payload = decode_access_token(credentials.credentials)
+    if payload is None:
+        return None
+    try:
+        user_id = int(payload.get("sub", 0))
+        role = UserRole(payload["role"])
+    except (KeyError, TypeError, ValueError):
+        return await get_optional_user_verified(credentials, session)
+    if user_id <= 0:
+        return None
+    return User(id=user_id, role=role, department=payload.get("department"))
+
+
+async def get_optional_user_verified(
+    credentials: HTTPAuthorizationCredentials | None = Depends(optional_security),
+    session: AsyncSession = Depends(get_session),
+) -> User | None:
+    """Authenticated user loaded from the database (cached), else None.
+
+    For optional-auth endpoints that write or need profile fields (email);
+    invalid tokens are treated as anonymous (not 401).
     """
     if credentials is None:
         return None

@@ -2,11 +2,10 @@ import asyncio
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.database import get_session as db_get_session
-from database.models import DatasetVisibility, User
+from database.models import User
 from src.middleware.auth import allowed_services, get_current_user, scoped_service, user_context
 from src.openmetadata import visibility as vis
 from src.openmetadata.client import OpenMetadataClient
@@ -15,12 +14,12 @@ router = APIRouter(prefix="/openmetadata/metadata", tags=["openmetadata"])
 
 
 async def _visibility_map(session: AsyncSession, fqns: list[str]) -> dict[str, dict]:
+    """Visibility rows for these FQNs, from the registry's per-worker cache."""
     if not fqns:
         return {}
-    rows = (
-        await session.execute(select(DatasetVisibility).where(DatasetVisibility.fqn.in_(fqns)))
-    ).scalars().all()
-    return {r.fqn: {"visibility": r.visibility.value, "department": r.department} for r in rows}
+    from src.openmetadata.routers.registry import _visibility_map as cached_visibility_map
+
+    return await cached_visibility_map(session, fqns)
 
 
 async def _visible_full(session: AsyncSession, tables: list[dict], user: User) -> list[dict]:
