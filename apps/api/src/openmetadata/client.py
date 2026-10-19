@@ -5,6 +5,7 @@ import time
 import httpx
 from typing import Any
 
+from src import timing
 from src.openmetadata.config import settings
 
 # Shared HTTP pool: one AsyncClient per worker process, created lazily and
@@ -120,6 +121,10 @@ class OpenMetadataClient:
         return self._client
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+        with timing.track("om"):
+            return await self._request_untimed(method, path, **kwargs)
+
+    async def _request_untimed(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         client = self._assert_client()
         url = f"{self._base_url}/{path.lstrip('/')}"
         # Tests monkeypatch _login; keep the call inside _request cheap by

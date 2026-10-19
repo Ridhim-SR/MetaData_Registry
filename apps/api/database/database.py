@@ -1,7 +1,10 @@
 import os
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy import event
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+from src import timing
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
@@ -47,7 +50,51 @@ engine = create_async_engine(
     pool_pre_ping=True,
     pool_recycle=120,
 )
-async_session = async_sessionmaker(engine, expire_on_commit=False)
+
+
+# Request timing: count/time new DB connections (dialect connect -> pool
+# "connect"). Both events run in the request's context, so they are
+# attributed to the request that paid for the connection.
+@event.listens_for(engine.sync_engine, "do_connect")
+def _timing_connect_started(dialect, conn_rec, cargs, cparams):
+    timing.connect_started()
+
+
+@event.listens_for(engine.sync_engine, "connect")
+def _timing_connect_finished(dbapi_connection, connection_record):
+    timing.connect_finished()
+
+
+class TimedAsyncSession(AsyncSession):
+    """AsyncSession that records wall time per call for request timing
+    (includes pool checkout, pre-ping and any new connection)."""
+
+    async def execute(self, *args, **kwargs):
+        with timing.track("db"):
+            return await super().execute(*args, **kwargs)
+
+    async def scalar(self, *args, **kwargs):
+        with timing.track("db"):
+            return await super().scalar(*args, **kwargs)
+
+    async def commit(self):
+        with timing.track("db"):
+            return await super().commit()
+
+    async def flush(self, *args, **kwargs):
+        with timing.track("db"):
+            return await super().flush(*args, **kwargs)
+
+    async def refresh(self, *args, **kwargs):
+        with timing.track("db"):
+            return await super().refresh(*args, **kwargs)
+
+    async def rollback(self):
+        with timing.track("db"):
+            return await super().rollback()
+
+
+async_session = async_sessionmaker(engine, class_=TimedAsyncSession, expire_on_commit=False)
 
 
 async def get_session():

@@ -8,6 +8,8 @@ load_dotenv()  # apps/api/.env (server-only, gitignored) before local imports re
 
 import time
 
+import logging
+
 import httpx
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,6 +24,7 @@ from database.schemas import UserOut
 from src.middleware.auth import get_current_user, invalidate_user_cache, require_admin
 from src.openmetadata.client import aclose_shared_client, warm_shared_client
 from src.openmetadata.config import settings as om_settings
+from src import timing
 from src.routers import app_router
 
 
@@ -103,11 +106,26 @@ app.add_middleware(
 app.include_router(app_router)
 
 
+# uvicorn's logger, so timing lines show up in `pm2 logs registry-api`.
+_timing_log = logging.getLogger("uvicorn.error")
+
+
 @app.middleware("http")
 async def _server_timing(request: Request, call_next):
+    """Report where each request's time went: DB, new DB connections,
+    OpenMetadata, and the rest (see src/timing.py)."""
     started = time.perf_counter()
+    timings = timing.begin()
     response = await call_next(request)
-    response.headers["X-Process-Time"] = f"{(time.perf_counter() - started) * 1000:.1f}ms"
+    total_ms = (time.perf_counter() - started) * 1000
+    response.headers["X-Process-Time"] = f"{total_ms:.1f}ms"
+    response.headers["Server-Timing"] = timing.server_timing_header(timings, total_ms)
+    # Let the web app's origins see the breakdown in DevTools (cross-origin).
+    response.headers["Timing-Allow-Origin"] = ", ".join(cors_origins)
+    if request.method != "OPTIONS":
+        _timing_log.info(
+            timing.log_line(request.method, request.url.path, response.status_code, timings, total_ms)
+        )
     return response
 
 
