@@ -905,3 +905,28 @@ def test_table_info_write_clears_cache(client):
         dataset_owner=None, frequency=None, timeline=None,
     ))
     assert not registry_router._table_info_cache.loaded
+
+
+def test_login_caches_user_for_auth_me():
+    import asyncio
+
+    from database.models import AuthProvider, User, UserRole
+    from src.middleware import auth
+    from src.schemas.auth import LoginRequest
+    from src.services.auth import login_user
+
+    user = User(id=123, username="bo", email="bo@x", first_name="Bo", last_name=None,
+                password_hash=auth.hash_password("pw"), role=UserRole.user,
+                department="agri", auth_provider=AuthProvider.local)
+
+    class _LoginSession:
+        async def execute(self, stmt):
+            return _Result([user])
+
+    auth.invalidate_user_cache(123)
+    try:
+        asyncio.run(login_user(LoginRequest(email="bo@x", password="pw"), _LoginSession()))
+        cached = auth._cached_user(123)
+        assert cached is not None and cached.first_name == "Bo"  # /auth/me needs no DB now
+    finally:
+        auth.invalidate_user_cache(123)
