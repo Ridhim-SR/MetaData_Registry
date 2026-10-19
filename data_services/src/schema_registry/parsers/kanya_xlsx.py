@@ -38,6 +38,19 @@ logger = get_logger(__name__)
 # Exactly what the parser reads; anything else in the sheet is dropped.
 OUTPUT_HEADERS = ["Dataset Name", "Dataset Field", "Data Description", "Format", "Mandatory (Y/N)", "Personal Data (Y/N)"]
 
+PERSONAL_DATA_HEADER = "Personal Data (Y/N)"
+
+# The converted CSV is a Field Dictionary in the canonical form, so it carries
+# the curated `tag` answer as its own column. The workbook's "Personal Data
+# (Y/N)" is the source statement; translating it once, here, in code that can
+# be reviewed, is what makes it an explicit tag-column answer instead of the
+# generic parser re-deriving a tag from a raw survey input -- the ingest
+# policy forbids the latter (test_personal_data_column_is_classified_but_
+# not_tagged_by_ingest), and this is the only place the translation happens.
+# Empty when the workbook doesn't mark the field, and an empty cell is dropped
+# downstream, so a sheet with no Personal Data column answer publishes no tag.
+DICTIONARY_HEADERS = OUTPUT_HEADERS + ["tag"]
+
 
 class SheetConfig(NamedTuple):
     sheet: str
@@ -206,12 +219,25 @@ def read_note_sheet(workbook_path: str | Path) -> dict[str, dict[str, str]]:
     return roster
 
 
+def _tag_from_personal(personal) -> str:
+    """Translate the workbook's Personal Data flag into the canonical tag.
+
+    Done here, once, so the converted CSV carries an explicit `tag` column --
+    which is the only thing the ingest step will read as a tag. The generic
+    field-dictionary parser deliberately does not re-derive a tag from the
+    raw Personal Data cell (the ingest policy forbids that; see
+    test_personal_data_column_is_classified_but_not_tagged_by_ingest)."""
+
+    return "PII" if str(personal or "").strip().upper().startswith("Y") else ""
+
+
 def _write_dictionary(path: Path, records: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=OUTPUT_HEADERS)
+        writer = csv.DictWriter(f, fieldnames=DICTIONARY_HEADERS)
         writer.writeheader()
-        writer.writerows(records)
+        for record in records:
+            writer.writerow({**record, "tag": _tag_from_personal(record.get(PERSONAL_DATA_HEADER))})
 
 
 def convert_workbook(workbook_path: str | Path, out_dir: str | Path) -> dict[str, Path]:

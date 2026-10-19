@@ -14,12 +14,18 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 _COLUMN_FIELDS = ["name", "data_type", "length", "nullable", "default"]
-# Only what a Field Dictionary actually answers. Writing blank tag/
-# classification/glossary_term or a hard-coded active=true here would
-# overwrite answers set by hand on an earlier run every time it's re-ingested
-# -- and per the standing directive the ingest step leaves `tag` alone
-# entirely, so curate's auto-tag stays the only thing that sets it.
-_METADATA_FIELDS = ["name", "business_description"]
+# `tag` is included so a Field Dictionary that answers it (an optional `tag`
+# column) actually reaches curate_schema() -- the parser used to compute it
+# and then drop it here, so a department's answer silently never landed.
+# `Personal Data (Y/N)` is deliberately not a source of tags (see the parser);
+# PII still reaches `classification` via curate's MDSF rules. A blank
+# is safe: pipeline's _business_metadata_from_rows drops blank cells, so a
+# dictionary that doesn't answer `tag` leaves an existing hand-set value
+# alone instead of clearing it, which is what _merge_business_metadata()
+# carries forward. Nothing else is written: a blank classification/
+# glossary_term or a hard-coded active=true would still overwrite answers
+# set by hand on an earlier run.
+_METADATA_FIELDS = ["name", "business_description", "tag"]
 
 
 def run_field_dictionary(
@@ -86,7 +92,13 @@ def run_field_dictionary(
                 writer = csv.DictWriter(f, fieldnames=_METADATA_FIELDS)
                 writer.writeheader()
                 for name, meta in table["business_metadata"].items():
-                    writer.writerow({"name": name, "business_description": meta.get("business_description", "")})
+                    writer.writerow(
+                        {
+                            "name": name,
+                            "business_description": meta.get("business_description", ""),
+                            "tag": meta.get("tag", ""),
+                        }
+                    )
 
             logger.info(f"Field dictionary: ingesting table '{table_name}' ({len(table['columns'])} column(s))")
             try:

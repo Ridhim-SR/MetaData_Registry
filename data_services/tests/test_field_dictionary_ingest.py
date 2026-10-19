@@ -263,3 +263,104 @@ def test_unrecognised_format_row_is_still_ingested(tmp_path):
 
     assert results["t1"]["status"] == "ok"
     assert results["t1"]["columns"][0]["data_type"] == "character varying"
+
+
+# --- the optional `tag` column, end to end ------------------------------
+
+
+def _write_dictionary_with_tag(tmp_path, rows, name="field_dictionary_tagged.csv"):
+    """`rows` are 5-tuples of the plain header plus a 6th tag cell."""
+    path = tmp_path / name
+    header = "Dataset Name,Dataset Field,Data Description,Format,Mandatory (Y/N),tag"
+    lines = [header] + [",".join(row) for row in rows]
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return str(path)
+
+
+def test_tag_column_reaches_the_published_column(tmp_path):
+    """The whole point of wiring `tag` through: a department's answer in the
+    KNOWN_TAGS vocabulary survives parse -> split -> curate_schema() and comes
+    back on the published column. It used to be parsed and then dropped by the
+    ingest step, so the answer never landed anywhere."""
+    storage = LocalObjectStorage(tmp_path / "storage")
+    lookups.register_department(storage, "welfare", "Social Welfare Department")
+    source = _write_dictionary_with_tag(
+        tmp_path,
+        [("t1", "village_lat", "Latitude of the village", "Numeric", "Y", "Geospatial")],
+    )
+
+    results = run_field_dictionary(department="welfare", dataset="cmsvy", source_file=source, storage=storage)
+
+    assert results["t1"]["status"] == "ok"
+    assert results["t1"]["columns"][0]["tag"] == "Geospatial"
+    # classification stays curate's own MDSF verdict -- the tag axis does not
+    # get to decide it
+    assert results["t1"]["columns"][0]["classification"] != ""
+
+
+def test_blank_tag_cell_leaves_the_tag_blank(tmp_path):
+    """A blank cell means "not answered", and must not turn into a tag."""
+    storage = LocalObjectStorage(tmp_path / "storage")
+    lookups.register_department(storage, "welfare", "Social Welfare Department")
+    source = _write_dictionary_with_tag(
+        tmp_path,
+        [("t1", "beneficiary_name", "Name of the beneficiary", "Text", "Y", "")],
+    )
+
+    results = run_field_dictionary(department="welfare", dataset="cmsvy", source_file=source, storage=storage)
+
+    assert results["t1"]["status"] == "ok"
+    assert results["t1"]["columns"][0]["tag"] == ""
+
+
+def test_unknown_tag_fails_that_table_instead_of_leaking_a_new_ones(tmp_path):
+    """A typo'd tag would otherwise become a brand-new tag under OpenMetadata's
+    FieldTag classification on publish -- a taxonomy leak. curate_schema()
+    rejects it, and run_field_dictionary's per-table isolation means the rest
+    of the file still ingests."""
+    storage = LocalObjectStorage(tmp_path / "storage")
+    lookups.register_department(storage, "welfare", "Social Welfare Department")
+    source = _write_dictionary_with_tag(
+        tmp_path,
+        [
+            ("t1", "village_lat", "Latitude", "Numeric", "Y", "Geospatial"),
+            ("t2", "some_col", "desc", "Text", "Y", "Gospacial"),  # typo
+        ],
+    )
+
+    results = run_field_dictionary(department="welfare", dataset="cmsvy", source_file=source, storage=storage)
+
+    assert results["t1"]["status"] == "ok"
+    assert results["t1"]["columns"][0]["tag"] == "Geospatial"
+    assert results["t2"]["status"] == "failed"
+    assert "Gospacial" in results["t2"]["error"]
+
+
+def test_reingesting_with_a_blank_tag_keeps_the_earlier_answer(tmp_path):
+    """The safety property behind letting the ingest step write `tag` at all:
+    pipeline drops blank cells, so a later dictionary that doesn't answer
+    `tag` must carry forward the value an earlier run set rather than clear
+    it. Otherwise a re-ingest of an older file would silently strip tags
+    that were published."""
+    storage = LocalObjectStorage(tmp_path / "storage")
+    lookups.register_department(storage, "welfare", "Social Welfare Department")
+
+    first = _write_dictionary_with_tag(
+        tmp_path,
+        [("t1", "village_lat", "Latitude", "Numeric", "Y", "Geospatial")],
+        name="first.csv",
+    )
+    run_field_dictionary(department="welfare", dataset="cmsvy", source_file=first, storage=storage)
+    assert lookups.get_table(storage, "welfare.cmsvy.t1") is not None
+
+    second = _write_dictionary_with_tag(
+        tmp_path,
+        [("t1", "village_lat", "Latitude of the village", "Numeric", "Y", "")],
+        name="second.csv",
+    )
+    results = run_field_dictionary(department="welfare", dataset="cmsvy", source_file=second, storage=storage)
+
+    assert results["t1"]["status"] == "ok"
+    assert results["t1"]["columns"][0]["tag"] == "Geospatial"
+    # while a description the second file does answer still updates
+    assert results["t1"]["columns"][0]["business_description"] == "Latitude of the village"

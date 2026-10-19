@@ -144,7 +144,7 @@ def test_publish_table_builds_full_entity_chain(tmp_path):
     assert [t.tagFQN.root for t in columns["total_cost"].tags] == ["FieldTag.Financial"]
     patch_body = _last_patch_body(client, "/tables/")
     assert [[t["tagFQN"] for t in patch_body[f"/columns/{i}/tags"]] for i in range(3)] == [
-        ["MDSF.Internal"],
+        [],  # sno: no rule recognises it, so no classification
         ["FieldTag.Firm/Contractor-Identifier", "MDSF.PII"],
         ["FieldTag.Financial", "MDSF.Financial"],
     ]
@@ -293,7 +293,7 @@ def test_publish_table_clears_stale_category_and_description_on_republish(tmp_pa
         ["FieldTag.Financial"],
     ]
     assert [[t["tagFQN"] for t in _last_patch_body(client, "/tables/")[f"/columns/{i}/tags"]] for i in range(3)] == [
-        ["MDSF.Internal"],
+        [],  # sno: no rule recognises it, so no classification
         ["FieldTag.Firm/Contractor-Identifier", "MDSF.PII"],
         ["FieldTag.Financial", "MDSF.Financial"],
     ]
@@ -327,14 +327,14 @@ def test_publish_table_patches_column_tags_right_after_the_put(tmp_path):
         ("add", "/columns/2/tags"),
     ]
     assert [[tag["tagFQN"] for tag in op["value"]] for op in ops] == [
-        ["MDSF.Internal"],
+        [],  # sno: no rule recognises it, so no classification
         ["FieldTag.Firm/Contractor-Identifier", "MDSF.PII"],
         ["FieldTag.Financial", "MDSF.Financial"],
     ]
     # the labels are the same TagLabel shape OpenMetadata stores, so the patch
     # overwrites rather than appends
-    assert ops[0]["value"][0] == {
-        "tagFQN": "MDSF.Internal",
+    assert ops[1]["value"][-1] == {
+        "tagFQN": "MDSF.PII",
         "source": "Classification",
         "labelType": "Automated",
         "state": "Confirmed",
@@ -711,10 +711,9 @@ def test_publish_table_replaces_column_tags_instead_of_merging(tmp_path):
     assert {op["op"] for op in ops} == {"add"}
     body = {op["path"]: op["value"] for op in ops}
     assert [t["tagFQN"] for t in body["/columns/0/tags"]] == ["MDSF.Internal"]
-    # every column carries at least its classification level, and column 0 no
-    # longer shows the PII label from the first publish -- that's the merge
-    # quirk this patch exists for
-    assert [t["tagFQN"] for t in body["/columns/1/tags"]] == ["MDSF.Internal"]
+    # column 0 no longer shows the PII label from the first publish -- that's
+    # the merge quirk this patch exists for
+    assert [t["tagFQN"] for t in body["/columns/1/tags"]] == []  # remarks: no rule, so no level
 
 
 def test_publish_table_matches_column_tags_by_name_not_request_order(tmp_path):
@@ -734,7 +733,7 @@ def test_publish_table_matches_column_tags_by_name_not_request_order(tmp_path):
     publish_table(client, storage, "pwd.vishwakarma.t1")
 
     body = _last_patch_body(client, "/tables/")
-    assert [t["tagFQN"] for t in body["/columns/0/tags"]] == ["MDSF.Internal"]  # remarks, now first on the server
+    assert [t["tagFQN"] for t in body["/columns/0/tags"]] == []  # remarks, now first on the server
     assert body["/columns/1/tags"][0]["tagFQN"] == "MDSF.PII"
 
 

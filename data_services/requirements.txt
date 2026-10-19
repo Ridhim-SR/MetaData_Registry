@@ -7,4 +7,10 @@ moto[s3]>=5.0
 python-dotenv>=1.0
 pyyaml>=6.0
 ruamel.yaml>=0.18
+# Required at runtime by the xlsx parsers (parsers/kanya_xlsx.py and
+# parsers/dept/RuralDevelopment/mgnrega_codebook.py). They raise
+# "openpyxl is required to read ... workbook" without it, so leaving it out
+# silently disables every workbook-based department. CI skipped 36 tests
+# because of this gap before it was added.
+openpyxl>=3.1
 anthropic>=0.40

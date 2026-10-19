@@ -27,6 +27,14 @@ CLASSIFICATION_LEVELS = [
 
 CLASSIFICATION_HIERARCHY = {level: idx for idx, level in enumerate(CLASSIFICATION_LEVELS)}
 
+def _tok(*words: str) -> str:
+    """Regex alternatives that match only as whole snake_case tokens: a word
+    counts when it is delimited by "_" or the ends of the name, so "log"
+    matches audit_log but not cancel_by_logic or catalog_no."""
+
+    return r"(?<![a-z0-9])(?:" + "|".join(words) + r")(?![a-z0-9])"
+
+
 # Auto-classification rules (field_name pattern -> classification level)
 # Based on MDSF: classify per field by risk of disclosure/re-identification/misuse
 AUTO_CLASSIFICATION_RULES: list[tuple[str, re.Pattern]] = [
@@ -43,43 +51,62 @@ AUTO_CLASSIFICATION_RULES: list[tuple[str, re.Pattern]] = [
         r"mandal|town|city|ward|sector|ulb|cluster|hobli|country)(_[a-z]+)*_name$",
         re.IGNORECASE,
     )),
+    # Non-person "name of ..." columns. MUST stay above the PII name rules:
+    # "name of the work" is a title, not a person.
+    ("Internal", re.compile(_tok(r"name_of_(?:work|scheme|project|department|office|division|road|bridge)"), re.IGNORECASE)),
     # PII - Direct identifiers (MDSF PII-removal checklist: name, Aadhaar,
-    # PAN, voter id, passport, driving licence, mobile, email, address, DOB)
-    ("PII", re.compile(r"(aadha+r|pan|passport|voter_?id|ssn|national_id|driving_?licen[sc]e|vehicle_registration)", re.IGNORECASE)),
-    ("PII", re.compile(r"(name|first_name|last_name|full_name|father_name|mother_name)", re.IGNORECASE)),
+    # PAN, voter id, passport, driving licence, mobile, email, address, DOB).
+    # Short words (pan, name, ssn, dob, sex, iris) match as whole snake_case
+    # tokens: "pan" in "company" or "expansion" is not a PAN. Concatenated
+    # forms people really write (pannumber, aadhaarno) are listed explicitly.
+    ("PII", re.compile(_tok(r"aadha+r(?:_?(?:no|number|num))?", r"pan(?:_?(?:no|number|num|card))?", "passport",
+                            r"voter_?id", "ssn", "national_id", r"driving_?licen[sc]e", "vehicle_registration"), re.IGNORECASE)),
+    # A column that ENDS in "name" (firm_name, farmername, sansthaname, name)
+    # or reads "name_of_<something>" -- not one where "name" sits in the
+    # middle (name_of_work, crop_noncrop_name_id). Conservative on purpose:
+    # whether a firm's name is personal is a policy call (MDSF s5.1), and
+    # when in doubt the higher level applies.
+    ("PII", re.compile(r"name$|(^|_)name_of_", re.IGNORECASE)),
     ("PII", re.compile(r"(email|mobile|phone|contact)", re.IGNORECASE)),
     ("PII", re.compile(r"(address|pincode|zipcode)", re.IGNORECASE)),
-    ("PII", re.compile(r"(date_of_birth|dob|birth_date)", re.IGNORECASE)),
-    ("PII", re.compile(r"(gender|sex)", re.IGNORECASE)),
+    ("PII", re.compile(_tok("date_of_birth", "dob", "birth_date"), re.IGNORECASE)),
+    ("PII", re.compile(_tok("gender", "sex"), re.IGNORECASE)),
     ("PII", re.compile(r"(caste|religion|community)", re.IGNORECASE)),
-    ("PII", re.compile(r"(image|photo|biometric|fingerprint|iris)", re.IGNORECASE)),
+    ("PII", re.compile(_tok("images?", "photos?", "biometrics?", "fingerprints?", "iris"), re.IGNORECASE)),
     ("PII", re.compile(r"(registration_no|application_no|beneficiary_id|farmer_id)", re.IGNORECASE)),
 
-    # Financial - Direct financial identifiers
+    # Financial - Direct financial identifiers. Money words are long and
+    # rarely sit inside another word, and PWD-style names glue them on
+    # (extraamount, surrenderamount), so these stay substring matches;
+    # the short or ambiguous ones (emi, grant) are whole tokens.
     ("Financial", re.compile(r"(bank_account|account_no|ifsc|branch_name|bank_name)", re.IGNORECASE)),
     ("Financial", re.compile(r"(amount|price|cost|budget|subsidy|payment|transaction)", re.IGNORECASE)),
     ("Financial", re.compile(r"(salary|income|wage|allowance|pension|benefit)", re.IGNORECASE)),
-    ("Financial", re.compile(r"(loan|credit|debit|interest|emi|installment)", re.IGNORECASE)),
-    ("Financial", re.compile(r"(grant|fund|allocation|sanction|disbursement)", re.IGNORECASE)),
+    ("Financial", re.compile(r"(loan|credit|debit|interest|installment)|" + _tok("emi"), re.IGNORECASE)),
+    ("Financial", re.compile(r"(fund|allocation|sanction|disbursement)|(^|_)grants?", re.IGNORECASE)),
 
     # Health - Health-related data
     ("Health", re.compile(r"(health|medical|diagnosis|treatment|prescription|hospital|clinic)", re.IGNORECASE)),
 
-    # Restricted - High sensitivity identifiers
-    ("Restricted", re.compile(r"(password|secret|token|key|credential|auth)", re.IGNORECASE)),
-    ("Restricted", re.compile(r"(audit|log|audit_trail|change_log)", re.IGNORECASE)),
+    # Restricted - High sensitivity identifiers. "key", "auth" and "log" are
+    # whole tokens: "monkey", "author", "catalog" and "cancel_by_logic" are
+    # not credentials or audit trails.
+    ("Restricted", re.compile(r"(password|secret|credential|authentication|authori[sz]ation)|(^|_)token|" + _tok("key", "auth"), re.IGNORECASE)),
+    ("Restricted", re.compile(_tok("audit", "audit_trail", "change_log", "logs?", "logging"), re.IGNORECASE)),
 
-    # Confidential - Business sensitive
+    # Confidential - Business sensitive. "plan" is a whole token: not "plant".
     ("Confidential", re.compile(r"(internal|confidential|proprietary|trade_secret)", re.IGNORECASE)),
-    ("Confidential", re.compile(r"(strategy|plan|forecast|projection|estimate)", re.IGNORECASE)),
+    ("Confidential", re.compile(_tok("plans?", "planning", "strategy", "forecast", "projection", "estimate"), re.IGNORECASE)),
 
     # Internal - Operational identifiers
     ("Internal", re.compile(r"(id$|_id|code$|_code|reference|ref_no|sr_no|serial)", re.IGNORECASE)),
     ("Internal", re.compile(r"(created|modified|updated|deleted|version|status)", re.IGNORECASE)),
-    ("Internal", re.compile(r"(department|division|unit|branch|office|zone|region|district|block)", re.IGNORECASE)),
+    ("Internal", re.compile(r"(department|division|branch|office|zone|region|district|block)|" + _tok("units?"), re.IGNORECASE)),
 
-    # Public - Non-sensitive reference data
-    ("Public", re.compile(r"(country|state|district|city|village|pincode|latitude|longitude)", re.IGNORECASE)),
+    # Public - Non-sensitive reference data. Whole tokens: "capacity" is not
+    # a city and "statement" is not a state -- a wrongly Public field is the
+    # dangerous mistake.
+    ("Public", re.compile(_tok(r"countr(?:y|ies)", "states?", "districts?", r"cit(?:y|ies)", "villages?", "latitude", "longitude"), re.IGNORECASE)),
     ("Public", re.compile(r"(scheme|program|project|initiative|policy|guideline)", re.IGNORECASE)),
 ]
 
@@ -92,15 +119,32 @@ AUTO_TAG_RULES: list[tuple[str, re.Pattern]] = [
     ("Date/Timestamp", re.compile(r"(_date|_at)$", re.IGNORECASE)),
 ]
 
-# The controlled vocabulary for a column's `tag`: everything AUTO_TAG_RULES
-# can assign, plus the values real Field Dictionaries already use (PII) and
-# the MDSF s5.1 sensitive attributes ai_metadata's apply_rules() writes
-# (Sensitive). Anything outside it is a typo or an invented value, and
-# publishing it would silently create a brand-new tag under the FieldTag
-# Classification in OpenMetadata -- which is how "cat3" ended up as a tag
-# next to CAT-3. ai_metadata.KNOWN_TAGS must stay a subset of this set or
-# a drafted file fails at ingest rather than at review.
-KNOWN_TAGS = sorted({tag for tag, _ in AUTO_TAG_RULES} | {"PII", "Sensitive"})
+# The controlled vocabulary for a column's `tag`. Two kinds of value live
+# here, and only the first kind may ever be auto-assigned:
+#
+#   * everything AUTO_TAG_RULES can detect from a field name. Adding a rule
+#     rewrites tagging for every department, so a new entry there is a
+#     behaviour change, not a vocabulary change.
+#
+#   * values that are real but not name-inferable -- a human supplied them
+#     and the vocabulary merely permits them. PII (already used by real
+#     Field Dictionaries), Sensitive (the MDSF s5.1 sensitive attributes
+#     ai_metadata's apply_rules() writes), and PWD's own field dictionary:
+#     Remarks, Identifier, Administrative-Unit and Quantity. That file was
+#     curated on 2026-10-13, before validate_tag() existed, so all four are
+#     already published under OpenMetadata's FieldTag Classification. They
+#     are allowed here so a republish passes, and deliberately kept out of
+#     AUTO_TAG_RULES so the auto-tagger never starts inventing them.
+#
+# Anything outside this set is a typo or an invented value, and publishing
+# it would silently create a brand-new tag under the FieldTag Classification
+# in OpenMetadata -- which is how "cat3" ended up as a tag next to CAT-3.
+# ai_metadata.KNOWN_TAGS must stay a subset of this set or a drafted file
+# fails at ingest rather than at review.
+KNOWN_TAGS = sorted({tag for tag, _ in AUTO_TAG_RULES} | {
+    "PII", "Sensitive",
+    "Remarks", "Identifier", "Administrative-Unit", "Quantity",
+})
 
 # MDSF dataset-level categories (the axis curate_schema()'s per-column
 # `classification` is NOT part of -- this one is per dataset, see
@@ -120,12 +164,14 @@ def auto_classify(field_name: str) -> str:
     """Auto-classify a field based on MDSF risk assessment.
 
     Classification is per-field based on potential risk of disclosure,
-    re-identification, or misuse. First matching rule wins.
+    re-identification, or misuse. First matching rule wins. A name no rule
+    recognises gets "" (not classified yet): a default level would claim
+    someone judged the field low-risk, and nobody did.
     """
     for classification, pattern in AUTO_CLASSIFICATION_RULES:
         if pattern.search(field_name):
             return classification
-    return "Internal"  # Default: internal use only
+    return ""
 
 
 def validate_classification(classification: str) -> bool:
@@ -169,6 +215,9 @@ def validate_schema(table_id: str, columns: list[dict]) -> None:
     can fix the whole file in one go."""
 
     problems: list[str] = []
+
+    if not columns:
+        problems.append("the file has no columns")
 
     empty_positions = [str(i) for i, col in enumerate(columns, start=1) if not col["name"]]
     if empty_positions:
@@ -257,8 +306,9 @@ def curate_schema(
         #     it (tags already published still have to validate) and because
         #     ai_metadata drafts against it. Turning off the *fallback*
         #     needs no change to the vocabulary;
-        #   * `classification` keeps auto_classify, so every column remains
-        #     MDSF-classified even with no submitted metadata.
+        #   * `classification` keeps auto_classify: a column whose name a rule
+        #     recognises is classified even with no submitted metadata, and
+        #     one it does not recognise stays blank (not classified yet).
         # tag = meta.get("tag") or auto_tag(name) or ""
         tag = meta.get("tag") or ""
         if tag and not validate_tag(tag):
