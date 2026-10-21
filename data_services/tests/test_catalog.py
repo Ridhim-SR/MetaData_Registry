@@ -49,6 +49,26 @@ def test_mistakes_fail_with_the_place_to_fix(bad, message):
         parse_catalog(bad)
 
 
+def test_load_catalog_reads_a_utf8_description(tmp_path):
+    """Windows' locale codec is cp1252: a Hindi description must still load."""
+
+    from src.schema_registry.catalog import load_catalog
+
+    path = tmp_path / "catalog.yaml"
+    path.write_text(
+        _VALID.replace(
+            "owner: PWD IT Cell",
+            "owner: PWD IT Cell\n"
+            "        description: >-\n"
+            "          विधान मण्डल क्षेत्र विकास निधि योजना",
+        ),
+        encoding="utf-8",
+    )
+
+    (dept,) = load_catalog(path)
+    assert "विधान मण्डल क्षेत्र विकास निधि योजना" in dept.datasets[0].fields["dataset_description"]
+
+
 def test_shipped_catalog_is_valid():
     from src.schema_registry.catalog import load_catalog
 

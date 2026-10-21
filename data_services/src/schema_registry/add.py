@@ -166,7 +166,7 @@ def add(
     metadata_key = input_key(department, dataset, Path(metadata_file).name) if metadata_file else None
     catalog_path = Path(catalog_path)
     new_text, changes = update_catalog_text(
-        catalog_path.read_text() if catalog_path.exists() else "",
+        catalog_path.read_text(encoding="utf-8") if catalog_path.exists() else "",
         department, dataset, f"{inputs.STORAGE_SCHEME}{source_key}",
         department_name=department_name, table=table,
         file_format=file_format or (guess_format(file) if table else None), schema=schema,
@@ -179,8 +179,8 @@ def add(
             storage.write_bytes(key, data)
             changes.insert(0, f"uploaded {local} -> {key} (sha256 {inputs.sha256(data)[:12]}...)")
 
-    if new_text != (catalog_path.read_text() if catalog_path.exists() else ""):
-        catalog_path.write_text(new_text)
+    if new_text != (catalog_path.read_text(encoding="utf-8") if catalog_path.exists() else ""):
+        catalog_path.write_text(new_text, encoding="utf-8")
     return changes
 
 

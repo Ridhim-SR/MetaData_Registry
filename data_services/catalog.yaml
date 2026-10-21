@@ -137,3 +137,22 @@ departments:
           (women_joint_accounts), and works, expenditure and persondays by
           work type (work_structure).
         field_dictionary: storage:inputs/rural_development_department/mgnrega/mgnrega_field_dictionary.csv
+      mla_lads:
+        category: CAT-1
+        owner: Rural Development Department
+        steward:
+        frequency: yearly
+        timeline: 2023-27
+        api_available: N
+        description: >-
+          Financial status of works under the Legislative Assembly Area
+          Development Fund Scheme (MLA LADS), reported for each Honourable MLA:
+          funds carried forward and allocated per constituency, amounts
+          sanctioned and awaiting approval, expenditure, and the unspent and
+          committed balances, in lakh.
+          [विधान मण्डल क्षेत्र विकास निधि योजना]
+        tables:
+          financial_status:
+            source: storage:inputs/rural_development_department/mla_lads/mla_lads_financial_status_schema.csv
+            format: csv
+            metadata: storage:inputs/rural_development_department/mla_lads/mla_lads_financial_status_metadata.csv

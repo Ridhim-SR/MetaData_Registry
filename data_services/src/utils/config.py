@@ -25,6 +25,7 @@ ENVIRONMENTS = {
 _WASABI_SETTINGS = (
     "WASABI_BUCKET", "WASABI_ENDPOINT_URL", "WASABI_REGION", "WASABI_ACCESS_KEY_ID",
     "WASABI_SECRET_ACCESS_KEY", "WASABI_BACKUP_BUCKET", "WASABI_BACKUP_REGION",
+    "WASABI_BACKUP_ENDPOINT_URL",
 )
 # local must bring its own account: these can't fall back to the company one.
 _LOCAL_REQUIRED = ("WASABI_BUCKET", "WASABI_ENDPOINT_URL", "WASABI_ACCESS_KEY_ID", "WASABI_SECRET_ACCESS_KEY")
@@ -175,6 +176,20 @@ def load_env() -> str:
                        os.environ.get("WASABI_ENDPOINT_URL", ""))
         _refuse_remote("OPENMETADATA_HOST_PORT (LOCAL_OPENMETADATA_HOST_PORT)",
                        os.environ.get("OPENMETADATA_HOST_PORT", ""))
+        # The backup bucket is a second copy of the same data, so it needs the
+        # same rail: without its own endpoint the backup client falls back to
+        # the company Wasabi URL, which under LOCAL_ONLY is never what is meant.
+        if os.environ.get("WASABI_BACKUP_BUCKET", "").strip():
+            backup_endpoint = os.environ.get("WASABI_BACKUP_ENDPOINT_URL", "").strip()
+            if not backup_endpoint:
+                raise ValueError(
+                    "LOCAL_ONLY=1 needs WASABI_BACKUP_ENDPOINT_URL "
+                    "(LOCAL_WASABI_BACKUP_ENDPOINT_URL) when LOCAL_WASABI_BACKUP_BUCKET is set -- "
+                    "otherwise the backup goes to the company Wasabi. Set it to the same local "
+                    "MinIO (http://localhost:9000), or blank the backup bucket"
+                )
+            _refuse_remote("WASABI_BACKUP_ENDPOINT_URL (LOCAL_WASABI_BACKUP_ENDPOINT_URL)",
+                           backup_endpoint)
 
     logger.info(
         f"Config: ENVIRONMENT={env} | branch: {branch or 'unknown'} | "

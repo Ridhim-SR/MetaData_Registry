@@ -139,4 +139,6 @@ def parse_catalog(text: str) -> list[DepartmentEntry]:
 
 
 def load_catalog(path: str | Path) -> list[DepartmentEntry]:
-    return parse_catalog(Path(path).read_text())
+    # explicit utf-8: catalog descriptions carry Hindi labels, and on Windows
+    # Path.read_text() otherwise uses the locale codec (cp1252) and refuses them
+    return parse_catalog(Path(path).read_text(encoding="utf-8"))

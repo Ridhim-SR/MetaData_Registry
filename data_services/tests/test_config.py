@@ -11,7 +11,9 @@ _KEYS = (
     "PROD_OPENMETADATA_HOST_PORT", "PROD_OPENMETADATA_JWT_TOKEN",
     "WASABI_BUCKET", "WASABI_PREFIX", "DEPARTMENT", "WASABI_ACCESS_KEY_ID",
     "WASABI_ENDPOINT_URL", "WASABI_SECRET_ACCESS_KEY", "WASABI_REGION", "WASABI_BACKUP_BUCKET", "WASABI_BACKUP_REGION",
+    "WASABI_BACKUP_ENDPOINT_URL",
     "LOCAL_WASABI_BUCKET", "LOCAL_WASABI_ACCESS_KEY_ID", "LOCAL_WASABI_ENDPOINT_URL", "LOCAL_WASABI_SECRET_ACCESS_KEY",
+    "LOCAL_WASABI_BACKUP_BUCKET", "LOCAL_WASABI_BACKUP_REGION", "LOCAL_WASABI_BACKUP_ENDPOINT_URL",
     "LOCAL_ONLY",
 )
 
@@ -260,6 +262,52 @@ def test_local_only_happy_path_is_localhost(env_file, monkeypatch):
     monkeypatch.setenv("LOCAL_ONLY", "1")
     assert config.load_env() == "local"
     assert os.environ["WASABI_ENDPOINT_URL"] == "http://localhost:9000"
+
+
+# The backup is a second copy of the same data, so it gets the same treatment:
+# a feature branch must be able to point it at the local MinIO, and LOCAL_ONLY
+# must stop it from falling back to the company Wasabi URL.
+
+
+def test_local_uses_its_own_backup_endpoint(env_file, monkeypatch):
+    env_file.write_text(
+        env_file.read_text()
+        + "LOCAL_WASABI_BACKUP_BUCKET=my-backup\n"
+        + "LOCAL_WASABI_BACKUP_ENDPOINT_URL=http://localhost:9000\n"
+        + "WASABI_BACKUP_ENDPOINT_URL=https://s3.eu-central-1.wasabisys.com\n"
+    )
+    monkeypatch.setenv("ENVIRONMENT", "local")
+    config.load_env()
+    assert os.environ["WASABI_BACKUP_ENDPOINT_URL"] == "http://localhost:9000"
+
+
+def test_local_only_refuses_a_remote_backup_endpoint(env_file, monkeypatch):
+    env_file.write_text(
+        env_file.read_text()
+        .replace("LOCAL_WASABI_ENDPOINT_URL=https://s3.us-west-1.wasabisys.com",
+                 "LOCAL_WASABI_ENDPOINT_URL=http://localhost:9000")
+        + "LOCAL_WASABI_BACKUP_BUCKET=my-backup\n"
+        + "LOCAL_WASABI_BACKUP_ENDPOINT_URL=https://s3.eu-central-1.wasabisys.com\n"
+    )
+    monkeypatch.setenv("ENVIRONMENT", "local")
+    monkeypatch.setenv("LOCAL_ONLY", "1")
+    with pytest.raises(PermissionError, match=r"LOCAL_ONLY=1 refuses WASABI_BACKUP_ENDPOINT_URL"):
+        config.load_env()
+
+
+def test_local_only_needs_a_backup_endpoint_once_a_backup_bucket_is_set(env_file, monkeypatch):
+    """Without one the backup client would use the company Wasabi URL."""
+
+    env_file.write_text(
+        env_file.read_text()
+        .replace("LOCAL_WASABI_ENDPOINT_URL=https://s3.us-west-1.wasabisys.com",
+                 "LOCAL_WASABI_ENDPOINT_URL=http://localhost:9000")
+        + "LOCAL_WASABI_BACKUP_BUCKET=my-backup\n"
+    )
+    monkeypatch.setenv("ENVIRONMENT", "local")
+    monkeypatch.setenv("LOCAL_ONLY", "1")
+    with pytest.raises(ValueError, match="needs WASABI_BACKUP_ENDPOINT_URL"):
+        config.load_env()
 
 
 def test_without_local_only_a_personal_wasabi_account_is_still_allowed(env_file, monkeypatch):
