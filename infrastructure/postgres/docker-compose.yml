@@ -1,0 +1,43 @@
+# Postgres for the registry API (users + registry schemas).
+#
+#   cp infrastructure/postgres/.env.example infrastructure/postgres/.env   # then set the password
+#   docker compose -f infrastructure/postgres/docker-compose.yml up -d
+#
+# Replaces Neon + the neon-bridge tunnel on BIPP2. Published on
+# 127.0.0.1:5434 only: 5432 belongs to the host's own Postgres 17, and the
+# API runs on the same machine, so nothing off-box needs to reach it.
+#
+# Not managed by PM2 on purpose: `restart: unless-stopped` brings it back
+# after a reboot (the Docker daemon starts at boot), and PM2 restarts of a
+# compose process stop the containers (see the openmetadata entry in
+# ecosystem.config.js).
+#
+# API connection string (apps/api/.env):
+#   DATABASE_URL=postgresql+asyncpg://registry:<POSTGRES_PASSWORD>@127.0.0.1:5434/registry?sslmode=disable
+#
+# The API creates its schemas and tables on startup, so an empty database
+# is enough. Major version matches Neon (18) so pg_dump/pg_restore between
+# them just work.
+services:
+  postgres:
+    image: postgres:18
+    container_name: registry_postgres
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5434}:5432"
+    environment:
+      POSTGRES_USER: registry
+      POSTGRES_DB: registry
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in infrastructure/postgres/.env}
+    volumes:
+      # Postgres 18 images keep data under /var/lib/postgresql/18/docker;
+      # mount the parent so a future major upgrade can sit alongside it.
+      - registry-pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U registry -d registry"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  registry-pgdata:
