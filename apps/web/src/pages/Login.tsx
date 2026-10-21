@@ -4,7 +4,6 @@ import { useMutation } from "@tanstack/react-query";
 import { login } from "../api/auth";
 import { ApiError } from "../api/client";
 import { useAuth } from "../contexts/AuthContext";
-import { SocialButtons } from "./Register";
 
 export function LoginPage() {
   const { login: setAuth } = useAuth();
@@ -71,12 +70,6 @@ export function LoginPage() {
             {mutation.isPending ? "Signing in…" : "Sign in"}
           </button>
         </form>
-        <div className="my-4 flex items-center gap-2 text-xs text-slate-400">
-          <div className="h-px flex-1 bg-slate-200" />
-          <span>or</span>
-          <div className="h-px flex-1 bg-slate-200" />
-        </div>
-        <SocialButtons />
         <p className="mt-4 text-center text-sm" style={{ color: "var(--text-muted)" }}>
           No account?{" "}
           <Link to="/register" className="font-medium underline" style={{ color: "var(--blue-700)" }}>
