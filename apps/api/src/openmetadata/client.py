@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import html
 import time
 
 import httpx
@@ -22,6 +23,22 @@ _om_token: str | None = None
 _om_token_expires: float = 0.0
 _login_lock = asyncio.Lock()
 TOKEN_TTL_SECONDS = 50 * 60
+
+
+def _unescape_descriptions(data: Any) -> Any:
+    # OM's rich-text editor stores descriptions HTML-escaped (e.g. "&#39;"
+    # for an apostrophe). OM's UI decodes them on render; we serve them as
+    # plain text, so decode once here for every GET response.
+    if isinstance(data, dict):
+        for key, value in data.items():
+            if key == "description" and isinstance(value, str):
+                data[key] = html.unescape(value)
+            else:
+                _unescape_descriptions(value)
+    elif isinstance(data, list):
+        for item in data:
+            _unescape_descriptions(item)
+    return data
 
 
 def _build_timeout() -> httpx.Timeout:
@@ -145,7 +162,7 @@ class OpenMetadataClient:
 
     async def get(self, path: str, params: dict | None = None) -> dict:
         resp = await self._request("GET", path, params=params)
-        return resp.json()
+        return _unescape_descriptions(resp.json())
 
     async def post(self, path: str, json: dict | None = None) -> dict:
         resp = await self._request("POST", path, json=json)

@@ -97,12 +97,6 @@ export function RegisterPage() {
             {mutation.isPending ? "Creating…" : "Register"}
           </button>
         </form>
-        <div className="my-4 flex items-center gap-2 text-xs text-slate-400">
-          <div className="h-px flex-1 bg-slate-200" />
-          <span>or</span>
-          <div className="h-px flex-1 bg-slate-200" />
-        </div>
-        <SocialButtons />
         <p className="mt-4 text-center text-sm text-slate-600">
           Already registered?{" "}
           <Link to="/login" className="font-medium text-slate-900 underline">
@@ -110,45 +104,6 @@ export function RegisterPage() {
           </Link>
         </p>
       </div>
-    </div>
-  );
-}
-
-export function SocialButtons() {
-  const [error, setError] = useState<string | null>(null);
-  const [pending, setPending] = useState<string | null>(null);
-
-  const start = async (provider: "google" | "microsoft") => {
-    setError(null);
-    setPending(provider);
-    try {
-      const { getOAuthLoginUrl } = await import("../api/auth");
-      window.location.href = await getOAuthLoginUrl(provider);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.detail : "Social sign-in is not available yet");
-      setPending(null);
-    }
-  };
-
-  return (
-    <div className="space-y-2">
-      {error && <div className="rounded-md px-3 py-2 text-sm" style={{ background: "var(--confid-bg)", color: "var(--confid-fg)" }}>{error}</div>}
-      <button
-        type="button"
-        onClick={() => start("google")}
-        disabled={pending !== null}
-        className="btn-secondary w-full disabled:opacity-50"
-      >
-        {pending === "google" ? "Redirecting…" : "Continue with Google"}
-      </button>
-      <button
-        type="button"
-        onClick={() => start("microsoft")}
-        disabled={pending !== null}
-        className="btn-secondary w-full disabled:opacity-50"
-      >
-        {pending === "microsoft" ? "Redirecting…" : "Continue with Microsoft"}
-      </button>
     </div>
   );
 }
