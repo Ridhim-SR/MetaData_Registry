@@ -672,3 +672,81 @@ def test_rejected_run_archives_nothing(tmp_path):
         run(department="pwd", dataset="vishwakarma", table_name="t1", source_file=str(ddl_file), storage=storage)
 
     assert storage.list("department/") == []
+
+
+def test_name_hindi_from_the_schema_csv_reaches_the_curated_snapshot(tmp_path):
+    schema = tmp_path / "schema.csv"
+    schema.write_text(
+        "name,name_Hindi,data_type\n"
+        "serial_number,क्रमसं०,integer\n"
+        "amount,आवंटित धनराशि,numeric\n",
+        encoding="utf-8",
+    )
+    storage = _storage_with_department(tmp_path)
+
+    result = run(
+        department="pwd",
+        dataset="vishwakarma",
+        table_name="hindi_demo",
+        source_file=str(schema),
+        storage=storage,
+        source_format="csv",
+    )
+
+    curated = storage.read_csv(result["curated_path"])
+    assert {row["name"]: row["name_hindi"] for row in curated} == {
+        "serial_number": "क्रमसं०",
+        "amount": "आवंटित धनराशि",
+    }
+    assert result["column_count"] == 2
+
+
+def test_name_hindi_is_carried_forward_when_a_later_export_omits_it(tmp_path):
+    """A re-export that has no name_Hindi column must not silently erase the
+    labels that were reviewed for the table."""
+
+    storage = _storage_with_department(tmp_path)
+    first = tmp_path / "first.csv"
+    first.write_text(
+        "name,name_Hindi,data_type\nserial_number,क्रमसं०,integer\n",
+        encoding="utf-8",
+    )
+    run(department="pwd", dataset="vishwakarma", table_name="hindi_demo",
+        source_file=str(first), storage=storage, source_format="csv")
+
+    second = tmp_path / "second.csv"
+    second.write_text("name,data_type\nserial_number,integer\n", encoding="utf-8")
+    result = run(department="pwd", dataset="vishwakarma", table_name="hindi_demo",
+                 source_file=str(second), storage=storage, source_format="csv")
+
+    curated = storage.read_csv(result["curated_path"])
+    assert curated[0]["name_hindi"] == "क्रमसं०"
+
+
+def test_a_field_dictionary_can_supply_the_hindi_name(tmp_path):
+    """The column CSV is the normal home for name_Hindi, but a Field
+    Dictionary that answers it (even as `name_Hindi`) must work too."""
+
+    storage = _storage_with_department(tmp_path)
+    schema = tmp_path / "schema.csv"
+    schema.write_text("name,data_type\nserial_number,integer\n", encoding="utf-8")
+    dictionary = tmp_path / "dictionary.csv"
+    dictionary.write_text(
+        "name,name_Hindi,business_description\n"
+        "serial_number,क्रमसं०,Row serial number in the portal export.\n",
+        encoding="utf-8",
+    )
+
+    result = run(
+        department="pwd",
+        dataset="vishwakarma",
+        table_name="hindi_demo",
+        source_file=str(schema),
+        storage=storage,
+        source_format="csv",
+        business_metadata_file=str(dictionary),
+    )
+
+    curated = storage.read_csv(result["curated_path"])
+    assert curated[0]["name_hindi"] == "क्रमसं०"
+    assert curated[0]["business_description"] == "Row serial number in the portal export."

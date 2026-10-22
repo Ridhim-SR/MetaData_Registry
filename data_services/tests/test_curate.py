@@ -163,6 +163,35 @@ def test_unknown_classification_override_falls_back_to_rules():
     assert curated[0]["classification"] == "PII"
 
 
+def test_name_hindi_is_carried_beside_the_column():
+    curated = curate_schema([_col("serial_number", name_hindi="क्रमसं०")])
+    assert curated[0]["name_hindi"] == "क्रमसं०"
+
+
+def test_name_hindi_from_business_metadata_fills_a_missing_column_answer():
+    curated = curate_schema(
+        [_col("serial_number")],
+        {"serial_number": {"name_hindi": "क्रमसं०"}},
+    )
+    assert curated[0]["name_hindi"] == "क्रमसं०"
+
+
+def test_the_schema_csv_answer_wins_over_a_carried_forward_label():
+    """An edited label in the submitted schema CSV must take effect instead of
+    the previous snapshot's label being carried forward forever."""
+
+    curated = curate_schema(
+        [_col("serial_number", name_hindi="क्रमसंख्या")],
+        {"serial_number": {"name_hindi": "क्रमसं०"}},
+    )
+    assert curated[0]["name_hindi"] == "क्रमसंख्या"
+
+
+def test_a_column_without_a_hindi_name_does_not_gain_the_key():
+    curated = curate_schema([_col("amount", "numeric")])
+    assert "name_hindi" not in curated[0]
+
+
 # --- auto_classify: whole-token matching for the short, ambiguous words ----------------------------
 
 @pytest.mark.parametrize("name,level", [

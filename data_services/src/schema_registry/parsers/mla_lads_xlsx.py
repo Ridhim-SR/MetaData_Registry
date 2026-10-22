@@ -10,12 +10,13 @@ The portal exports this table as one sheet shaped like::
 Both downloads carry the *same English headers* -- the Hindi workbook differs
 only in the title and in the MLA-name / district values -- so the Hindi column
 labels are not in the file at all. They come from the portal's own Hindi
-rendering and live in the table's business-metadata CSV, appended to each
-description as ``[<Hindi label>]``.
+rendering and are written into the column CSV's own ``name_Hindi`` column, next
+to the English ``name``; OpenMetadata shows them as each column's display name.
+They are deliberately *not* appended to the descriptions.
 
 The registry stores column definitions, not rows, so this module maps the
 export's prose headers onto stable snake_case names and writes the canonical
-``name,data_type`` CSV that the shared csv parser reads.
+``name,name_Hindi,data_type`` CSV that the shared csv parser reads.
 """
 
 from __future__ import annotations
@@ -28,36 +29,69 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-# (header as the export writes it, column name, data type)
+# (header as the export writes it, column name, data type, Hindi name)
 #
 # The headers are prose ("Name and constituency of the Honorable MLA") and are
 # not usable as OpenMetadata column names, so the mapping is fixed here, in one
 # reviewable place, instead of being derived from the file on every run.
-COLUMNS: tuple[tuple[str, str, str], ...] = (
-    ("Serial number", "serial_number", "integer"),
+COLUMNS: tuple[tuple[str, str, str, str], ...] = (
+    ("Serial number", "serial_number", "integer", "क्रमसं०"),
     (
         "Name and constituency of the Honorable MLA",
         "mla_name_and_constituency",
         "character varying",
+        "माननीय विधायक का नाम व क्षेत्र",
     ),
-    ("financial year", "financial_year", "character varying"),
-    ("Nodal District", "nodal_district", "character varying"),
+    ("financial year", "financial_year", "character varying", "वित्तीय वर्ष"),
+    ("Nodal District", "nodal_district", "character varying", "नोडल जनपद"),
     (
         "Balance amount of last financial year (in lakhs)",
         "balance_last_financial_year_lakhs",
         "numeric",
+        "गत वित्तीय वर्ष की अवशेष धनराशि (लाख मे)",
     ),
-    ("Amount allocated (in lakh)", "amount_allocated_lakhs", "numeric"),
+    (
+        "Amount allocated (in lakh)",
+        "amount_allocated_lakhs",
+        "numeric",
+        "आवंटित धनराशि (लाख मे)",
+    ),
     (
         "Total (Remainder + Allocated)   (in lakh)",
         "total_remainder_allocated_lakhs",
         "numeric",
+        "योग (अवशेष और आवंटित) (लाख मे)",
     ),
-    ("Sanctioned Amount (in lakh)", "sanctioned_amount_lakhs", "numeric"),
-    ("Balance amount for approval (in lakhs)", "balance_for_approval_lakhs", "numeric"),
-    ("Expenditure Amount (in lakhs)", "expenditure_amount_lakhs", "numeric"),
-    ("Balance Amount (in lakhs)", "balance_amount_lakhs", "numeric"),
-    ("Amount Committed (in lakhs)", "amount_committed_lakhs", "numeric"),
+    (
+        "Sanctioned Amount (in lakh)",
+        "sanctioned_amount_lakhs",
+        "numeric",
+        "स्वीकृत धनराशि (लाख मे)",
+    ),
+    (
+        "Balance amount for approval (in lakhs)",
+        "balance_for_approval_lakhs",
+        "numeric",
+        "स्वीकृति हेतु अवशेष धनराशि (लाख मे)",
+    ),
+    (
+        "Expenditure Amount (in lakhs)",
+        "expenditure_amount_lakhs",
+        "numeric",
+        "व्यय धनराशि (लाख मे)",
+    ),
+    (
+        "Balance Amount (in lakhs)",
+        "balance_amount_lakhs",
+        "numeric",
+        "अवशेष धनराशि (लाख मे)",
+    ),
+    (
+        "Amount Committed (in lakhs)",
+        "amount_committed_lakhs",
+        "numeric",
+        "प्रतिबद्ध धनराशि (लाख मे)",
+    ),
 )
 
 # Today's export uses rows 1-2 as a preamble. Searching a few more rows means a
@@ -78,8 +112,12 @@ def _normalise(value: object) -> str:
     return " ".join(str(value).split()).lower() if value is not None else ""
 
 
-_EXPECTED = {_normalise(header): (name, data_type) for header, name, data_type in COLUMNS}
-_TYPE_BY_NAME = {name: data_type for _, name, data_type in COLUMNS}
+_EXPECTED = {
+    _normalise(header): (name, data_type, name_hindi)
+    for header, name, data_type, name_hindi in COLUMNS
+}
+_TYPE_BY_NAME = {name: data_type for _, name, data_type, _ in COLUMNS}
+_HINDI_BY_NAME = {name: name_hindi for _, name, _, name_hindi in COLUMNS}
 
 
 def _load_workbook(path: str | Path):
@@ -181,6 +219,7 @@ def schema_columns(path: str | Path) -> list[dict]:
     return [
         {
             "name": name,
+            "name_hindi": _HINDI_BY_NAME[name],
             "data_type": _TYPE_BY_NAME[name],
             "length": None,
             "scale": None,
@@ -192,16 +231,16 @@ def schema_columns(path: str | Path) -> list[dict]:
 
 
 def write_schema_csv(workbook_path: str | Path, out_path: str | Path) -> list[dict]:
-    """Write the canonical ``name,data_type`` CSV the shared parser reads."""
+    """Write the canonical ``name,name_Hindi,data_type`` CSV the parser reads."""
 
     columns = schema_columns(workbook_path)
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.writer(handle)
-        writer.writerow(["name", "data_type"])
+        writer.writerow(["name", "name_Hindi", "data_type"])
         for column in columns:
-            writer.writerow([column["name"], column["data_type"]])
+            writer.writerow([column["name"], column["name_hindi"], column["data_type"]])
     logger.info(f"mla_lads_xlsx: {len(columns)} column(s) -> {out_path}")
     return columns
 
@@ -214,7 +253,7 @@ def main(argv: list[str] | None = None) -> int:
 
     columns = write_schema_csv(args.input, args.out)
     for column in columns:
-        print(f"{column['name']:<34} {column['data_type']}")
+        print(f"{column['name']:<34} {column['name_hindi']:<44} {column['data_type']}")
     print(f"\n{len(columns)} column(s) -> {args.out}")
     return 0
 

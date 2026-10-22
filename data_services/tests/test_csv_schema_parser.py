@@ -10,7 +10,7 @@ def parse_csv_columns(path):
 
 def _write(tmp_path, name, content):
     path = tmp_path / name
-    path.write_text(content)
+    path.write_text(content, encoding="utf-8")
     return str(path)
 
 
@@ -92,3 +92,29 @@ def test_non_numeric_scale_value_defaults_to_none(tmp_path):
         "name,data_type,scale\namount,numeric,two\n",
     )
     assert parse_csv_columns(path)[0]["scale"] is None
+
+
+def test_name_hindi_is_carried_beside_the_column_name(tmp_path):
+    """`name_Hindi` is a column attribute (the Hindi label), not a column of
+    the table -- it must not disturb the column list."""
+
+    path = _write(
+        tmp_path,
+        "dept_hindi.csv",
+        "name,name_Hindi,data_type\nserial_number,क्रमसं०,integer\namount,आवंटित धनराशि,numeric\n",
+    )
+    cols = parse_csv_columns(path)
+
+    assert [col["name"] for col in cols] == ["serial_number", "amount"]
+    assert [col["name_hindi"] for col in cols] == ["क्रमसं०", "आवंटित धनराशि"]
+    assert cols[0]["data_type"] == "integer"
+
+
+def test_a_csv_without_name_hindi_keeps_its_old_shape(tmp_path):
+    """Existing departments' files must parse exactly as before: the key is
+    only added when the source answered it."""
+
+    path = _write(tmp_path, "dept_plain.csv", "name,data_type\namount,numeric\n")
+    assert parse_csv_columns(path) == [
+        {"name": "amount", "data_type": "numeric", "length": None, "scale": None, "nullable": True, "default": None},
+    ]

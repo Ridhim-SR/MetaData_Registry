@@ -7,7 +7,7 @@ import requests
 from metadata.ingestion.ometa.client import APIError
 
 from src.schema_registry.curate import CLASSIFICATION_LEVELS
-from src.schema_registry.openmetadata.publish import _create_or_update, _get_by_name, _unwrap, publish_table
+from src.schema_registry.openmetadata.publish import _create_or_update, _get_by_name, _to_column, _unwrap, publish_table
 from src.schema_registry.registry import lookups
 from src.schema_registry.pipeline import run
 from src.storage.local import LocalObjectStorage
@@ -984,3 +984,26 @@ def test_other_errors_while_setting_the_display_name_are_not_hidden(tmp_path):
 
     with pytest.raises(ValueError, match="something else broke"):
         publish_table(client, storage, "pwd.vishwakarma.tbd_confirm_with_pwd")
+
+
+def test_a_columns_hindi_name_becomes_its_openmetadata_display_name():
+    column = _to_column(
+        {
+            "name": "serial_number",
+            "data_type": "integer",
+            "business_description": "Row serial number in the portal export.",
+            "name_hindi": "क्रमसं०",
+        }
+    )
+
+    assert _unwrap(column.name) == "serial_number"
+    assert _unwrap(column.displayName) == "क्रमसं०"
+    assert _unwrap(column.description) == "Row serial number in the portal export."
+
+
+def test_a_column_without_a_hindi_name_has_no_display_name():
+    column = _to_column(
+        {"name": "amount", "data_type": "numeric", "business_description": "Amount."}
+    )
+
+    assert column.displayName is None

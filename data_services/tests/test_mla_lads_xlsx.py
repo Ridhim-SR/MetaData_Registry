@@ -14,9 +14,10 @@ WORKBOOK = (
 )
 REAL = pytest.mark.skipif(not WORKBOOK.exists(), reason=f"{WORKBOOK} is gitignored and not present")
 
-HEADERS = [header for header, _, _ in mla_lads_xlsx.COLUMNS]
-EXPECTED_NAMES = [name for _, name, _ in mla_lads_xlsx.COLUMNS]
-EXPECTED_TYPES = [data_type for _, _, data_type in mla_lads_xlsx.COLUMNS]
+HEADERS = [header for header, _, _, _ in mla_lads_xlsx.COLUMNS]
+EXPECTED_NAMES = [name for _, name, _, _ in mla_lads_xlsx.COLUMNS]
+EXPECTED_TYPES = [data_type for _, _, data_type, _ in mla_lads_xlsx.COLUMNS]
+EXPECTED_HINDI = [name_hindi for _, _, _, name_hindi in mla_lads_xlsx.COLUMNS]
 
 DATA_ROW = [
     1,
@@ -63,8 +64,10 @@ def test_skips_title_and_timestamp_and_keeps_the_twelve_columns(tmp_path):
     columns = mla_lads_xlsx.schema_columns(_write_workbook(tmp_path))
 
     assert [column["name"] for column in columns] == EXPECTED_NAMES
+    assert [column["name_hindi"] for column in columns] == EXPECTED_HINDI
     assert [column["data_type"] for column in columns] == EXPECTED_TYPES
     assert all(column["nullable"] is True for column in columns)
+    assert columns[0]["name_hindi"] == "क्रमसं०"
 
 
 def test_header_is_found_even_when_spacing_and_case_differ(tmp_path):
@@ -90,9 +93,9 @@ def test_write_schema_csv_is_the_shared_parser_shape(tmp_path):
     mla_lads_xlsx.write_schema_csv(_write_workbook(tmp_path), out)
 
     lines = out.read_text(encoding="utf-8").splitlines()
-    assert lines[0] == "name,data_type"
+    assert lines[0] == "name,name_Hindi,data_type"
     assert len(lines) == 1 + len(EXPECTED_NAMES)
-    assert lines[1].split(",") == ["serial_number", "integer"]
+    assert lines[1].split(",") == ["serial_number", "क्रमसं०", "integer"]
 
 
 def test_a_missing_column_is_refused(tmp_path):

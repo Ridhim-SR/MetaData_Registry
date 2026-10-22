@@ -12,7 +12,7 @@ from src.schema_registry.registry import lookups, paths
 from src.schema_registry.curate import CATEGORY_LEVELS, curate_schema, validate_category, validate_schema
 from src.schema_registry.openmetadata.publish import get_client, publish_table
 from src.schema_registry.parsers import agriculture_parser
-from src.schema_registry.parsers.csv_schema_parser import parse_csv_text
+from src.schema_registry.parsers.csv_schema_parser import _normalize_header, parse_csv_text
 from src.schema_registry.parsers.ddl_parser import parse_postgres_columns
 from src.storage import storage_from_env
 from src.storage.base import ObjectStorage
@@ -33,7 +33,7 @@ _PARSERS = {
 # this run's. The structural ones are the whole reason the diff exists: a
 # data_type or nullability change used to pass unnoticed on its way to
 # OpenMetadata. The governance ones catch a column being reclassified.
-_DIFF_FIELDS = ("data_type", "nullable", "length", "scale", "classification", "tag", "glossary_term")
+_DIFF_FIELDS = ("data_type", "nullable", "length", "scale", "classification", "tag", "glossary_term", "name_hindi")
 
 
 def parse_source(department_id: str, table_name: str, source_format: str, text: str) -> list[dict]:
@@ -141,7 +141,7 @@ def _summarize_diff(diff_rows: list[dict], has_previous: bool) -> tuple[str, int
     return mode, added, removed, changed
 
 
-_METADATA_TEXT_FIELDS = ("business_description", "tag", "classification", "glossary_term")
+_METADATA_TEXT_FIELDS = ("business_description", "tag", "classification", "glossary_term", "name_hindi")
 
 
 def _business_metadata_from_rows(rows: list[dict]) -> dict[str, dict]:
@@ -180,9 +180,24 @@ def _merge_business_metadata(previous: dict[str, dict], new: dict[str, dict]) ->
 
 def _parse_business_metadata(text: str) -> dict[str, dict]:
     """A Field Dictionary export (CSV: name, business_description, tag,
-    classification, glossary_term, active), keyed by field name."""
+    classification, glossary_term, active), keyed by field name.
 
-    return _business_metadata_from_rows(list(csv.DictReader(io.StringIO(text))))
+    Headers are matched case- and punctuation-insensitively, so a file that
+    writes ``name_Hindi`` / ``Name Hindi`` answers the column's Hindi label
+    instead of the column being silently ignored."""
+
+    rows = list(csv.DictReader(io.StringIO(text)))
+    if rows:
+        aliases = {
+            _normalize_header(header): header
+            for header in rows[0]
+            if header
+        }
+        rows = [
+            {canonical: row.get(source) or "" for canonical, source in aliases.items()}
+            for row in rows
+        ]
+    return _business_metadata_from_rows(rows)
 
 
 def _previous_curated_columns(

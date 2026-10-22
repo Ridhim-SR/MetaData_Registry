@@ -62,7 +62,7 @@ export interface RegistryTable {
   name: string;
   fullyQualifiedName: string;
   description?: string | null;
-  columns?: Array<{ name: string; dataType?: string; dataTypeDisplay?: string; description?: string | null; tags?: RegistryTag[] }>;
+  columns?: Array<{ name: string; displayName?: string | null; dataType?: string; dataTypeDisplay?: string; description?: string | null; tags?: RegistryTag[] }>;
   access_level?: AccessLevel;
   department?: string | null;
   department_display?: string | null;
