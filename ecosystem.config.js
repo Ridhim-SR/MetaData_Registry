@@ -1,7 +1,5 @@
-// PM2 config: registry-web (3100), registry-api (4100), openmetadata (8585).
+// PM2 config: registry-web (3100), registry-api (4100), registry-db (5434), openmetadata (8585).
 // Start: pm2 start ecosystem.config.js && pm2 save   (reboot persistence: pm2 startup)
-// Postgres runs as a Docker container outside PM2 (infrastructure/postgres,
-// 127.0.0.1:5434); it replaced Neon and the old neon-bridge tunnel.
 const ROOT = "/home/bipp2/MetaData_Registry";
 const WEB_PORT = 3100, API_PORT = 4100;
 
@@ -27,6 +25,22 @@ module.exports = {
       interpreter: "none",
       max_memory_restart: "800M",
       ...common,
+    },
+    {
+      // Postgres for registry-api (infrastructure/postgres, 127.0.0.1:5434);
+      // replaced Neon and the old neon-bridge tunnel. Same pattern as the
+      // openmetadata entry below: bring the container up detached, then tail
+      // its logs so it shows in `pm2 ls`. The container is owned by Docker
+      // (restart: unless-stopped), so `pm2 stop/restart registry-db` only
+      // stops/re-attaches the log tail and never stops the database. If the
+      // container dies the tail exits, and PM2's restart brings it back up.
+      name: "registry-db",
+      cwd: ROOT,
+      script: "bash",
+      args: `-c "docker compose -f infrastructure/postgres/docker-compose.yml up -d; exec docker logs -f --tail=20 registry_postgres"`,
+      interpreter: "none",
+      ...common,
+      restart_delay: 10000,
     },
     {
       // OpenMetadata UI/API is published on 8585 by the compose file.

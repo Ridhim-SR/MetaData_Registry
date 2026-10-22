@@ -1,41 +1,32 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { listDatasets, listPublicDatasets } from "../../api/registry";
+import { listDatasets } from "../../api/registry";
 import { useAuth } from "../../contexts/AuthContext";
 import { hasValidUpdatedAt } from "../../utils/format";
 import { DatasetCard } from "./DatasetCard";
 import { EmptyBlock, ErrorBlock, Skeleton } from "./StateBlocks";
 
 /**
- * "Recently updated datasets" — signed-in viewers see their whole visible
- * catalog (public datasets alone would hide what they can open). Guests see
- * public datasets when available, otherwise the visible catalog (with access
- * badges), otherwise a single short line of text. No large dashed boxes.
+ * "Recently updated datasets" — the same visible catalog the Explore page
+ * lists (restricted datasets appear with their access badge, never their
+ * schema), newest first, so guests and signed-in viewers see the home page
+ * and the catalog agree. No large dashed boxes.
  */
 export function PublicDataSection() {
   const { isAuthenticated } = useAuth();
-  const pub = useQuery({
-    queryKey: ["registry-public"],
-    queryFn: listPublicDatasets,
-    enabled: !isAuthenticated,
-  });
-  const showFallback =
-    isAuthenticated || Boolean(pub.data && pub.data.items.length === 0 && !pub.error);
-  const fallback = useQuery({
+  const catalog = useQuery({
     queryKey: ["registry-catalog-recent", isAuthenticated],
     queryFn: () => listDatasets(),
-    enabled: showFallback,
     retry: false,
   });
 
-  const items = !isAuthenticated && pub.data && pub.data.items.length > 0 ? pub.data.items.slice(0, 6) : [];
-  const fallbackItems = fallback.data ? fallback.data.items.slice(0, 6) : [];
-  const shown = items.length > 0 ? items : fallbackItems;
+  // Dated datasets first (newest first), undated ones after in catalog order.
+  const shown = [...(catalog.data?.items ?? [])]
+    .sort((a, b) => (hasValidUpdatedAt(b.updated_at) ? b.updated_at : 0) - (hasValidUpdatedAt(a.updated_at) ? a.updated_at : 0))
+    .slice(0, 6);
   // Loader on every fetch so stale cards never flash as current.
-  const isPending =
-    (!isAuthenticated && (pub.isPending || pub.isFetching)) ||
-    (showFallback && (fallback.isPending || fallback.isFetching));
-  const error = (isAuthenticated ? null : pub.error) ?? (showFallback ? fallback.error : null);
+  const isPending = catalog.isPending || catalog.isFetching;
+  const error = catalog.error;
   // Without any valid dates there is nothing "recent" to show.
   const hasAnyDates = shown.some((card) => hasValidUpdatedAt(card.updated_at));
   const heading = hasAnyDates ? "Recently Updated Datasets" : "Latest Datasets";
@@ -84,7 +75,7 @@ export function PublicDataSection() {
           <div className="mt-4">
             <ErrorBlock
               message="Dataset information is temporarily unavailable."
-              onRetry={() => (pub.error ? pub.refetch() : fallback.refetch())}
+              onRetry={() => catalog.refetch()}
             />
           </div>
         )}
