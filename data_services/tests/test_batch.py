@@ -200,7 +200,7 @@ requires_minio = pytest.mark.skipif(
 
 
 def _run_cli(tmp_path, manifest) -> "subprocess.CompletedProcess":
-    env = {**os.environ, "MANIFEST_FILE": str(manifest)}
+    env = {**os.environ, "MANIFEST_FILE": str(manifest), "ENVIRONMENT": "local"}
     # Main's config routes feature-branch runs to S3 (no local-filesystem
     # storage anymore), so point the CLI at the local MinIO stand-in
     # (infrastructure/minio) under a throwaway prefix: the run exercises the

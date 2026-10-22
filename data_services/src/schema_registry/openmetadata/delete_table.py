@@ -16,17 +16,16 @@ clears the mark and brings it back.
 import os
 import sys
 
-from dotenv import load_dotenv
-
 from src.schema_registry.openmetadata.publish import delete_table, get_client
 from src.storage import storage_from_env
+from src.utils.config import load_env
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 
 if __name__ == "__main__":
-    load_dotenv()
+    load_env()
     _table_id = os.environ.get("TABLE_ID", "")
     if not _table_id:
         sys.exit("TABLE_ID is required, e.g. TABLE_ID=pwd.vishwakarma.roads")

@@ -424,6 +424,9 @@ way, one level up, onto the Database entity. A resolved `owner` (an
 OpenMetadata user or team, matched by name or email) also lands in the
 Database's built-in **Owners** field, so ownership-based access rules and
 "my assets" filters apply; an unresolvable one is a warning, not a failure.
+A matching team must be of type **Group**: OpenMetadata rejects
+Department/Division/BusinessUnit teams as owners, so those are skipped with a
+warning instead of failing the publish.
 
 **Re-running is safe** — the service and schema are reused; the database
 and table are always create-or-update, so a later-confirmed `category`/
