@@ -121,7 +121,13 @@ export function TablePage() {
   const columns = useMemo(() => {
     let cols = [...(table?.columns ?? [])];
     const needle = colQuery.trim().toLowerCase();
-    if (needle) cols = cols.filter((c) => (c.name || "").toLowerCase().includes(needle));
+    if (needle) {
+      cols = cols.filter(
+        (c) =>
+          (c.name || "").toLowerCase().includes(needle) ||
+          (c.displayName || "").toLowerCase().includes(needle),
+      );
+    }
     cols.sort((a, b) =>
       colSort === "name"
         ? (a.name || "").localeCompare(b.name || "")
@@ -129,6 +135,13 @@ export function TablePage() {
     );
     return cols;
   }, [table, colQuery, colSort]);
+
+  // Only datasets that carry a `name_Hindi` on any column get the extra
+  // column, so every other table keeps the four-column layout it has today.
+  const hasHindiNames = useMemo(
+    () => (table?.columns ?? []).some((c) => (c.displayName || "").trim() !== ""),
+    [table],
+  );
 
   const colPages = Math.max(1, Math.ceil(columns.length / COLS_PER_PAGE));
   const safeColPage = Math.min(colPage, colPages);
@@ -471,6 +484,9 @@ export function TablePage() {
                         <thead style={{ background: "var(--bg-alt)", color: "var(--text-muted)" }}>
                           <tr>
                             <th scope="col" className="px-4 py-2 text-left font-medium">Column Name</th>
+                            {hasHindiNames && (
+                              <th scope="col" className="px-4 py-2 text-left font-medium">Name (Hindi)</th>
+                            )}
                             <th scope="col" className="px-4 py-2 text-left font-medium">Data Type</th>
                             <th scope="col" className="px-4 py-2 text-left font-medium">Description</th>
                             <th scope="col" className="px-4 py-2 text-left font-medium">Tags</th>
@@ -489,6 +505,11 @@ export function TablePage() {
                                 }}
                               >
                                 <td className="px-4 py-2 font-medium" style={{ color: "var(--text)" }}>{col.name}</td>
+                                {hasHindiNames && (
+                                  <td className="px-4 py-2" style={{ color: "var(--text)" }}>
+                                    {col.displayName || <span className="not-provided">Not provided</span>}
+                                  </td>
+                                )}
                                 <td className="px-4 py-2">
                                   <span className="badge badge-neutral">
                                     {col.dataTypeDisplay || col.dataType || "Not provided"}
@@ -511,7 +532,7 @@ export function TablePage() {
                           })}
                           {visibleColumns.length === 0 && (
                             <tr>
-                              <td colSpan={4} className="px-4 py-3" style={{ color: "var(--text-muted)" }}>
+                              <td colSpan={hasHindiNames ? 5 : 4} className="px-4 py-3" style={{ color: "var(--text-muted)" }}>
                                 No columns match.
                               </td>
                             </tr>

@@ -249,7 +249,7 @@ def curate_schema(
 ) -> list[dict]:
     """Standardize raw columns (already checked by validate_schema), merging
     in business metadata (business description / tag / glossary term / active
-    / classification) keyed by field name where it's available. Fields without
+    / classification / Hindi name) keyed by field name where it's available. Fields without
     an answer yet are left blank rather than guessed -- including `tag`, which
     used to fall back to a rule-based auto-tag; that fallback is switched off
     (see the tag line below), so a tag now only ever comes from a submitted
@@ -325,15 +325,26 @@ def curate_schema(
                 f"OpenMetadata's dot-separated FQN -- rename the term (e.g. use '_')."
             )
 
-        curated_columns.append(
-            {
-                **column,
-                "business_description": meta.get("business_description", ""),
-                "tag": tag,
-                "glossary_term": glossary_term,
-                "active": meta.get("active", True),
-                "classification": classification,
-            }
-        )
+        # The Hindi name normally arrives with the column definition CSV
+        # (`name,name_Hindi,data_type`). A Field Dictionary may answer it too,
+        # and a table that has been ingested before carries the previous label
+        # forward through business metadata -- so an export that omits the
+        # column does not silently drop the label. This run's schema CSV wins
+        # over the carried-forward value, so an edited label takes effect.
+        name_hindi = (column.get("name_hindi") or meta.get("name_hindi") or "").strip()
+
+        curated = {
+            **column,
+            "business_description": meta.get("business_description", ""),
+            "tag": tag,
+            "glossary_term": glossary_term,
+            "active": meta.get("active", True),
+            "classification": classification,
+        }
+        if name_hindi:
+            curated["name_hindi"] = name_hindi
+        else:
+            curated.pop("name_hindi", None)
+        curated_columns.append(curated)
 
     return curated_columns

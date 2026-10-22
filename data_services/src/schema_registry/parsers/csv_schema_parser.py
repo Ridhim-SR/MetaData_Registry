@@ -16,6 +16,11 @@ COLUMN_ALIASES: dict[str, list[str]] = {
     "length": ["length", "max_length", "size"],
     "nullable": ["nullable", "is_nullable", "allow_null"],
     "default": ["default", "default_value"],
+    # A column's Hindi name (written as `name_Hindi` in the source CSV). It is
+    # an attribute of the column, not a column of the table: the parser keeps
+    # it beside `name` so publish can set OpenMetadata's Column.displayName,
+    # instead of the label being appended to the description.
+    "name_hindi": ["name_hindi", "hindi_name"],
 }
 
 REQUIRED_FIELDS = ["name", "data_type"]
@@ -67,21 +72,25 @@ def parse_csv_text(text: str, label: str = "<text>") -> list[dict]:
     columns = []
     for row in reader:
         length = (row.get(header_map.get("length", ""), "") or "").strip()
+        name_hindi = (row.get(header_map.get("name_hindi", ""), "") or "").strip()
 
-        columns.append(
-            {
-                "name": row[header_map["name"]].strip(),
-                "data_type": row[header_map["data_type"]].strip(),
-                "length": int(length) if length.isdigit() else None,
-                # `scale` stays None for a submitted CSV: it is a storage-side
-                # detail (numeric(p,s) of a DDL dump, written to Wasabi with
-                # the snapshot), never part of what a column CSV carries to
-                # OpenMetadata.
-                "scale": None,
-                "nullable": _to_bool(row.get(header_map.get("nullable", ""))),
-                "default": (row.get(header_map.get("default", ""), "") or "").strip() or None,
-            }
-        )
+        column = {
+            "name": row[header_map["name"]].strip(),
+            "data_type": row[header_map["data_type"]].strip(),
+            "length": int(length) if length.isdigit() else None,
+            # `scale` stays None for a submitted CSV: it is a storage-side
+            # detail (numeric(p,s) of a DDL dump, written to Wasabi with
+            # the snapshot), never part of what a column CSV carries to
+            # OpenMetadata.
+            "scale": None,
+            "nullable": _to_bool(row.get(header_map.get("nullable", ""))),
+            "default": (row.get(header_map.get("default", ""), "") or "").strip() or None,
+        }
+        # Only present when the source answered it: a CSV without the column
+        # keeps producing exactly the same shape it always did.
+        if name_hindi:
+            column["name_hindi"] = name_hindi
+        columns.append(column)
 
     logger.info(f"csv_schema_parser: parsed {len(columns)} column(s) from {label}")
     return columns

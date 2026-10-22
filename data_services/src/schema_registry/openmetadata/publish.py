@@ -285,6 +285,12 @@ def _to_column(row: dict) -> Column:
         # has -- _replace_column_tags() is what actually makes them exact.
         "tags": _column_tags(row),
     }
+    # The Hindi name is a display label for the column, so it goes to
+    # OpenMetadata's `displayName` -- keeping `name` as the stable English
+    # identifier that queries and lineage use.
+    name_hindi = (row.get("name_hindi") or "").strip()
+    if name_hindi:
+        kwargs["displayName"] = name_hindi
     if data_type in _LENGTH_REQUIRED_TYPES:
         length = row.get("length")
         kwargs["dataLength"] = int(length) if length else _DEFAULT_LENGTH

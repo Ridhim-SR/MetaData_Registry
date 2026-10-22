@@ -395,8 +395,9 @@ class OpenMetadataClient:
             return True
         for col in table.get("columns") or []:
             col_name = (col.get("name") or "").lower()
+            col_display = (col.get("displayName") or "").lower()
             col_desc = (col.get("description") or "").lower()
-            if needle in col_name or needle in col_desc:
+            if needle in col_name or needle in col_display or needle in col_desc:
                 return True
         return False
 
