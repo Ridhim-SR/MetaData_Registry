@@ -42,7 +42,7 @@ from metadata.generated.schema.entity.services.databaseService import (
     DatabaseService,
     DatabaseServiceType,
 )
-from metadata.generated.schema.entity.teams.team import Team
+from metadata.generated.schema.entity.teams.team import Team, TeamType
 from metadata.generated.schema.entity.teams.user import User
 from metadata.generated.schema.security.client.openMetadataJWTClientConfig import (
     OpenMetadataJWTClientConfig,
@@ -376,6 +376,14 @@ def _resolve_owner(client: OpenMetadata, owner: str) -> EntityReference | None:
         for entity, entity_type in ((User, "user"), (Team, "team")):
             found = _get_or_none(client, entity, candidate)
             if found is None:
+                continue
+            if entity is Team and getattr(found, "teamType", None) != TeamType.Group:
+                logger.warning(
+                    f"Dataset owner '{owner}' matches OpenMetadata team '{candidate}' of type "
+                    f"{_unwrap(getattr(found, 'teamType', None))}, but only Group teams can own "
+                    f"entities -- skipping it. Change the team type to Group (or use a Group team) "
+                    f"and republish."
+                )
                 continue
             name = str(_unwrap(found.name))
             return EntityReference(

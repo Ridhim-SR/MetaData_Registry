@@ -8,7 +8,7 @@ import uuid
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from metadata.generated.schema.entity.teams.team import Team
+from metadata.generated.schema.entity.teams.team import Team, TeamType
 from metadata.generated.schema.entity.teams.user import User
 
 from src.schema_registry.openmetadata.publish import _resolve_owner, _unwrap, publish_table
@@ -41,7 +41,11 @@ def _fake_client():
     return client
 
 
-def _client_with_users(users: dict[str, str], teams: dict[str, str] | None = None):
+def _client_with_users(
+    users: dict[str, str],
+    teams: dict[str, str] | None = None,
+    team_types: dict[str, TeamType] | None = None,
+):
     """get_by_name returns a real-ish User/Team for the given FQNs, "not
     found" for everything else.
 
@@ -49,12 +53,14 @@ def _client_with_users(users: dict[str, str], teams: dict[str, str] | None = Non
     the mock's *repr name*, not a `.name` attribute."""
 
     teams = teams or {}
+    team_types = team_types or {}
     client = _fake_client()
 
     def _get(entity, fqn):
         if entity is Team and fqn in teams:
             return SimpleNamespace(
-                id=uuid.uuid4(), name=fqn, fullyQualifiedName=fqn, displayName=teams[fqn]
+                id=uuid.uuid4(), name=fqn, fullyQualifiedName=fqn, displayName=teams[fqn],
+                teamType=team_types.get(fqn, TeamType.Group),
             )
         if entity is User and fqn in users:
             return SimpleNamespace(
@@ -118,6 +124,20 @@ def test_resolve_owner_falls_back_to_a_team():
 
     assert ref is not None
     assert _unwrap(ref.type) == "team"
+
+
+def test_resolve_owner_skips_a_team_that_cannot_own_entities(caplog):
+    """OpenMetadata rejects owners of type Department/Division/BusinessUnit;
+    resolving one used to fail the whole publish with a 400. Skip it and
+    leave the built-in Owners field unset instead."""
+
+    client = _client_with_users(
+        {}, teams={"rdd": "Rural Development Department"},
+        team_types={"rdd": TeamType.Department},
+    )
+
+    assert _resolve_owner(client, "rdd") is None
+    assert "only Group teams can own entities" in caplog.text
 
 
 def test_resolve_owner_is_none_for_an_unknown_owner():
