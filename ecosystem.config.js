@@ -53,10 +53,14 @@ module.exports = {
       // No `--wait` and `;` not `&&`: --wait fails when a one-shot service
       // (e.g. the migration container) exits, which skipped the log tail
       // and made PM2 crash-loop this entry.
+      // Services are named so `up -d` never starts the Airflow `ingestion`
+      // container, which BIPP2 does not run (execute-migrate-all comes in as
+      // a dependency of the server). Needs infrastructure/openmetadata/.env
+      // (MYSQL_ROOT_PASSWORD), or compose refuses to start and this loops.
       name: "openmetadata",
       cwd: ROOT,
       script: "bash",
-      args: `-c "docker compose -f infrastructure/openmetadata/docker-compose.yml up -d; exec docker compose -f infrastructure/openmetadata/docker-compose.yml logs -f --tail=50"`,
+      args: `-c "docker compose -f infrastructure/openmetadata/docker-compose.yml up -d mysql elasticsearch openmetadata-server; exec docker compose -f infrastructure/openmetadata/docker-compose.yml logs -f --tail=50 mysql elasticsearch openmetadata-server"`,
       interpreter: "none",
       ...common,
       restart_delay: 15000,
