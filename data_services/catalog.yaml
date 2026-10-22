@@ -33,7 +33,7 @@ departments:
         steward:
         frequency: Daily
         timeline:
-        api_available: 
+        api_available:
         description: "Works managed by the Public Works Department under the Vishwakarma scheme: road and bridge works with their costs, year-wise funds, tenders, agreements, contractors, progress and locations."
         tables:
           vishwakarma_T:
@@ -156,3 +156,20 @@ departments:
             source: storage:inputs/rural_development_department/mla_lads/mla_lads_financial_status_schema.csv
             format: csv
             metadata: storage:inputs/rural_development_department/mla_lads/mla_lads_financial_status_metadata.csv
+      awas:
+        category: CAT-1
+        owner: Rural Development Department
+        steward:
+        frequency:
+        timeline:
+        api_available: N
+        description: >-
+          District-wise progress of the Pradhan Mantri Awas Yojana - Gramin
+          (PMAY-G) rural housing scheme: households targeted and registered,
+          houses sanctioned and completed, with break-ups by social category
+          (ST, SC, minorities, PH and others).
+        tables:
+          pradhan_mantri_awaas_yojana_gramin:
+            source: storage:inputs/rural_development_department/awas/awas_pmayg_category_progress_raw_columns.csv
+            format: csv
+            metadata: storage:inputs/rural_development_department/awas/awas_pmayg_category_progress_raw_columns_metadata.csv
