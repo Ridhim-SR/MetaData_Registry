@@ -53,6 +53,10 @@ services:
   elasticsearch:
     container_name: openmetadata_elasticsearch
     image: docker.elastic.co/elasticsearch/elasticsearch:9.3.0
+    # Without this a host reboot brings mysql and the server back but not
+    # search, and OM (and the registry's search) stays broken until someone
+    # starts it by hand.
+    restart: always
     environment:
       - discovery.type=single-node
       - ES_JAVA_OPTS=-Xms1024m -Xmx1024m
