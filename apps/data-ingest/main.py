@@ -190,6 +190,20 @@ def _max_upload_bytes() -> int:
         return DEFAULT_MAX_UPLOAD_BYTES
 
 
+def form_flag(value: str | None, *, default: bool) -> bool:
+    """Read a form flag that defaults to true.
+
+    FastAPI 0.161 (with Pydantic 2.14) coerces an *omitted* bool form field to
+    False even when the declared default is True, so `run_sync: bool =
+    Form(True)` silently skipped sync after the upgrade. Taking the raw string
+    keeps the default explicit and independent of the installed version.
+    """
+
+    if value is None or not value.strip():
+        return default
+    return value.strip().lower() not in {"false", "0", "no", "off"}
+
+
 def check_api_key(x_api_key: str | None) -> None:
     expected = os.environ.get("INGEST_API_KEY")
     if expected and not hmac.compare_digest(x_api_key or "", expected):
@@ -431,12 +445,13 @@ def ingest(
     metadata: UploadFile | None = File(None, description="the department's own metadata CSV (name,business_description,tag)"),
     sheet: str | None = Form(None, description="worksheet name, for an .xlsx upload"),
     dry_run: bool = Form(False, description="true: show what would change, change nothing"),
-    run_sync: bool = Form(True, description="false: only upload and update catalog.yaml (like the add command); sync later"),
+    run_sync: str | None = Form(None, description="true|false (default true): false only uploads and updates catalog.yaml, like the add command"),
     x_confirm_environment: str | None = Header(None),
     x_api_key: str | None = Header(None),
 ) -> dict:
     rt = runtime()
     check_access(rt, dry_run, x_confirm_environment, x_api_key)
+    sync_requested = form_flag(run_sync, default=True)
     if field_dictionary and table:
         raise HTTPException(
             422,
@@ -453,7 +468,7 @@ def ingest(
                 "fix": "name the table, or send field_dictionary=true for a multi-table field dictionary",
             },
         )
-    if not dry_run and run_sync:
+    if not dry_run and sync_requested:
         check_publish_available(rt, dry_run)
     if not file.filename:
         raise HTTPException(422, {"problem": "the file has no name", "fix": "upload the department's file with its file name"})
@@ -542,7 +557,7 @@ def ingest(
                 rt["storage"].write_bytes(original_key, raw.read_bytes())
                 changes.insert(0, f"kept the original workbook as {original_key}")
 
-            if not run_sync:
+            if not sync_requested:
                 keep = True
                 backed_up = backup_after_run(rt["storage"])
                 return {

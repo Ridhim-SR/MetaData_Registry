@@ -146,6 +146,21 @@ def test_add_only_uploads_and_registers_but_does_not_sync(client):
     assert not state["storage"].exists("_lookups/tables.csv")  # nothing ingested yet
 
 
+def test_run_sync_defaults_to_true_when_the_field_is_omitted(client):
+    """FastAPI 0.161 turns an omitted bool Form into False even when its
+    default is True, which silently skipped sync. The default must not depend
+    on the installed FastAPI version."""
+
+    c, _, _ = client
+    r = _post(c, headers={"X-Confirm-Environment": "local"})
+    assert r.status_code == 200, r.text
+    assert r.json()["tables"][0]["store"] == "ingested"
+
+    explicit = _post(c, headers={"X-Confirm-Environment": "local"}, run_sync="true")
+    assert explicit.status_code == 200, explicit.text
+    assert explicit.json()["tables"][0]["store"] == "unchanged"
+
+
 def test_sync_after_add_ingests_it(client):
     c, _, state = client
     ok = {"X-Confirm-Environment": "local"}
