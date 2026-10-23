@@ -284,6 +284,10 @@ CLAUDE.md
 # Repository review findings -- working record of modularity issues, not for commit
 /REPO_REVIEW_ISSUES.txt
 
+# Runtime lock for catalog.yaml, and the temp file used for its atomic write
+catalog.yaml.lock
+.catalog.yaml.*.tmp
+
 # Separate ingestion pipeline (not wired into schema_registry)
 /data_services/src/ingestion/
 /data_services/data/

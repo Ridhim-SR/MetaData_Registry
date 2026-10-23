@@ -23,11 +23,16 @@ Then commit catalog.yaml (open a PR) and run sync.
 
 import argparse
 import io
+import os
 import re
 import sys
+import tempfile
+import time
+from contextlib import nullcontext
 from pathlib import Path
 
 import yaml
+from filelock import FileLock
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap
 from ruamel.yaml.scalarstring import DoubleQuotedScalarString
@@ -45,6 +50,47 @@ logger = get_logger(__name__)
 DEFAULT_CATALOG = Path(__file__).resolve().parents[2] / "catalog.yaml"
 _NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_ -]{0,99}$")
 _DATASET_FIELD_KEYS = ("category", "owner", "steward", "frequency", "timeline", "api_available", "description")
+_LOCK_TIMEOUT_SECONDS = 120
+_REPLACE_ATTEMPTS = 5
+
+
+def catalog_lock(catalog_path: str | Path) -> FileLock:
+    """Cross-process lock for one catalog.yaml.
+
+    The ingest API serializes threads with its own lock, but two uvicorn
+    workers (or a worker plus a CLI `add`) are separate processes; without
+    this they read the same YAML, each add a table and the last writer wins.
+    """
+
+    return FileLock(f"{catalog_path}.lock", timeout=_LOCK_TIMEOUT_SECONDS)
+
+
+def write_catalog_text(catalog_path: str | Path, text: str) -> None:
+    """Write catalog.yaml atomically (temp file in the same folder + replace).
+
+    A crash during a plain write_text() left a truncated catalog -- i.e. the
+    whole registry. os.replace is atomic on one filesystem.
+    """
+
+    path = Path(catalog_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_path = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        for attempt in range(_REPLACE_ATTEMPTS):
+            try:
+                os.replace(temp_path, path)
+                return
+            except PermissionError:  # Windows: antivirus/indexer holds the target briefly
+                if attempt == _REPLACE_ATTEMPTS - 1:
+                    raise
+                time.sleep(0.1 * (attempt + 1))
+    except BaseException:
+        Path(temp_path).unlink(missing_ok=True)
+        raise
 
 
 def input_key(department: str, dataset: str, file_name: str) -> str:
@@ -56,11 +102,17 @@ def guess_format(path: str) -> str:
 
 
 def _check_name(kind: str, value: str) -> None:
-    """Dataset and table names become folder names and catalog keys, so '/', '.', '..' and the like are refused."""
+    """Dataset and table names become folder names and catalog keys, so '/', '.', '..' and the like are refused.
+    Surrounding or repeated spaces are refused too: "works " and "works" slugify to the same id, so accepting
+    both would create two catalog keys for one registry entry."""
 
     if not _NAME_RE.match(value or ""):
         raise ValueError(
             f"{kind} name '{value}' isn't allowed -- use letters, digits, _ - and spaces only (up to 100 characters)"
+        )
+    if value != value.strip() or "  " in value:
+        raise ValueError(
+            f"{kind} name '{value}' isn't allowed -- remove leading, trailing or repeated spaces"
         )
 
 
@@ -94,12 +146,19 @@ def update_catalog_text(
     schema: str | None = None,
     metadata_ref: str | None = None,
     dataset_fields: dict | None = None,
+    allow_column_removal: bool | None = None,
+    shared_source_ok: bool = False,
 ) -> tuple[str, list[str]]:
     """Return catalog.yaml text with the entry added or updated, plus a
     list of what changed (empty = already up to date). Comments and the
     order of everything else are kept. table=None means `source_ref` is the
     dataset's field dictionary. `dataset_fields` ({category: ..., owner: ...}):
-    non-blank values are written to the dataset; blanks leave it as it is."""
+    non-blank values are written to the dataset; blanks leave it as it is.
+
+    `shared_source_ok` is for a multi-table file (agri_dept's one CSV holds
+    several tables): the caller has checked that the bytes already stored at
+    `source_ref` are exactly the bytes it is uploading, so sharing it cannot
+    hide another table's data. Metadata is always table-specific."""
 
     _check_name("Dataset", dataset)
     if table is not None:
@@ -150,19 +209,29 @@ def update_catalog_text(
         tables = ds.get("tables")
         if tables is None:
             tables = ds["tables"] = CommentedMap()
-        for other, other_entry in tables.items():  # two tables must never share one stored file
-            used = {other_entry.get("source"), other_entry.get("metadata")}
-            if other != table and (source_ref in used or (metadata_ref and metadata_ref in used)):
-                shared = source_ref if source_ref in used else metadata_ref
-                raise ValueError(
-                    f"'{shared.rsplit('/', 1)[-1]}' is already the file of table '{other}' in {department}/{dataset}, "
-                    f"and uploading it again would overwrite it -- give this table's file its own name"
-                )
+        for other, other_entry in tables.items():
+            if other == table:
+                continue
+            # A table's metadata file is table-specific: never share that.
+            # Sharing a *source* is allowed only when the caller proved the
+            # stored bytes are identical (a multi-table workbook/CSV).
+            if metadata_ref and metadata_ref in {other_entry.get("source"), other_entry.get("metadata")}:
+                shared = metadata_ref
+            elif other_entry.get("source") == source_ref and not shared_source_ok:
+                shared = source_ref
+            else:
+                continue
+            raise ValueError(
+                f"'{shared.rsplit('/', 1)[-1]}' is already the file of table '{other}' in {department}/{dataset}, "
+                f"and uploading it again would overwrite it -- give this table's file its own name"
+            )
         wanted = {"source": source_ref, "format": file_format or guess_format(source_ref)}
         if schema:
             wanted["schema"] = schema
         if metadata_ref:
             wanted["metadata"] = metadata_ref
+        if allow_column_removal:
+            wanted["allow_column_removal"] = True
         entry = tables.get(table)
         if entry is None:
             tables[table] = CommentedMap(wanted)
@@ -192,10 +261,16 @@ def add(
     schema: str | None = None,
     metadata_file: str | None = None,
     dataset_fields: dict | None = None,
+    allow_column_removal: bool | None = None,
+    lock: bool = True,
 ) -> list[str]:
     """Upload `file` (and `metadata_file`) and update catalog.yaml. The
     catalog change is worked out and checked first, so a mistake (unknown
-    department without a name, bad id) uploads nothing."""
+    department without a name, bad id) uploads nothing.
+
+    `lock=False` is for a caller that already holds `catalog_lock()` around
+    this call (the ingest API does, so it can restore the same catalog text on
+    a failed sync)."""
 
     if lookups.slugify(department) != department:
         raise ValueError(f"--department must be lowercase letters, digits and _ (try '{lookups.slugify(department)}')")
@@ -211,23 +286,35 @@ def add(
     source_key = input_key(department, dataset, Path(file).name)
     metadata_key = input_key(department, dataset, Path(metadata_file).name) if metadata_file else None
     catalog_path = Path(catalog_path)
-    new_text, changes = update_catalog_text(
-        catalog_path.read_text(encoding="utf-8") if catalog_path.exists() else "",
-        department, dataset, f"{inputs.STORAGE_SCHEME}{source_key}",
-        department_name=department_name, table=table,
-        file_format=file_format or (guess_format(file) if table else None), schema=schema,
-        metadata_ref=f"{inputs.STORAGE_SCHEME}{metadata_key}" if metadata_key else None,
-        dataset_fields=dataset_fields,
-    )
+    source_bytes = Path(file).read_bytes()
+    with (catalog_lock(catalog_path) if lock else nullcontext()):
+        before = catalog_path.read_text(encoding="utf-8") if catalog_path.exists() else ""
+        # agri_dept's one CSV holds several tables side by side, so the same
+        # source file is legitimately shared. Allow that only when the bytes
+        # already stored are the bytes we are uploading -- a different file
+        # with a colliding name could still hide another table's data.
+        shared_source_ok = bool(
+            table and storage.exists(source_key) and storage.read_bytes(source_key) == source_bytes
+        )
+        new_text, changes = update_catalog_text(
+            before,
+            department, dataset, f"{inputs.STORAGE_SCHEME}{source_key}",
+            department_name=department_name, table=table,
+            file_format=file_format or (guess_format(file) if table else None), schema=schema,
+            metadata_ref=f"{inputs.STORAGE_SCHEME}{metadata_key}" if metadata_key else None,
+            dataset_fields=dataset_fields,
+            allow_column_removal=allow_column_removal,
+            shared_source_ok=shared_source_ok,
+        )
 
-    for local, key in [(file, source_key), (metadata_file, metadata_key)]:
-        if local:
-            data = Path(local).read_bytes()
-            storage.write_bytes(key, data)
-            changes.insert(0, f"uploaded {local} -> {key} (sha256 {inputs.sha256(data)[:12]}...)")
+        for local, key in [(file, source_key), (metadata_file, metadata_key)]:
+            if local:
+                data = source_bytes if local == file else Path(local).read_bytes()
+                storage.write_bytes(key, data)
+                changes.insert(0, f"uploaded {local} -> {key} (sha256 {inputs.sha256(data)[:12]}...)")
 
-    if new_text != (catalog_path.read_text(encoding="utf-8") if catalog_path.exists() else ""):
-        catalog_path.write_text(new_text, encoding="utf-8")
+        if new_text != before:
+            write_catalog_text(catalog_path, new_text)
     return changes
 
 

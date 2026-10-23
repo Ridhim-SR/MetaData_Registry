@@ -107,9 +107,16 @@ def parse_catalog(text: str) -> list[DepartmentEntry]:
             raise CatalogError(f"{where}: department id must be lowercase letters, digits and _ (try '{lookups.slugify(str(dept_id))}')")
         dept = _check_keys(where, dept, {"name", "datasets"}, {"name"})
         entry = DepartmentEntry(id=str(dept_id), name=_text(dept["name"]))
+        seen_datasets: dict[str, str] = {}
 
         for ds_name, ds in (dept.get("datasets") or {}).items():
             ds_where = f"{where}.datasets.{ds_name}"
+            ds_slug = lookups.slugify(str(ds_name))
+            if ds_slug in seen_datasets:
+                raise CatalogError(
+                    f"{ds_where}: same dataset id '{ds_slug}' as '{seen_datasets[ds_slug]}' -- rename one of them"
+                )
+            seen_datasets[ds_slug] = str(ds_name)
             ds = _check_keys(
                 ds_where, ds or {},
                 set(_DATASET_FIELD_KEYS) | {"tables", "field_dictionary", "allow_category_below_columns"},

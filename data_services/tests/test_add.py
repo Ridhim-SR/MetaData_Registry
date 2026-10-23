@@ -199,6 +199,27 @@ def test_dataset_and_table_names_with_odd_characters_are_refused(bad):
         update_catalog_text("departments:\n", "pwd", "ds", "storage:x", department_name="P", table=bad)
 
 
+@pytest.mark.parametrize("bad", ["works ", " works", "two  spaces"])
+def test_surrounding_or_repeated_spaces_are_refused(bad):
+    with pytest.raises(ValueError, match="spaces"):
+        update_catalog_text("departments:\n", "pwd", "ds", "storage:x", department_name="P", table=bad)
+    with pytest.raises(ValueError, match="spaces"):
+        update_catalog_text("departments:\n", "pwd", bad, "storage:x", department_name="P", table="t")
+
+
+def test_allow_column_removal_is_written_only_when_requested():
+    text, _ = update_catalog_text(
+        "departments:\n", "pwd", "ds", "storage:x", department_name="P", table="t",
+        allow_column_removal=True,
+    )
+    table = load_catalog_from_text(text)[0].datasets[0].tables[0]
+    assert table.allow_column_removal is True
+
+    text, _ = update_catalog_text(text, "pwd", "ds", "storage:y", table="t")
+    table = load_catalog_from_text(text)[0].datasets[0].tables[0]
+    assert table.allow_column_removal is True  # omitted argument must not reset the flag
+
+
 def test_values_a_yaml_reader_would_change_are_quoted_and_read_back_exactly():
     values = {"owner": "yes", "steward": "no", "frequency": "1:30", "timeline": "null", "description": "Works: roads"}
     text, _ = update_catalog_text("departments:\n", "pwd", "ds", "storage:x", department_name="P", table="t",
@@ -216,3 +237,38 @@ def test_two_tables_cannot_share_one_file_name():
     # the same table re-sending its own file name is fine
     again, changes = update_catalog_text(text, "pwd", "ds", "storage:inputs/pwd/ds/same.txt", table="first")
     assert changes == []
+
+
+def test_same_multi_table_file_may_be_shared_with_identical_bytes(setup):
+    """agri_dept's one CSV holds several tables; re-sending it for another
+    table is safe when storage already has exactly those bytes."""
+
+    storage, catalog, _, tmp_path = setup
+    multi = tmp_path / "multi.csv"
+    multi.write_text("name,data_type\na,integer\n")
+    add(storage, catalog, str(multi), "pwd", "ds", table="first")
+
+    changes = add(storage, catalog, str(multi), "pwd", "ds", table="second")
+
+    assert "added table pwd/ds/second" in changes
+    (dept,) = load_catalog(catalog)
+    dataset = next(d for d in dept.datasets if d.name == "ds")
+    tables = {table.name: table for table in dataset.tables}
+    assert tables["first"].source == tables["second"].source == "storage:inputs/pwd/ds/multi.csv"
+
+
+def test_different_bytes_under_the_same_file_name_are_still_refused(setup):
+    storage, catalog, _, tmp_path = setup
+    original = tmp_path / "multi.csv"
+    original.write_text("name,data_type\na,integer\n")
+    add(storage, catalog, str(original), "pwd", "ds", table="first")
+    before = catalog.read_text()
+
+    collides = tmp_path / "other" / "multi.csv"
+    collides.parent.mkdir()
+    collides.write_text("name,data_type\nb,character varying\n")
+    with pytest.raises(ValueError, match="already the file of table 'first'"):
+        add(storage, catalog, str(collides), "pwd", "ds", table="second")
+
+    assert storage.read_bytes("inputs/pwd/ds/multi.csv") == original.read_bytes()
+    assert catalog.read_text() == before

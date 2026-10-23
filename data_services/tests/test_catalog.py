@@ -49,6 +49,28 @@ def test_mistakes_fail_with_the_place_to_fix(bad, message):
         parse_catalog(bad)
 
 
+def test_two_datasets_that_slugify_alike_are_refused():
+    text = (
+        "departments:\n"
+        "  pwd:\n"
+        "    name: Public Works\n"
+        "    datasets:\n"
+        "      My Data:\n"
+        "        category: CAT-2\n"
+        "        tables:\n"
+        "          t:\n"
+        "            source: storage:inputs/pwd/my_data/t.txt\n"
+        "      my_data:\n"
+        "        category: CAT-2\n"
+        "        tables:\n"
+        "          u:\n"
+        "            source: storage:inputs/pwd/my_data/u.txt\n"
+    )
+
+    with pytest.raises(CatalogError, match="same dataset id 'my_data'"):
+        parse_catalog(text)
+
+
 def test_load_catalog_reads_a_utf8_description(tmp_path):
     """Windows' locale codec is cp1252: a Hindi description must still load."""
 
