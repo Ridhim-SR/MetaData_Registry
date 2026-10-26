@@ -33,9 +33,9 @@ departments:
         owner: Public Works Department (PWD)
         steward:
         frequency: Daily
-        timeline:
+        timeline: "01-06-2019 - ongoing"
         api_available:
-        description: "Works managed by the Public Works Department under the Vishwakarma scheme: road and bridge works with their costs, year-wise funds, tenders, agreements, contractors, progress and locations."
+        description: "System to monitor all activities related to financial management of the sanctioned projects online. It is an end-to-end integration of all financial activities, right from sanction of the project to its completion, including all checks and balances."
         tables:
           vishwakarma_T:
             source: storage:inputs/pwd/vishwakarma/pwd_vishwakarma_full_raw_columns.txt

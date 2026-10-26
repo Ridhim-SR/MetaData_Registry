@@ -473,10 +473,12 @@ def _ensure_database(
         "/databases",
         _unwrap(database.id),
         {
+            "description": description or "",
             "tags": [t.model_dump(mode="json", exclude_none=True) for t in tags],
             "extension": extension,
             "owners": [o.model_dump(mode="json", exclude_none=True) for o in owners],
         },
+        op="add",
     )
     return database
 
