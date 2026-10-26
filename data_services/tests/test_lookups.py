@@ -42,8 +42,20 @@ def test_upsert_dataset_links_to_department(tmp_path):
             "frequency": "",
             "timeline": "",
             "dataset_description": "",
+            "dataset_type": "",
         }
     ]
+
+
+def test_upsert_dataset_carries_dataset_type_forward(tmp_path):
+    # dataset_type comes from catalog.yaml via sync's set_dataset_fields; a
+    # later pipeline run (upsert_dataset without it) must not blank it.
+    storage = LocalObjectStorage(tmp_path)
+    lookups.set_dataset_fields(storage, "pwd.vishwakarma", "pwd", "vishwakarma", {"dataset_type": "Administrative"})
+    lookups.upsert_dataset(storage, "pwd.vishwakarma", "pwd", "vishwakarma", owner="PWD")
+    row = storage.read_csv(lookups.DATASETS_PATH)[0]
+    assert row["dataset_type"] == "Administrative"
+    assert row["owner"] == "PWD"
 
 
 def test_upsert_dataset_governance_fields(tmp_path):

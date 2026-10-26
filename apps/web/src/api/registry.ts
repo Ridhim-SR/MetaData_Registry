@@ -6,6 +6,10 @@ export interface RegistryStats {
   departments: number;
   datasets: number;
   tables: number;
+  /** Visible datasets per CAT category ("CAT-1".."CAT-4", "unclassified"); sums to `datasets`. */
+  by_classification?: Record<string, number>;
+  /** Visible datasets per type ("Citizen Centric", "Administrative", "unspecified"); sums to `datasets`. */
+  by_dataset_type?: Record<string, number>;
 }
 
 export interface Department {
@@ -129,6 +133,8 @@ export interface DatasetCard {
   access_level: AccessLevel;
   /** Dataset CAT category ("CAT-1".."CAT-4") from OM DataSensitivity tags; drives access. */
   classification?: string | null;
+  /** "Citizen Centric" | "Administrative" from the OM datasetType custom property; null when not set. */
+  dataset_type?: string | null;
   department?: string | null;
   department_display?: string | null;
   /** Teaser cards carry locked:true and no tables. Full cards carry tables. */

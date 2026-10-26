@@ -23,7 +23,7 @@ import {
 } from "../utils/format";
 import { useAuth } from "../contexts/AuthContext";
 
-type Tab = "schema" | "about" | "lineage";
+type Tab = "schema" | "lineage";
 
 const COLS_PER_PAGE = 50;
 
@@ -249,8 +249,6 @@ export function TablePage() {
   const tableTags = table && !table.locked ? (table.tags ?? []) : [];
   const datasetTagNames: string[] = !isFull && card ? ((card as { tags?: string[] }).tags ?? []) : [];
 
-  const hasAbout =
-    Boolean(table?.description) || owners.length > 0 || tableTags.length > 0;
   const upstream: string[] = [];
   const downstream: string[] = [];
   for (const e of lineageQuery.data?.edges ?? []) {
@@ -263,19 +261,17 @@ export function TablePage() {
 
   const tabs: Array<{ id: Tab; label: string; show: boolean }> = [
     { id: "schema", label: "Schema", show: true },
-    { id: "about", label: "About", show: hasAbout },
     { id: "lineage", label: "Lineage", show: hasLineage },
   ];
 
   const describedCols = (table?.columns ?? []).filter((c) => (c.description ?? "").trim()).length;
   const totalCols = table?.columns?.length ?? 0;
 
-  // Completeness is computed from 4 strict table-level items (owner and
+  // Completeness is computed from 3 strict table-level items (owner and
   // steward are dataset-level): a column-descriptions item counts as done
   // only when every column has a description.
   const completenessItems = useMemo(
     () => [
-      { key: "description", label: "Description", done: Boolean(table?.description), count: null as string | null },
       { key: "classification", label: "Data classification", done: Boolean(classification), count: null as string | null },
       { key: "api", label: "API availability", done: apiAvailable != null, count: null as string | null },
       {
@@ -285,7 +281,7 @@ export function TablePage() {
         count: `${describedCols} / ${totalCols}`,
       },
     ],
-    [table, classification, apiAvailable, describedCols, totalCols],
+    [classification, apiAvailable, describedCols, totalCols],
   );
   const completenessDone = completenessItems.filter((i) => i.done).length;
   const completenessPct = Math.round((completenessDone / completenessItems.length) * 100);
@@ -558,38 +554,6 @@ export function TablePage() {
               </div>
             )}
 
-            {tab === "about" && hasAbout && (
-              <div className="mt-4 space-y-4" role="tabpanel" aria-label="About">
-                {table?.description && (
-                  <p className="text-sm" style={{ color: "var(--text)", fontSize: "0.9375rem" }}>{table.description}</p>
-                )}
-                {owners.length > 0 && (
-                  <div>
-                    <h3 className="font-semibold" style={{ color: "var(--navy-900)", fontSize: "1rem" }}>Owners</h3>
-                    <ul className="mt-1 list-disc pl-5 text-sm" style={{ color: "var(--text)" }}>
-                      {owners.map((o, i) => (
-                        <li key={o.id ?? o.fullyQualifiedName ?? o.name ?? i}>
-                          {o.displayName || o.name || "Not provided"}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-                {tableTags.length > 0 && (
-                  <div>
-                    <h3 className="font-semibold" style={{ color: "var(--navy-900)", fontSize: "1rem" }}>Tags</h3>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {tableTags.map((t, i) => (
-                        <span key={t.tagFQN ?? t.name ?? i} className="badge badge-neutral">
-                          {readableTag(t)}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
 
             {tab === "lineage" && hasLineage && (
               <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2" role="tabpanel" aria-label="Lineage">
@@ -740,7 +704,6 @@ export function TablePage() {
                           color: "var(--text-muted)",
                           fontSize: "11px",
                           fontWeight: 700,
-                          cursor: "help",
                         }}
                       >
                         <span aria-hidden="true">i</span>

@@ -270,6 +270,8 @@ async def registry_stats(
         "departments": len(profiles),
         "datasets": summary["datasets"],
         "tables": summary["tables"],
+        "by_classification": vis.count_by_classification(cards),
+        "by_dataset_type": vis.count_by_dataset_type(cards),
     }
 
 

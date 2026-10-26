@@ -277,7 +277,7 @@ def test_guest_department_restricted_teaser_locked_no_columns(client):
     assert set(card) <= {
         "dataset", "service", "database", "name", "description",
         "department", "department_display", "table_count", "access_level", "locked",
-        "tags", "updated_at", "classification",
+        "tags", "updated_at", "classification", "dataset_type",
     }
     assert card["tags"] == [] and card["updated_at"] is None
 
@@ -349,6 +349,29 @@ def test_guest_counts_identical_across_home_card_and_page(client):
     card = [d for d in directory["items"] if d["slug"] == "pwd"][0]
     assert card["dataset_count"] == page["total"] == len(page["datasets"])
     assert stats["tables"] == sum(c["table_count"] for c in catalog["items"])
+
+
+def test_guest_stats_by_classification_matches_catalog(client):
+    stats = _get(client, "/registry/stats")
+    catalog = _get(client, "/registry/datasets")
+    by_cat = stats["by_classification"]
+    assert set(by_cat) == {"CAT-1", "CAT-2", "CAT-3", "CAT-4", "unclassified"}
+    assert sum(by_cat.values()) == stats["datasets"]
+    for key in ("CAT-1", "CAT-2", "CAT-3", "CAT-4"):
+        assert by_cat[key] == sum(1 for c in catalog["items"] if c["classification"] == key)
+    assert by_cat["CAT-1"] >= 1  # pub.db is tagged CAT-1
+
+
+def test_guest_stats_by_dataset_type_matches_catalog(client, monkeypatch):
+    db = next(d for d in DATABASES if d["fullyQualifiedName"] == "pub.db")
+    monkeypatch.setitem(db, "extension", {**(db.get("extension") or {}), "datasetType": "Citizen Centric"})
+    stats = _get(client, "/registry/stats")
+    catalog = _get(client, "/registry/datasets")
+    by_type = stats["by_dataset_type"]
+    assert set(by_type) == {"Citizen Centric", "Administrative", "unspecified"}
+    assert sum(by_type.values()) == stats["datasets"]
+    assert by_type["Citizen Centric"] == 1
+    assert [c["dataset_type"] for c in catalog["items"] if c["dataset"] == "pub.db"] == ["Citizen Centric"]
 
 
 def test_guest_legacy_schema_fqn_resolves_to_database(client):
@@ -755,6 +778,10 @@ def test_cat4_dataset_hidden_from_guests(client, monkeypatch):
     _tag_database(monkeypatch, "pub.db", 4)
     assert client.get("/registry/datasets/by-fqn", params={"fqn": "pub.db"}).status_code == 404
     assert client.get("/registry/tables/t-pub").status_code == 404
+    # Not counted either: guests never learn that a CAT-4 dataset exists.
+    stats = _get(client, "/registry/stats")
+    assert stats["by_classification"]["CAT-4"] == 0
+    assert sum(stats["by_classification"].values()) == stats["datasets"]
 
 
 def test_responses_carry_server_timing_breakdown(client):
