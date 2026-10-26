@@ -7,7 +7,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from src.openmetadata.visibility import (  # noqa: E402
     can_view_full,
+    count_by_classification,
+    count_by_dataset_type,
     dataset_fqn,
+    effective_visibility_map,
     group_datasets,
     normalize_dataset_fqn,
     normalize_visibility,
@@ -163,7 +166,7 @@ def test_visible_catalog_guest_teaser_fields_only():
     assert set(card) == {
         "dataset", "service", "database", "name", "description",
         "department", "table_count", "access_level", "locked",
-        "tags", "updated_at", "classification",
+        "tags", "updated_at", "classification", "dataset_type",
     }
     assert card["tags"] == [] and card["updated_at"] is None
 
@@ -186,6 +189,55 @@ def test_summarize_cards_counts_match_lists():
         {"dataset": "b.db", "table_count": 0},
     ]
     assert summarize_cards(cards) == {"datasets": 2, "tables": 2}
+
+
+def test_count_by_classification_always_lists_every_category():
+    cards = [
+        {"dataset": "a.db", "classification": "CAT-1"},
+        {"dataset": "b.db", "classification": "CAT-3"},
+        {"dataset": "c.db", "classification": "CAT-3"},
+        {"dataset": "d.db", "classification": None},
+        {"dataset": "e.db", "classification": "CAT-9"},  # unknown -> unclassified
+    ]
+    counts = count_by_classification(cards)
+    assert counts == {"CAT-1": 1, "CAT-2": 0, "CAT-3": 2, "CAT-4": 0, "unclassified": 2}
+    assert sum(counts.values()) == len(cards)
+    assert count_by_classification([]) == {"CAT-1": 0, "CAT-2": 0, "CAT-3": 0, "CAT-4": 0, "unclassified": 0}
+
+
+def test_dataset_type_read_from_database_custom_property():
+    tables = [{"fullyQualifiedName": f"a.{d}.s.t"} for d in ("cit", "adm", "odd", "none")]
+    databases = [
+        {"fullyQualifiedName": "a.cit", "extension": {"datasetType": "Citizen Centric"}},
+        {"fullyQualifiedName": "a.adm", "extension": {"datasetType": " administrative "}},
+        {"fullyQualifiedName": "a.odd", "extension": {"datasetType": "Other"}},
+        {"fullyQualifiedName": "a.none", "extension": {"datasetType": ""}},
+    ]
+    vmap = {t["fullyQualifiedName"]: {"visibility": "public"} for t in tables}
+    cards = {c["dataset"]: c for c in visible_catalog(tables, databases, vmap, None)}
+    assert cards["a.cit"]["dataset_type"] == "Citizen Centric"
+    assert cards["a.adm"]["dataset_type"] == "Administrative"  # case/space tolerant
+    assert cards["a.odd"]["dataset_type"] is None and cards["a.none"]["dataset_type"] is None
+    counts = count_by_dataset_type(list(cards.values()))
+    assert counts == {"Citizen Centric": 1, "Administrative": 1, "unspecified": 2}
+    assert count_by_dataset_type([]) == {"Citizen Centric": 0, "Administrative": 0, "unspecified": 0}
+
+
+def test_count_by_classification_never_counts_cat4_for_non_admins():
+    tables = [
+        {"fullyQualifiedName": "a.open.s.t"},
+        {"fullyQualifiedName": "a.secret.s.t"},
+    ]
+    databases = [
+        {"fullyQualifiedName": "a.open", "tags": [{"tagFQN": "DataSensitivity.CAT-1"}]},
+        {"fullyQualifiedName": "a.secret", "tags": [{"tagFQN": "DataSensitivity.CAT-4"}]},
+    ]
+    vmap = effective_visibility_map(tables, databases, {})
+    for viewer in (None, {"role": "user", "department": "a"}):
+        counts = count_by_classification(visible_catalog(tables, databases, vmap, viewer))
+        assert counts["CAT-1"] == 1 and counts["CAT-4"] == 0
+    admin = count_by_classification(visible_catalog(tables, databases, vmap, {"role": "admin"}))
+    assert admin["CAT-1"] == 1 and admin["CAT-4"] == 1
 
 
 def test_viewer_key_classes():

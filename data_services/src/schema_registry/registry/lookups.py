@@ -150,6 +150,7 @@ def upsert_dataset(
     frequency: str = "",
     timeline: str = "",
     dataset_description: str = "",
+    dataset_type: str = "",
 ) -> None:
     """Dataset-level fields (per the governance meeting): `category` (MDSF
     CAT-1/2/3/4 -- the dataset's overall classification, separate from
@@ -181,6 +182,9 @@ def upsert_dataset(
             "frequency": frequency or existing.get("frequency", ""),
             "timeline": timeline or existing.get("timeline", ""),
             "dataset_description": dataset_description or existing.get("dataset_description", ""),
+            # Set from catalog.yaml by sync (set_dataset_fields); carried
+            # forward here so a pipeline run never blanks it.
+            "dataset_type": dataset_type or existing.get("dataset_type", ""),
         }
 
     # The carry-forward merge runs inside _upsert's lock -- reading the
@@ -190,7 +194,9 @@ def upsert_dataset(
     logger.info(f"Dataset {'updated' if existing else 'created'}: {dataset_id}")
 
 
-DATASET_FIELDS = ("category", "api_available", "owner", "steward", "frequency", "timeline", "dataset_description")
+DATASET_FIELDS = (
+    "category", "dataset_type", "api_available", "owner", "steward", "frequency", "timeline", "dataset_description",
+)
 
 
 def set_dataset_fields(storage: ObjectStorage, dataset_id: str, department_id: str, dataset_name: str, fields: dict) -> bool:

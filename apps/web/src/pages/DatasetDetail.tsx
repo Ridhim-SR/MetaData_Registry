@@ -183,7 +183,6 @@ export function DatasetDetailPage() {
                     key={t.id}
                     dataset={query.data.dataset}
                     name={t.name}
-                    description={t.description}
                     columnCount={t.columns?.length ?? 0}
                   />
                 ))}
@@ -258,12 +257,10 @@ function DatasetFact({ label, value }: { label: string; value: string | null | u
 function TableCard({
   dataset,
   name,
-  description,
   columnCount,
 }: {
   dataset: string;
   name: string;
-  description?: string | null;
   columnCount: number;
 }) {
   const navigate = useNavigate();
@@ -297,15 +294,6 @@ function TableCard({
       <div className="font-semibold" style={{ color: "var(--navy-900)", fontSize: "1rem" }}>
         {humanizeRaw(name) || "Not provided"}
       </div>
-      {description ? (
-        <div className="clamp-2 mt-1 text-sm" style={{ color: "var(--text)", fontSize: "0.9375rem" }}>
-          {description}
-        </div>
-      ) : (
-        <div className="not-provided mt-1 text-sm" style={{ fontSize: "0.9375rem" }}>
-          No description
-        </div>
-      )}
       <div className="mt-3" style={{ color: "var(--text-muted)", fontSize: "0.8125rem" }}>
         {columnCount} columns
       </div>

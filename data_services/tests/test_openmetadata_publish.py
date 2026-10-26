@@ -259,6 +259,7 @@ def test_publish_table_clears_stale_category_and_description_on_republish(tmp_pa
         "datasetSteward": "A Steward",
         "frequency": "",
         "timeline": "",
+        "datasetType": "",
     }
 
     # now clear both -- upsert_dataset() itself carries forward unmentioned
@@ -278,7 +279,9 @@ def test_publish_table_clears_stale_category_and_description_on_republish(tmp_pa
 
     patch_body = _last_patch_body(client, "/databases/")
     assert patch_body["/tags"] == []
-    assert patch_body["/extension"] == {"apiAvailable": "", "datasetOwner": "", "datasetSteward": "", "frequency": "", "timeline": ""}
+    assert patch_body["/extension"] == {
+        "apiAvailable": "", "datasetOwner": "", "datasetSteward": "", "frequency": "", "timeline": "", "datasetType": "",
+    }
 
     # the PUT carries only the non-MDSF tags; the curated MDSF
     # classifications (plus the tags submitted in the metadata file) land in

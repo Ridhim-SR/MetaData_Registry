@@ -54,6 +54,19 @@ def cat_level(entity: dict | None) -> int | None:
     return max(levels) if levels else None
 
 
+# Dataset type, the `datasetType` custom property on an OM database (set from
+# catalog.yaml's `dataset_type` by data_services sync).
+DATASET_TYPE_PROPERTY = "datasetType"
+DATASET_TYPES = ("Citizen Centric", "Administrative")
+
+
+def dataset_type(database: dict | None) -> str | None:
+    """The dataset's type if its OM database carries a known one, else None."""
+    raw = ((database or {}).get("extension") or {}).get(DATASET_TYPE_PROPERTY)
+    value = raw.strip() if isinstance(raw, str) else ""
+    return next((t for t in DATASET_TYPES if t.lower() == value.lower()), None)
+
+
 def _max_level(*levels: int | None) -> int | None:
     known = [lvl for lvl in levels if lvl is not None]
     return max(known) if known else None
@@ -304,6 +317,7 @@ def visible_catalog(
         # Dataset CAT badge: the dataset tag, raised by any listed table's tag.
         level = _max_level(cat_level(dbs.get(key)), entry["cat"])
         classification = f"CAT-{level}" if level is not None else None
+        kind = dataset_type(dbs.get(key))
         table_count = len(entry["full"]) + entry["teasers"]
         if entry["full"]:
             slim = [
@@ -334,6 +348,7 @@ def visible_catalog(
                     "table_count": table_count,
                     "access_level": entry["level"],
                     "classification": classification,
+                    "dataset_type": kind,
                     "locked": False,
                     "tables": slim,
                     "tags": tag_set,
@@ -352,6 +367,7 @@ def visible_catalog(
                     "table_count": table_count,
                     "access_level": entry["level"],
                     "classification": classification,
+                    "dataset_type": kind,
                     "locked": True,
                     "tags": [],
                     "updated_at": None,
@@ -366,3 +382,40 @@ def summarize_cards(cards: list[dict]) -> dict:
         "datasets": len(cards),
         "tables": sum(c.get("table_count", 0) for c in cards),
     }
+
+
+UNCLASSIFIED = "unclassified"
+
+
+def count_by_classification(cards: list[dict]) -> dict[str, int]:
+    """Dataset counts per CAT category over the exact cards a viewer sees.
+
+    Every category is always present (0 when empty); cards without a CAT
+    badge count as "unclassified". The values sum to len(cards), so the
+    breakdown always matches the dataset total. CAT-4 cards only exist for
+    admins (visible_catalog drops them for everyone else), so non-admins
+    always get CAT-4: 0 and never learn that confidential datasets exist.
+    """
+    counts = {f"CAT-{level}": 0 for level in sorted(CAT_VISIBILITY)}
+    counts[UNCLASSIFIED] = 0
+    for card in cards:
+        key = card.get("classification")
+        counts[key if key in counts else UNCLASSIFIED] += 1
+    return counts
+
+
+UNSPECIFIED = "unspecified"
+
+
+def count_by_dataset_type(cards: list[dict]) -> dict[str, int]:
+    """Dataset counts per dataset type over the exact cards a viewer sees.
+
+    Same contract as count_by_classification: every type is always present,
+    cards without a type count as "unspecified", values sum to len(cards).
+    """
+    counts = {t: 0 for t in DATASET_TYPES}
+    counts[UNSPECIFIED] = 0
+    for card in cards:
+        key = card.get("dataset_type")
+        counts[key if key in counts else UNSPECIFIED] += 1
+    return counts

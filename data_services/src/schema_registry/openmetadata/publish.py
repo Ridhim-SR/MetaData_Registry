@@ -359,6 +359,7 @@ _CUSTOM_PROPERTY_NAMES = {
     "steward": "datasetSteward",
     "frequency": "frequency",
     "timeline": "timeline",
+    "dataset_type": "datasetType",
 }
 
 
@@ -814,6 +815,7 @@ def publish_table(
             "steward": dataset_row.get("steward", ""),
             "frequency": dataset_row.get("frequency", ""),
             "timeline": dataset_row.get("timeline", ""),
+            "dataset_type": dataset_row.get("dataset_type", ""),
         },
         owner_ref=_resolve_owner(client, dataset_row.get("owner", "")),
     )
