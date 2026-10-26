@@ -282,7 +282,7 @@ def test_publish_table_clears_stale_category_and_description_on_republish(tmp_pa
 
     patch_body = _last_patch_body(client, "/databases/")
     assert patch_body["/tags"] == []
-    assert patch_body["/extension"] == {"apiAvailable": "", "datasetOwner": "", "datasetSteward": "", "frequency": "", "timeline": ""}
+    assert patch_body["/extension"] == {"apiAvailable": "", "datasetOwner": "", "datasetSteward": "", "frequency": "", "timeline": "", "datasetType": ""}
     assert patch_body["/description"] == ""
 
     # the PUT carries only the non-MDSF tags; the curated MDSF
