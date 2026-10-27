@@ -33,6 +33,7 @@ _DATASET_FIELD_KEYS = {
     "frequency": "frequency",
     "timeline": "timeline",
     "description": "dataset_description",
+    "source_url": "source_url",
 }
 
 
