@@ -49,6 +49,7 @@ departments:
         category: CAT-3
         owner: Agriculture Department
         steward:
+        dataset_type: Citizen Centric
         frequency:
         timeline:
         api_available:
@@ -83,6 +84,7 @@ departments:
         category: CAT-3
         owner: Agriculture Department
         steward:
+        dataset_type: Citizen Centric
         frequency:
         timeline:
         api_available:
@@ -100,6 +102,7 @@ departments:
         category: CAT-3
         owner: Agriculture Department
         steward:
+        dataset_type: Administrative
         frequency:
         timeline:
         api_available:
@@ -128,6 +131,7 @@ departments:
         category: CAT-1
         owner: Rural Development Department
         steward:
+        dataset_type: Citizen Centric
         frequency: yearly
         timeline: 2014-15 to 2025-26
         api_available: N
@@ -143,6 +147,7 @@ departments:
         category: CAT-1
         owner: Rural Development Department
         steward:
+        dataset_type: Administrative
         frequency: yearly
         timeline: 2023-27
         api_available: N
@@ -162,6 +167,7 @@ departments:
         category: CAT-1
         owner: Rural Development Department
         steward:
+        dataset_type: Citizen Centric
         frequency:
         timeline:
         api_available: N
