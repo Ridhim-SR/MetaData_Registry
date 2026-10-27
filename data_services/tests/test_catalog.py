@@ -85,4 +85,4 @@ def test_shipped_catalog_is_valid():
     # another team's; commenting it out here would silently disable their
     # data the moment this branch merges into main, so the list is asserted
     # in full rather than by membership.
-    assert [d.id for d in departments] == ["pwd", "agri_dept", "rural_development_department"]
+    assert [d.id for d in departments] == ["pwd", "agri_dept", "rural_development_department", "non_proprietary_data"]

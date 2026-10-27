@@ -188,7 +188,7 @@ departments:
         category: CAT-1
         dataset_type:
         owner: National Remote Sensing Centre, ISRO
-        source: https://bhuvan-app1.nrsc.gov.in/bhuvan_ntl/
+        source_url: https://bhuvan-app1.nrsc.gov.in/bhuvan_ntl/
         steward:
         frequency: Annual
         timeline:
