@@ -184,7 +184,7 @@ departments:
   non_proprietary_data:
     name: Non-Proprietary Data
     datasets:
-      night_time_light_ntl_over_india:
+      night_time_light_over_india:
         category: CAT-1
         dataset_type:
         owner: National Remote Sensing Centre, ISRO
