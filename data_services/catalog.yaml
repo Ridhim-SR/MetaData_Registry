@@ -181,3 +181,24 @@ departments:
             source: storage:inputs/rural_development_department/awas/awas_pmayg_category_progress_raw_columns.csv
             format: csv
             metadata: storage:inputs/rural_development_department/awas/awas_pmayg_category_progress_raw_columns_metadata.csv
+  non_proprietary_data:
+    name: Non-Proprietary Data
+    datasets:
+      night_time_light_ntl_over_india:
+        category: CAT-1
+        dataset_type:
+        owner: National Remote Sensing Centre, ISRO
+        source: https://bhuvan-app1.nrsc.gov.in/bhuvan_ntl/
+        steward:
+        frequency: Annual
+        timeline:
+        api_available: No
+        description: >-
+          State-wise annual night-time light (NTL) radiance for India, derived
+          from satellite imagery. Source: National Remote Sensing Centre (NRSC),
+          ISRO.
+        tables:
+          NightTimeLight:
+            source: storage:inputs/non_proprietary_data/night_time_light_ntl_over_india/NTL_schema_metadata.csv
+            format: csv
+            metadata: storage:inputs/non_proprietary_data/night_time_light_ntl_over_india/NTL_metadata.csv
