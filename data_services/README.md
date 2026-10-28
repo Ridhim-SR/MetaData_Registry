@@ -507,6 +507,8 @@ Log file: logs/sync_20261007_164556.log
 | Republish one table | `TABLE_ID=pwd.vishwakarma.vishwakarma_t python3 -m src.schema_registry.openmetadata.publish` |
 | Batch many tables from a manifest CSV | `MANIFEST_FILE=manifest.csv python3 -m src.schema_registry.batch` (add `OPENMETADATA_JWT_TOKEN` to publish each) |
 | Republish everything that never reached OpenMetadata | `python3 -m src.schema_registry.republish` (reads `_lookups/runs.csv`; exit 1 if any still fail) |
+| Backfill readable types into existing curated snapshots | `python3 -m src.schema_registry.backfill_readable [--dry-run] [--department <id>] [--exclude <table_id>] [--publish]` |
+| Readable type not showing in OpenMetadata | Add `--recreate` (with `--publish`): backs the entity up under `_lookups/om_recreate_backups/`, hard-deletes and republishes only tables whose stored `dataTypeDisplay` is stale |
 | Remove a (renamed/orphaned) table from OpenMetadata + the registry | `TABLE_ID=<id> python3 -m src.schema_registry.openmetadata.delete_table` (re-ingesting the id later brings it back) |
 | See who ran what, and whether it published | `storage/_lookups/runs.csv` (one row per run, including failed ones) |
 | Run all tests | `python3 -m pytest tests/` |
@@ -565,6 +567,7 @@ Every run adds new files with the time in the name, so the full history stays. O
 
 - Renaming or removing a table leaves the old one in OpenMetadata: `TABLE_ID=<id> python3 -m src.schema_registry.openmetadata.delete_table` removes it there and marks the registry row deleted (re-ingesting the id brings it back).
 - A renamed column needs `allow_column_removal`, and its description doesn't carry over.
+- OpenMetadata 2.0.2 ignores a changed `dataTypeDisplay` on an existing column whose type is unchanged; `backfill_readable --publish --recreate` hard-deletes and republishes the table (with a backup in storage) to make a later readable type visible.
 - Columns marked `active: false` are still published.
 - Personal-data detection misses many names (e.g. `bride_name`, `groom_dob`, `account_no`). Check sensitive tables by hand.
 - Numeric precision/scale (e.g. `numeric(10,2)`) is kept in the curated file for Postgres column lists only, and isn't sent to OpenMetadata.

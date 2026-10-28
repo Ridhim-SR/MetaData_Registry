@@ -17,6 +17,15 @@ alone.
     python -m src.schema_registry.backfill_readable --dry-run
     python -m src.schema_registry.backfill_readable --department pwd
     python -m src.schema_registry.backfill_readable --department pwd --publish
+    python -m src.schema_registry.backfill_readable --exclude dept.dataset.table
+
+`--exclude` (repeatable or comma-separated) leaves a known orphan alone: it
+is reported as `skipped` and no snapshot is written.
+
+`--recreate` (with `--publish`) repairs tables that OpenMetadata already
+has: 2.0.2 ignores a changed `dataTypeDisplay` on an existing column, so the
+table is backed up to storage, hard-deleted and republished when the stored
+readable type does not match the curated snapshot.
 
 A table whose latest snapshot already has `readable_type` is reported as
 `unchanged` and no new snapshot is written, so the command is idempotent.
@@ -32,6 +41,7 @@ import argparse
 import os
 import sys
 import uuid
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 from src.schema_registry.curate import readable_data_type, validate_unit
@@ -48,7 +58,7 @@ _BACKFILL_OPERATOR = "backfill_readable"
 @dataclass
 class Outcome:
     table_id: str
-    status: str  # backfilled | unchanged | would backfill | failed
+    status: str  # backfilled | unchanged | would backfill | skipped | failed
     publish: str = "-"  # "-" | published | failed
     detail: str = ""
 
@@ -77,12 +87,50 @@ def _needs_backfill(previous: list[dict], curated: list[dict]) -> bool:
     return False
 
 
+def _publish_outcome(
+    storage: ObjectStorage,
+    client,
+    table_id: str,
+    *,
+    status: str,
+    detail: str,
+    recreate: bool,
+    run_id: str | None = None,
+) -> Outcome:
+    """Publish (optionally repairing a stale readable type) and report it."""
+
+    from src.schema_registry.openmetadata.publish import (
+        publish_table,
+        publish_table_fixing_display,
+    )
+
+    try:
+        if recreate:
+            result = publish_table_fixing_display(client, storage, table_id)
+        else:
+            result = {**publish_table(client, storage, table_id), "status": "published", "columns": []}
+    except Exception as exc:  # noqa: BLE001 -- one bad table must not stop the rest
+        if run_id:
+            lookups.update_run(
+                storage, run_id, publish_status="failed", error=f"{type(exc).__name__}: {exc}"
+            )
+        logger.error(f"Publish failed for {table_id}: {exc}")
+        return Outcome(table_id, status, publish="failed", detail=f"{detail}; publish: {exc}")
+
+    if run_id:
+        lookups.update_run(storage, run_id, publish_status="published")
+    if result["status"] == "recreated":
+        detail = f"{detail}; recreated for display: {len(result['columns'])} column(s)"
+    return Outcome(table_id, status, publish=result["status"], detail=detail)
+
+
 def _backfill_table(
     storage: ObjectStorage,
     table_id: str,
     *,
     dry_run: bool,
     client=None,
+    recreate: bool = False,
 ) -> Outcome:
     department_id, dataset_slug, table_slug = _split_table_id(table_id)
     lock_path = paths.pipeline_lock_path(department_id, dataset_slug, table_slug)
@@ -120,7 +168,12 @@ def _backfill_table(
             curated.append(updated)
 
         if not _needs_backfill(previous, curated):
-            return Outcome(table_id, "unchanged", detail="latest curated snapshot already has readable_type")
+            detail = "latest curated snapshot already has readable_type"
+            if recreate and client is not None and not dry_run:
+                return _publish_outcome(
+                    storage, client, table_id, status="unchanged", detail=detail, recreate=True
+                )
+            return Outcome(table_id, "unchanged", detail=detail)
 
         ts = _timestamp()
         # The snapshot is new, so its rows should say when it was produced
@@ -153,17 +206,15 @@ def _backfill_table(
         if client is None:
             return Outcome(table_id, "backfilled", detail=detail)
 
-        from src.schema_registry.openmetadata.publish import publish_table
-
-        try:
-            publish_table(client, storage, table_id)
-        except Exception as exc:  # noqa: BLE001 -- one bad table must not stop the rest
-            lookups.update_run(storage, run_id, publish_status="failed", error=f"{type(exc).__name__}: {exc}")
-            logger.error(f"Publish failed for {table_id}: {exc}")
-            return Outcome(table_id, "backfilled", publish="failed", detail=f"{detail}; publish: {exc}")
-
-        lookups.update_run(storage, run_id, publish_status="published")
-        return Outcome(table_id, "backfilled", publish="published", detail=detail)
+        return _publish_outcome(
+            storage,
+            client,
+            table_id,
+            status="backfilled",
+            detail=detail,
+            recreate=recreate,
+            run_id=run_id,
+        )
 
 
 def backfill(
@@ -172,15 +223,20 @@ def backfill(
     department: str | None = None,
     dry_run: bool = False,
     client=None,
+    exclude: Iterable[str] | None = None,
+    recreate: bool = False,
 ) -> list[Outcome]:
     """Backfill every registered table (or one department's tables).
 
-    One failing table never stops the others -- its error is recorded in the
-    returned Outcome, exactly like `sync`."""
+    `exclude` names table ids to leave untouched (reported as `skipped`) --
+    for known orphans that should not gain the new columns. One failing table
+    never stops the others -- its error is recorded in the returned Outcome,
+    exactly like `sync`."""
 
     if not storage.exists(lookups.TABLES_PATH):
         raise ValueError(f"{lookups.TABLES_PATH} not found -- nothing registered in this storage")
 
+    excluded = set(exclude or ())
     rows = storage.read_csv(lookups.TABLES_PATH)
     if department:
         rows = [row for row in rows if row["table_id"].split(".")[0] == department]
@@ -191,8 +247,15 @@ def backfill(
         if row.get("deleted"):
             outcomes.append(Outcome(table_id, "skipped", detail="soft-deleted in the registry"))
             continue
+        if table_id in excluded:
+            outcomes.append(Outcome(table_id, "skipped", detail="excluded"))
+            continue
         try:
-            outcomes.append(_backfill_table(storage, table_id, dry_run=dry_run, client=client))
+            outcomes.append(
+                _backfill_table(
+                    storage, table_id, dry_run=dry_run, client=client, recreate=recreate
+                )
+            )
         except Exception as exc:  # noqa: BLE001
             logger.error(f"Backfill failed for {table_id}: {exc}")
             outcomes.append(Outcome(table_id, "failed", detail=str(exc)))
@@ -220,6 +283,21 @@ def _main(argv: list[str]) -> int:
     parser.add_argument("--department", default="", help="only this department id (e.g. pwd)")
     parser.add_argument("--dry-run", action="store_true", help="show what would change, write nothing")
     parser.add_argument("--publish", action="store_true", help="also republish each backfilled table")
+    parser.add_argument(
+        "--recreate",
+        action="store_true",
+        help=(
+            "with --publish: hard-delete and republish a table when OpenMetadata "
+            "ignored a changed readable type (backup kept in storage)"
+        ),
+    )
+    parser.add_argument(
+        "--exclude",
+        action="append",
+        default=[],
+        metavar="TABLE_ID",
+        help="table id to skip (repeatable, or comma-separated)",
+    )
     args = parser.parse_args(argv)
 
     load_env()
@@ -233,8 +311,18 @@ def _main(argv: list[str]) -> int:
             parser.error("--publish needs OPENMETADATA_JWT_TOKEN for this ENVIRONMENT (see .env)")
         client = get_client(host_port=host, jwt_token=token)
 
+    if args.recreate and not args.publish:
+        parser.error("--recreate needs --publish (it edits OpenMetadata)")
+
+    exclude = [item.strip() for value in args.exclude for item in value.split(",") if item.strip()]
+
     outcomes = backfill(
-        storage, department=args.department or None, dry_run=args.dry_run, client=client
+        storage,
+        department=args.department or None,
+        dry_run=args.dry_run,
+        client=client,
+        exclude=exclude,
+        recreate=args.recreate,
     )
     print_summary(outcomes)
     return 1 if any(o.status == "failed" or o.publish == "failed" for o in outcomes) else 0

@@ -200,6 +200,43 @@ def test_soft_deleted_tables_are_skipped(storage):
     assert [(o.table_id, o.status) for o in outcomes] == [("pwd.vishwakarma.t1", "skipped")]
 
 
+def test_recreate_repairs_display_even_when_snapshot_is_unchanged(storage, monkeypatch):
+    _seed(storage)
+    backfill(storage)
+    calls = []
+
+    def _fake_fix(client, storage_arg, table_id, **kwargs):
+        calls.append((client, storage_arg, table_id, kwargs))
+        return {"status": "recreated", "columns": ["total_cost"], "fully_qualified_name": table_id}
+
+    monkeypatch.setattr(
+        "src.schema_registry.openmetadata.publish.publish_table_fixing_display", _fake_fix
+    )
+    client = object()
+
+    outcomes = backfill(storage, client=client, recreate=True)
+
+    assert [(o.status, o.publish) for o in outcomes] == [("unchanged", "recreated")]
+    assert calls == [(client, storage, "pwd.vishwakarma.t1", {})]
+    assert "recreated for display: 1 column(s)" in outcomes[0].detail
+    assert _snapshot_count(storage) == 2
+    assert len(_run_rows(storage)) == 1
+
+
+def test_excluded_tables_are_skipped_and_untouched(storage):
+    _seed(storage, table_id="pwd.vishwakarma.keep", table="keep")
+    _seed(storage, table_id="pwd.vishwakarma.orphan", table="orphan")
+
+    outcomes = {o.table_id: o for o in backfill(storage, exclude=["pwd.vishwakarma.orphan"])}
+
+    assert outcomes["pwd.vishwakarma.keep"].status == "backfilled"
+    assert outcomes["pwd.vishwakarma.orphan"].status == "skipped"
+    assert outcomes["pwd.vishwakarma.orphan"].detail == "excluded"
+    assert _snapshot_count(storage, "pwd.vishwakarma.keep") == 2
+    assert _snapshot_count(storage, "pwd.vishwakarma.orphan") == 1
+    assert [row["table_id"] for row in _run_rows(storage)] == ["pwd.vishwakarma.keep"]
+
+
 def test_publish_is_called_and_recorded_on_the_run_row(storage, monkeypatch):
     _seed(storage)
     calls = []
