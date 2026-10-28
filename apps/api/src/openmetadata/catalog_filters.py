@@ -143,12 +143,8 @@ def facets(cards: list[dict], f: CatalogFilters) -> dict:
         "steward": {},
     }
     labels: dict[str, str] = {}
-    lo = hi = None
     for card in cards:
         facts = card_facts(card)
-        if facts["years"]:
-            lo = facts["years"][0] if lo is None else min(lo, facts["years"][0])
-            hi = facts["years"][1] if hi is None else max(hi, facts["years"][1])
         if facts["department"]:
             labels[facts["department"]] = card.get("department_display") or facts["department"]
         for name, bucket in counts.items():
@@ -169,8 +165,16 @@ def facets(cards: list[dict], f: CatalogFilters) -> dict:
                 item["label"] = labels.get(item["value"], item["value"])
             items.sort(key=lambda i: i["label"].lower())
         out[name] = items
-    out["years"] = {"min": lo, "max": hi} if lo is not None else None
+    out["years"] = year_span(cards)
     return out
+
+
+def year_span(cards: list[dict]) -> dict | None:
+    """{"min", "max"} over every card's timeline, else None (no timelines)."""
+    spans = [y for y in (card_facts(c)["years"] for c in cards) if y]
+    if not spans:
+        return None
+    return {"min": min(y[0] for y in spans), "max": max(y[1] for y in spans)}
 
 
 def sort_items(items: list[dict], sort: str) -> list[dict]:

@@ -1000,5 +1000,7 @@ def test_dataset_list_filters_facets_and_paging_run_server_side(client):
 def test_search_applies_the_same_filters(client):
     body = _get(client, "/registry/search", q="table")
     assert "facets" in body and body["datasets"]["total"] >= 1
+    # Year pickers cover the whole catalog, not just the matched datasets.
+    assert body["facets"]["years"] == _get(client, "/registry/datasets")["facets"]["years"] is not None
     filtered = _get(client, "/registry/search", q="table", api="no")
     assert filtered["datasets"]["total"] == 0 and filtered["tables"]["total"] == 0

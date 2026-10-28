@@ -1082,7 +1082,9 @@ async def registry_search(
         "department_count": len(services),
         "page": page,
         "size": size,
-        "facets": cf.facets(dataset_hits, filters),
+        # Year pickers span the viewer's whole catalog, so the Timeline
+        # control stays put even when no matched dataset has a timeline.
+        "facets": {**cf.facets(dataset_hits, filters), "years": cf.year_span(cards)},
         "fallback": fallback,
     }
 
