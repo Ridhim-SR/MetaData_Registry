@@ -215,27 +215,48 @@ def set_dataset_fields(storage: ObjectStorage, dataset_id: str, department_id: s
     return changed
 
 
-def latest_curated_snapshot_path(
-    storage: ObjectStorage, department_id: str, dataset_slug: str, table_slug: str
-) -> str:
-    """Path of the most recently written curated schema snapshot for one
-    table. Filenames are fixed-width UTC timestamps, so lexical order ==
-    chronological order -- shared by openmetadata/publish.py (publish the
-    latest) and pipeline.py (diff a new run against the latest).
+def _latest_snapshot_path(storage: ObjectStorage, prefix: str, kind: str) -> str:
+    """Newest timestamped snapshot under `prefix`.
 
-    Only files named like pipeline._timestamp()'s output count: a stray
-    non-snapshot file dropped in the folder (a README, a ~backup, a CSV
-    with a different name) must never be mistaken for the latest snapshot."""
+    Filenames are fixed-width UTC timestamps, so lexical order ==
+    chronological order. Only files named like pipeline._timestamp()'s output
+    count: a stray non-snapshot file dropped in the folder (a README, a
+    ~backup, a CSV with a different name) must never be mistaken for the
+    latest snapshot."""
 
-    prefix = paths.curated_schemas_prefix(department_id, dataset_slug, table_slug)
     # Local storage on Windows returns backslash-separated paths, S3 returns
     # forward slashes -- normalize so callers get one shape of path either way
     # (the raw text is also what ends up in OpenMetadata's extraMetadata).
     files = [f.replace("\\", "/") for f in storage.list(prefix)
              if _SNAPSHOT_NAME.match(f.replace("\\", "/").rsplit("/", 1)[-1])]
     if not files:
-        raise FileNotFoundError(f"No curated schema under {prefix} -- run the pipeline for this table first.")
+        raise FileNotFoundError(f"No {kind} schema under {prefix} -- run the pipeline for this table first.")
     return files[-1]
+
+
+def latest_curated_snapshot_path(
+    storage: ObjectStorage, department_id: str, dataset_slug: str, table_slug: str
+) -> str:
+    """Path of the most recently written curated schema snapshot for one
+    table -- shared by openmetadata/publish.py (publish the latest) and
+    pipeline.py (diff a new run against the latest)."""
+
+    return _latest_snapshot_path(
+        storage, paths.curated_schemas_prefix(department_id, dataset_slug, table_slug), "curated"
+    )
+
+
+def latest_raw_snapshot_path(
+    storage: ObjectStorage, department_id: str, dataset_slug: str, table_slug: str
+) -> str:
+    """Path of the most recently written raw (parser output) schema snapshot
+    for one table. Used by the readable-type backfill, which re-curates from
+    the parser's own output instead of re-reading a submission file that may
+    no longer be reachable."""
+
+    return _latest_snapshot_path(
+        storage, paths.raw_schemas_prefix(department_id, dataset_slug, table_slug), "raw"
+    )
 
 
 def upsert_table(storage: ObjectStorage, table_id: str, dataset_id: str, table_name: str, schema_name: str) -> None:
