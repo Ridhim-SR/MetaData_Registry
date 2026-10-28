@@ -12,6 +12,7 @@ local department_profile table, never from formatted service IDs.
 """
 
 import asyncio
+import logging
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -19,6 +20,7 @@ from fastapi.responses import PlainTextResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from database.database import async_session as _background_session
 from database.database import get_session as db_get_session
 from database.models import (
     AccessRequest,
@@ -74,14 +76,24 @@ def _catalog_lock(key: str) -> asyncio.Lock:
 # also show up within the TTL.
 SIDECAR_TTL_SECONDS = 60
 
+logger = logging.getLogger(__name__)
+
 
 class _SidecarCache:
-    """One whole sidecar table ({fqn: row dict}) cached per worker."""
+    """One whole sidecar table ({fqn: row dict}) cached per worker.
+
+    Only the first load (or the first after clear()) makes a request wait.
+    Once the TTL passes, requests keep getting the cached copy while a
+    single background task reloads it on its own session, so the slow
+    database never sits in a request's path (each cache reloads in
+    parallel with the others).
+    """
 
     def __init__(self, loader):
         self._loader = loader
         self._hit: tuple[float, dict[str, dict]] | None = None
         self._lock = asyncio.Lock()
+        self._refresh: asyncio.Task | None = None
 
     def clear(self) -> None:
         self._hit = None
@@ -91,16 +103,32 @@ class _SidecarCache:
         return self._hit is not None
 
     async def get(self, session: AsyncSession) -> dict[str, dict]:
-        """The cached table; at most one reload per TTL (concurrent requests
-        wait for that single load instead of each querying)."""
+        """The cached table; a stale copy triggers one background reload."""
         hit = self._hit
-        if hit is None or time.monotonic() - hit[0] >= SIDECAR_TTL_SECONDS:
+        if hit is None:
             async with self._lock:
                 hit = self._hit
-                if hit is None or time.monotonic() - hit[0] >= SIDECAR_TTL_SECONDS:
+                if hit is None:
                     hit = (time.monotonic(), await self._loader(session))
                     self._hit = hit
+        elif time.monotonic() - hit[0] >= SIDECAR_TTL_SECONDS and self._refresh is None:
+            self._refresh = asyncio.create_task(self._reload())
         return hit[1]
+
+    async def _reload(self) -> None:
+        stale = self._hit
+        try:
+            async with _background_session() as session:
+                fresh = await self._loader(session)
+            # A clear() during the reload wins; the next get() loads again.
+            if self._hit is stale:
+                self._hit = (time.monotonic(), fresh)
+        except Exception:
+            logger.warning("sidecar reload failed; serving the cached copy", exc_info=True)
+            if self._hit is stale and stale is not None:
+                self._hit = (time.monotonic(), stale[1])  # retry after one TTL
+        finally:
+            self._refresh = None
 
 
 async def _load_visibility(session: AsyncSession) -> dict[str, dict]:
@@ -405,6 +433,19 @@ def _catalog_filters(
     )
 
 
+def _without_columns(cards: list[dict]) -> list[dict]:
+    """List copies of cards: table names/descriptions only, no columns.
+
+    Columns can be hundreds per dataset and the catalog list never shows
+    them; the dataset page (GET /datasets/by-fqn) still returns them.
+    """
+    return [
+        {**c, "tables": [{k: v for k, v in t.items() if k != "columns"} for t in c["tables"]]}
+        if c.get("tables") else c
+        for c in cards
+    ]
+
+
 def _check_sort(sort: str) -> str:
     if sort not in cf.SORTS:
         raise HTTPException(status_code=422, detail=f"sort must be one of {', '.join(cf.SORTS)}")
@@ -449,7 +490,7 @@ async def list_datasets(
             if needle in (c["name"] or "").lower() or needle in (c["dataset"] or "").lower()
         ]
     matched = cf.sort_items(cf.filter_cards(cards, filters), _check_sort(sort))
-    items = cf.page_of(matched, page, size)
+    items = _without_columns(cf.page_of(matched, page, size))
     teasers: list[dict] = []
     if user is not None:
         raw = await _catalog_raw(session, ctx)
@@ -1027,6 +1068,7 @@ async def registry_search(
         )
         for name, items in groups.items()
     }
+    out_groups["datasets"]["items"] = _without_columns(out_groups["datasets"]["items"])
     total = sum(g["total"] for g in out_groups.values())
     services = {c["service"] for c in dataset_items} | {
         t["dataset"].split(".")[0] for t in table_items if t.get("dataset")

@@ -6,6 +6,7 @@ All requests are anonymous. OpenMetadata and the database are stubbed:
 - The shared catalog cache is cleared before every test.
 """
 
+import contextlib
 import os
 import sys
 import types
@@ -223,7 +224,13 @@ def client(monkeypatch):
     async def _fake_session():
         yield _FakeSession()
 
+    @contextlib.asynccontextmanager
+    async def _fake_background_session():
+        yield _FakeSession()
+
     app.dependency_overrides[db_get_session] = _fake_session
+    # Background sidecar reloads must never reach the real database.
+    monkeypatch.setattr(registry_router, "_background_session", _fake_background_session)
     try:
         yield TestClient(app, raise_server_exceptions=True)
     finally:
@@ -248,7 +255,8 @@ def test_guest_public_dataset_everywhere_full_detail(client):
     assert pub[0]["tags"] == ["theme.economy"]
     assert "updated_at" in pub[0]
     assert [c["name"] for c in pub[0]["tables"]] == ["pub_table"]
-    assert [c["name"] for c in pub[0]["tables"][0]["columns"]] == ["id", "name"]
+    # Lists carry table names only; columns come with the dataset page.
+    assert "columns" not in pub[0]["tables"][0]
     # Dataset facts ride on full cards so the catalog can filter by them.
     assert pub[0]["info"]["table_count"] == 1
     assert {"owner", "steward", "frequency", "timeline", "api_available"} <= set(pub[0]["info"])
@@ -259,7 +267,7 @@ def test_guest_public_dataset_everywhere_full_detail(client):
     detail = _get(client, "/registry/datasets/by-fqn", fqn="pub.db")
     assert detail["locked"] is False
     assert [t["name"] for t in detail["tables"]] == ["pub_table"]
-    assert "columns" in detail["tables"][0]
+    assert [c["name"] for c in detail["tables"][0]["columns"]] == ["id", "name"]
 
 
 def test_guest_department_restricted_teaser_locked_no_columns(client):
@@ -830,12 +838,14 @@ def test_visibility_loaded_once_for_many_requests(client):
     assert _CountingSession.visibility_reads == 1
 
 
-def test_visibility_reloaded_after_ttl(client, monkeypatch):
+def test_requests_never_wait_on_a_reload_after_ttl(client, monkeypatch):
+    # Past the TTL a request gets the cached copy; the reload runs on its own
+    # background session (see test_sidecar_cache.py), never the request's.
     _use_counting_session()
     monkeypatch.setattr(registry_router, "SIDECAR_TTL_SECONDS", 0)
-    client.get("/registry/stats")
-    client.get("/registry/stats")
-    assert _CountingSession.visibility_reads == 2
+    assert client.get("/registry/stats").status_code == 200
+    assert client.get("/registry/stats").status_code == 200
+    assert _CountingSession.visibility_reads == 1
 
 
 def test_visibility_write_clears_cache(client):
