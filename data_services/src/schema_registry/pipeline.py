@@ -33,7 +33,8 @@ _PARSERS = {
 # this run's. The structural ones are the whole reason the diff exists: a
 # data_type or nullability change used to pass unnoticed on its way to
 # OpenMetadata. The governance ones catch a column being reclassified.
-_DIFF_FIELDS = ("data_type", "nullable", "length", "scale", "classification", "tag", "glossary_term", "name_hindi")
+_DIFF_FIELDS = ("data_type", "nullable", "length", "scale", "classification", "tag", "glossary_term",
+                "name_hindi", "unit")
 
 
 def parse_source(department_id: str, table_name: str, source_format: str, text: str) -> list[dict]:
@@ -141,13 +142,14 @@ def _summarize_diff(diff_rows: list[dict], has_previous: bool) -> tuple[str, int
     return mode, added, removed, changed
 
 
-_METADATA_TEXT_FIELDS = ("business_description", "tag", "classification", "glossary_term", "name_hindi")
+_METADATA_TEXT_FIELDS = ("business_description", "tag", "classification", "glossary_term", "name_hindi", "unit")
 
 
 def _business_metadata_from_rows(rows: list[dict]) -> dict[str, dict]:
     """Shape a list of CSV rows (a Field Dictionary export, or a previous
     curated snapshot) into the {name: {business_description, tag,
-    classification, glossary_term, active}} form curate_schema() expects.
+    classification, glossary_term, name_hindi, unit, active}} form
+    curate_schema() expects.
 
     Only fields with a non-blank value are included -- a blank cell (or a
     column the file doesn't have at all) means "not answered in this file",

@@ -413,11 +413,17 @@ table_id)`, does the Service → Database → Schema → Table create-or-update.
 
 **Mapping**: department → service, dataset → database, `schema_name` →
 schema, `table_name` → table. Columns come from the curated CSV's
-`data_type` (unrecognized types fail loudly, never guessed). Each column's
-`tag`/`classification`/`glossary_term` are pushed as TagLabels — `tag`
+`data_type` (unrecognized types fail loudly, never guessed), and gets a
+`readable_type` label derived from it (Whole Number / Decimal Number / Text /
+Date & Time) so the catalog reads plainly to non-technical users. Each
+column's `tag`/`classification`/`glossary_term` are pushed as TagLabels — `tag`
 under a `FieldTag` Classification, the column's MDSF `classification`
 level under `MDSF`, `glossary_term` under a `BusinessGlossary` — created on
-first use, reused after. The dataset's own `category` (CAT-1..CAT-4,
+first use, reused after. `readable_type`, plus `unit` when a department
+answered one (`₹`/`Rs` → `INR`, `$` → `USD`), becomes the column's built-in
+`dataTypeDisplay` (`Decimal Number (INR)`); `unit` also stays in
+`extraMetadata` for machine use. Units are only accepted on numeric columns.
+The dataset's own `category` (CAT-1..CAT-4,
 validated against the MDSF vocabulary — an unknown one is rejected rather
 than published as a new tag) and `dataset_description` are pushed the same
 way, one level up, onto the Database entity. A resolved `owner` (an
@@ -534,7 +540,7 @@ _lookups/departments.csv, datasets.csv, tables.csv   lists of departments, datas
 department/<dept>/<dataset>/<table>/
     raw/source/<time>__<file>                        the exact file used, + .sha256
     raw/schemas/<time>.csv                           columns as read from the file
-    curated/schemas/<time>.csv                       + descriptions, tags, classification
+    curated/schemas/<time>.csv                       + descriptions, tags, classification, readable type, unit
     diffs/<time>.csv                                 what this run added/removed/changed vs the previous snapshot
 department/<dept>/<dataset>/_source/                 a multi-table field dictionary
 _locks/                                              stops two people writing at once
@@ -549,7 +555,7 @@ Every run adds new files with the time in the name, so the full history stays. O
 | Department (`pwd`) | Database service. Its name is the id (`pwd`); the full department name from the catalog is shown as its display name |
 | Dataset (`vishwakarma`) | Database: description, category tag, and owner / steward / frequency / timeline / API as custom properties |
 | `schema:` (default `public`) | Schema |
-| Table | Table: columns, types, descriptions, plus an `extraMetadata` custom property: JSON with the column details not shown elsewhere (nullable, default, scale, ...) and the curated file it came from, kept for later use |
+| Table | Table: columns with a plain-language type (`dataTypeDisplay`, e.g. `Decimal Number (INR)`), descriptions, plus an `extraMetadata` custom property: JSON with the column details not shown elsewhere (nullable, default, scale, unit, ...) and the curated file it came from, kept for later use |
 | Column tags | `FieldTag` (Financial, Geospatial, ...), `DataSensitivity` (CAT-1 to CAT-4), `BusinessGlossary` terms |
 
 - Columns whose names look like personal data (Aadhaar, PAN, mobile, email, ...) get CAT-3 automatically, unless the metadata file says otherwise.

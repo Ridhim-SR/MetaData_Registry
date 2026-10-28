@@ -291,6 +291,14 @@ def _to_column(row: dict) -> Column:
     name_hindi = (row.get("name_hindi") or "").strip()
     if name_hindi:
         kwargs["displayName"] = name_hindi
+    # A plain-language type ("Whole Number", "Text") is what the catalog UI
+    # shows instead of the raw Postgres type; appending the unit makes
+    # "Decimal Number (INR)" readable in the same cell. `unit` still reaches
+    # extraMetadata for machine use.
+    readable_type = (row.get("readable_type") or "").strip()
+    unit = (row.get("unit") or "").strip()
+    if readable_type:
+        kwargs["dataTypeDisplay"] = f"{readable_type} ({unit})" if unit else readable_type
     if data_type in _LENGTH_REQUIRED_TYPES:
         length = row.get("length")
         kwargs["dataLength"] = int(length) if length else _DEFAULT_LENGTH
@@ -414,7 +422,7 @@ def _resolve_owner(client: OpenMetadata, owner: str) -> EntityReference | None:
 # place in OpenMetadata's own fields -- kept in case it's wanted later.
 EXTRA_METADATA_PROPERTY = "extraMetadata"
 _PUBLISHED_ELSEWHERE = {"table_id", "name", "business_description", "tag", "classification", "glossary_term",
-                        "ingestion_timestamp"}
+                        "ingestion_timestamp", "readable_type"}
 
 
 def _extra_metadata_json(curated_columns: list[dict], curated_path: str) -> str:

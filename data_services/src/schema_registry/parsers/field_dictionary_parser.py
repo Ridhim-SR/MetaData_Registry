@@ -110,7 +110,8 @@ _REQUIRED_HEADERS = ("Dataset Name", "Dataset Field")
 def parse_field_dictionary_text(text: str, label: str = "<text>") -> dict[str, dict]:
     """Parse a multi-table Field Dictionary CSV (columns: Dataset Name,
     Dataset Field, Data Description, Format, Mandatory (Y/N),
-    Personal Data (Y/N), ...) into one entry per distinct "Dataset Name",
+    Personal Data (Y/N), optional tag/Unit, ...) into one entry per distinct
+    "Dataset Name",
     each with the canonical raw-column shape
     (name/data_type/length/scale/nullable/default) plus a business_metadata
     dict -- both in the exact shapes pipeline.run() / curate_schema() already
@@ -180,6 +181,12 @@ def parse_field_dictionary_text(text: str, label: str = "<text>") -> dict[str, d
             "business_description": (row.get("Data Description") or "").strip(),
             "tag": (row.get("tag") or "").strip(),
         }
+        # An optional `Unit` column (also accepted as "Unit of Measure"/"UOM")
+        # answers the field's unit -- INR, %, hectare, ... A blank cell is "not
+        # answered", so curate's carry-forward keeps an earlier answer.
+        unit = (row.get("Unit") or row.get("Unit of Measure") or row.get("UOM") or "").strip()
+        if unit:
+            metadata["unit"] = unit
         if format_note:
             metadata["format_note"] = format_note
 
