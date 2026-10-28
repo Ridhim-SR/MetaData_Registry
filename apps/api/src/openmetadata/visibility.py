@@ -67,6 +67,21 @@ def dataset_type(database: dict | None) -> str | None:
     return next((t for t in DATASET_TYPES if t.lower() == value.lower()), None)
 
 
+def table_tags(table: dict) -> list[str]:
+    """Distinct tagFQNs on a table and its columns, CAT tags excluded.
+
+    Tags assigned in the catalog (FieldTag.*, MDSF.*) mostly sit on columns;
+    the CAT tag is the dataset classification and is reported separately.
+    """
+    out: list[str] = []
+    for entity in [table, *(table.get("columns") or [])]:
+        for tag in entity.get("tags") or []:
+            label = tag.get("tagFQN") or tag.get("name")
+            if label and not label.startswith(CAT_TAG_PREFIX) and label not in out:
+                out.append(label)
+    return out
+
+
 def _max_level(*levels: int | None) -> int | None:
     known = [lvl for lvl in levels if lvl is not None]
     return max(known) if known else None
@@ -332,9 +347,8 @@ def visible_catalog(
             ]
             tag_set: list[str] = []
             for t in entry["full"]:
-                for tag in t.get("tags") or []:
-                    label = tag.get("tagFQN") or tag.get("name")
-                    if label and label not in tag_set:
+                for label in table_tags(t):
+                    if label not in tag_set:
                         tag_set.append(label)
             updated = [t.get("updatedAt") for t in entry["full"] if t.get("updatedAt")]
             cards.append(

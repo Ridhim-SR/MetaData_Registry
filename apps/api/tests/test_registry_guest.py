@@ -6,6 +6,7 @@ All requests are anonymous. OpenMetadata and the database are stubbed:
 - The shared catalog cache is cleared before every test.
 """
 
+import contextlib
 import os
 import sys
 import types
@@ -223,7 +224,13 @@ def client(monkeypatch):
     async def _fake_session():
         yield _FakeSession()
 
+    @contextlib.asynccontextmanager
+    async def _fake_background_session():
+        yield _FakeSession()
+
     app.dependency_overrides[db_get_session] = _fake_session
+    # Background sidecar reloads must never reach the real database.
+    monkeypatch.setattr(registry_router, "_background_session", _fake_background_session)
     try:
         yield TestClient(app, raise_server_exceptions=True)
     finally:
@@ -248,7 +255,11 @@ def test_guest_public_dataset_everywhere_full_detail(client):
     assert pub[0]["tags"] == ["theme.economy"]
     assert "updated_at" in pub[0]
     assert [c["name"] for c in pub[0]["tables"]] == ["pub_table"]
-    assert [c["name"] for c in pub[0]["tables"][0]["columns"]] == ["id", "name"]
+    # Lists carry table names only; columns come with the dataset page.
+    assert "columns" not in pub[0]["tables"][0]
+    # Dataset facts ride on full cards so the catalog can filter by them.
+    assert pub[0]["info"]["table_count"] == 1
+    assert {"owner", "steward", "frequency", "timeline", "api_available"} <= set(pub[0]["info"])
 
     public = _get(client, "/registry/datasets/public")
     assert any(c["dataset"] == "pub.db" for c in public["items"])
@@ -256,7 +267,7 @@ def test_guest_public_dataset_everywhere_full_detail(client):
     detail = _get(client, "/registry/datasets/by-fqn", fqn="pub.db")
     assert detail["locked"] is False
     assert [t["name"] for t in detail["tables"]] == ["pub_table"]
-    assert "columns" in detail["tables"][0]
+    assert [c["name"] for c in detail["tables"][0]["columns"]] == ["id", "name"]
 
 
 def test_guest_department_restricted_teaser_locked_no_columns(client):
@@ -827,12 +838,14 @@ def test_visibility_loaded_once_for_many_requests(client):
     assert _CountingSession.visibility_reads == 1
 
 
-def test_visibility_reloaded_after_ttl(client, monkeypatch):
+def test_requests_never_wait_on_a_reload_after_ttl(client, monkeypatch):
+    # Past the TTL a request gets the cached copy; the reload runs on its own
+    # background session (see test_sidecar_cache.py), never the request's.
     _use_counting_session()
     monkeypatch.setattr(registry_router, "SIDECAR_TTL_SECONDS", 0)
-    client.get("/registry/stats")
-    client.get("/registry/stats")
-    assert _CountingSession.visibility_reads == 2
+    assert client.get("/registry/stats").status_code == 200
+    assert client.get("/registry/stats").status_code == 200
+    assert _CountingSession.visibility_reads == 1
 
 
 def test_visibility_write_clears_cache(client):
@@ -957,3 +970,35 @@ def test_login_caches_user_for_auth_me():
         assert cached is not None and cached.first_name == "Bo"  # /auth/me needs no DB now
     finally:
         auth.invalidate_user_cache(123)
+
+
+def test_dataset_list_filters_facets_and_paging_run_server_side(client):
+    everything = _get(client, "/registry/datasets")
+    assert everything["total"] == len(everything["items"]) >= 2
+    api = {i["value"]: i["count"] for i in everything["facets"]["api"]}
+    assert api == {"yes": 1, "no": 0}  # pwd's "N" is behind a locked teaser
+    assert {"value": "CAT-1", "count": 1} in everything["facets"]["classification"]
+
+    for params in ({"api": "yes"}, {"frequency": "monthly"}, {"year_from": 2023},
+                   {"classification": "cat-1"}, {"tag": "theme.economy"}):
+        body = _get(client, "/registry/datasets", **params)
+        assert [c["dataset"] for c in body["items"]] == ["pub.db"], params
+        assert body["total"] == 1 and body["department_count"] == 1
+
+    # OR within one filter (repeated parameter), AND across filters.
+    resp = client.get("/registry/datasets", params=[("department", "pub"), ("department", "pwd")])
+    assert {c["service"] for c in resp.json()["items"]} == {"pub", "pwd"}
+    assert _get(client, "/registry/datasets", department="pwd", api="yes")["total"] == 0
+
+    page2 = _get(client, "/registry/datasets", sort="name", size=1, page=2)
+    names = sorted(c["name"].lower() for c in everything["items"])
+    assert page2["total"] == everything["total"]
+    assert [c["name"].lower() for c in page2["items"]] == names[1:2]
+    assert client.get("/registry/datasets", params={"sort": "bogus"}).status_code == 422
+
+
+def test_search_applies_the_same_filters(client):
+    body = _get(client, "/registry/search", q="table")
+    assert "facets" in body and body["datasets"]["total"] >= 1
+    filtered = _get(client, "/registry/search", q="table", api="no")
+    assert filtered["datasets"]["total"] == 0 and filtered["tables"]["total"] == 0
