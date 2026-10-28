@@ -32,6 +32,7 @@ departments:
         category: CAT-3
         owner: Public Works Department (PWD)
         steward:
+        dataset_type: Administrative
         frequency: Daily
         timeline: "01-06-2019 - ongoing"
         api_available:
@@ -48,6 +49,7 @@ departments:
         category: CAT-3
         owner: Agriculture Department
         steward:
+        dataset_type: Citizen Centric
         frequency:
         timeline:
         api_available:
@@ -82,6 +84,7 @@ departments:
         category: CAT-3
         owner: Agriculture Department
         steward:
+        dataset_type: Citizen Centric
         frequency:
         timeline:
         api_available:
@@ -99,6 +102,7 @@ departments:
         category: CAT-3
         owner: Agriculture Department
         steward:
+        dataset_type: Administrative
         frequency:
         timeline:
         api_available:
@@ -127,6 +131,7 @@ departments:
         category: CAT-1
         owner: Rural Development Department
         steward:
+        dataset_type: Citizen Centric
         frequency: yearly
         timeline: 2014-15 to 2025-26
         api_available: N
@@ -142,6 +147,7 @@ departments:
         category: CAT-1
         owner: Rural Development Department
         steward:
+        dataset_type: Administrative
         frequency: yearly
         timeline: 2023-27
         api_available: N
@@ -161,6 +167,7 @@ departments:
         category: CAT-1
         owner: Rural Development Department
         steward:
+        dataset_type: Citizen Centric
         frequency:
         timeline:
         api_available: N
@@ -174,3 +181,24 @@ departments:
             source: storage:inputs/rural_development_department/awas/awas_pmayg_category_progress_raw_columns.csv
             format: csv
             metadata: storage:inputs/rural_development_department/awas/awas_pmayg_category_progress_raw_columns_metadata.csv
+  non_proprietary_data:
+    name: Non-Proprietary Data
+    datasets:
+      night_time_light_over_india:
+        category: CAT-1
+        dataset_type:
+        owner: National Remote Sensing Centre, ISRO
+        steward:
+        source_url : https://bhuvan-app1.nrsc.gov.in/bhuvan_ntl/
+        frequency: Annual
+        timeline:
+        api_available: No
+        description: >-
+          State-wise annual night-time light (NTL) radiance for India, derived
+          from satellite imagery. Source: National Remote Sensing Centre (NRSC),
+          ISRO.
+        tables:
+          NightTimeLight:
+            source: storage:inputs/non_proprietary_data/night_time_light_ntl_over_india/NTL_schema_metadata.csv
+            format: csv
+            metadata: storage:inputs/non_proprietary_data/night_time_light_ntl_over_india/NTL_metadata.csv
