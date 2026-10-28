@@ -17,6 +17,7 @@ from src.openmetadata.visibility import (  # noqa: E402
     split_fqn,
     summarize_cards,
     table_decision,
+    table_tags,
     viewer_key,
     visible_catalog,
     visible_tables,
@@ -272,3 +273,23 @@ def test_cat_tags_drive_effective_visibility():
     assert vmap["a.d1.s.raised"]["visibility"] == "restricted"
     # Untagged tables keep their sidecar visibility.
     assert vmap["a.d2.s.plain"]["visibility"] == "restricted"
+
+
+def test_card_tags_include_column_tags_but_not_cat():
+    cat = [{"tagFQN": "DataSensitivity.CAT-1"}]
+    tables = [
+        {
+            "fullyQualifiedName": "a.d.s.t",
+            "tags": cat,
+            "columns": [
+                {"name": "lat", "tags": [{"tagFQN": "FieldTag.Geospatial"}]},
+                {"name": "name", "tags": [{"tagFQN": "MDSF.PII"}, {"tagFQN": "FieldTag.Geospatial"}]},
+            ],
+        }
+    ]
+    assert table_tags(tables[0]) == ["FieldTag.Geospatial", "MDSF.PII"]
+    databases = [{"fullyQualifiedName": "a.d", "tags": cat}]
+    vmap = effective_visibility_map(tables, databases, {})
+    [card] = visible_catalog(tables, databases, vmap, None)
+    assert card["classification"] == "CAT-1"
+    assert card["tags"] == ["FieldTag.Geospatial", "MDSF.PII"]
