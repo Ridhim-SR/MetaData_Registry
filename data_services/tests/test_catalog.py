@@ -81,8 +81,25 @@ def test_shipped_catalog_is_valid():
     from src.schema_registry.catalog import load_catalog
 
     departments = load_catalog("catalog.yaml")
-    # All three live departments, pwd first exactly as main has it. pwd is
+    # Every live department, pwd first exactly as main has it. pwd is
     # another team's; commenting it out here would silently disable their
     # data the moment this branch merges into main, so the list is asserted
     # in full rather than by membership.
-    assert [d.id for d in departments] == ["pwd", "agri_dept", "rural_development_department", "non_proprietary_data"]
+    assert [d.id for d in departments] == [
+        "pwd",
+        "agri_dept",
+        "rural_development_department",
+        "women_and_child_development_department",
+        "non_proprietary_data",
+    ]
+
+    # Kanya Sumangala is Women & Child Development, not Agriculture: two
+    # citizen-facing datasets, both personal data (CAT-3), each described by
+    # one multi-table Field Dictionary in storage.
+    wcd = next(d for d in departments if d.id == "women_and_child_development_department")
+    assert wcd.name == "Women and Child Development Department"
+    assert [ds.name for ds in wcd.datasets] == ["kanya_sumangla_portal", "pm_matru_vandana_yojana"]
+    assert all(ds.fields["category"] == "CAT-3" for ds in wcd.datasets)
+    assert all(ds.fields["dataset_type"] == "Citizen Centric" for ds in wcd.datasets)
+    assert all(ds.field_dictionary and ds.field_dictionary.startswith("storage:inputs/")
+               for ds in wcd.datasets)
