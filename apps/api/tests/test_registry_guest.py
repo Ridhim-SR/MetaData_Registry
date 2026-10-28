@@ -249,6 +249,9 @@ def test_guest_public_dataset_everywhere_full_detail(client):
     assert "updated_at" in pub[0]
     assert [c["name"] for c in pub[0]["tables"]] == ["pub_table"]
     assert [c["name"] for c in pub[0]["tables"][0]["columns"]] == ["id", "name"]
+    # Dataset facts ride on full cards so the catalog can filter by them.
+    assert pub[0]["info"]["table_count"] == 1
+    assert {"owner", "steward", "frequency", "timeline", "api_available"} <= set(pub[0]["info"])
 
     public = _get(client, "/registry/datasets/public")
     assert any(c["dataset"] == "pub.db" for c in public["items"])
@@ -957,3 +960,35 @@ def test_login_caches_user_for_auth_me():
         assert cached is not None and cached.first_name == "Bo"  # /auth/me needs no DB now
     finally:
         auth.invalidate_user_cache(123)
+
+
+def test_dataset_list_filters_facets_and_paging_run_server_side(client):
+    everything = _get(client, "/registry/datasets")
+    assert everything["total"] == len(everything["items"]) >= 2
+    api = {i["value"]: i["count"] for i in everything["facets"]["api"]}
+    assert api == {"yes": 1, "no": 0}  # pwd's "N" is behind a locked teaser
+    assert {"value": "CAT-1", "count": 1} in everything["facets"]["classification"]
+
+    for params in ({"api": "yes"}, {"frequency": "monthly"}, {"year_from": 2023},
+                   {"classification": "cat-1"}, {"tag": "theme.economy"}):
+        body = _get(client, "/registry/datasets", **params)
+        assert [c["dataset"] for c in body["items"]] == ["pub.db"], params
+        assert body["total"] == 1 and body["department_count"] == 1
+
+    # OR within one filter (repeated parameter), AND across filters.
+    resp = client.get("/registry/datasets", params=[("department", "pub"), ("department", "pwd")])
+    assert {c["service"] for c in resp.json()["items"]} == {"pub", "pwd"}
+    assert _get(client, "/registry/datasets", department="pwd", api="yes")["total"] == 0
+
+    page2 = _get(client, "/registry/datasets", sort="name", size=1, page=2)
+    names = sorted(c["name"].lower() for c in everything["items"])
+    assert page2["total"] == everything["total"]
+    assert [c["name"].lower() for c in page2["items"]] == names[1:2]
+    assert client.get("/registry/datasets", params={"sort": "bogus"}).status_code == 422
+
+
+def test_search_applies_the_same_filters(client):
+    body = _get(client, "/registry/search", q="table")
+    assert "facets" in body and body["datasets"]["total"] >= 1
+    filtered = _get(client, "/registry/search", q="table", api="no")
+    assert filtered["datasets"]["total"] == 0 and filtered["tables"]["total"] == 0

@@ -34,6 +34,7 @@ from src.middleware.auth import (
     require_admin,
     user_context,
 )
+from src.openmetadata import catalog_filters as cf
 from src.openmetadata import facts as facts_mod
 from src.openmetadata import visibility as vis
 from src.openmetadata.client import OpenMetadataClient
@@ -143,6 +144,7 @@ _dataset_info_cache = _SidecarCache(_load_dataset_info)
 def clear_sidecar_caches() -> None:
     for cache in (_visibility_cache, _table_info_cache, _dataset_info_cache):
         cache.clear()
+    _filterable_cache.clear()
 
 
 def _pick(rows: dict[str, dict], fqns: list[str] | None) -> dict[str, dict]:
@@ -335,10 +337,92 @@ async def public_datasets(
     return {"items": _with_dept_display(items, profiles), "total": len(items)}
 
 
+# ---- catalog filtering (dataset list + search) ----
+
+# Built cards (with dataset facts and department names) per viewer class,
+# reused until one of their inputs reloads: the OM payload (CATALOG_TTL)
+# or a sidecar table (SIDECAR_TTL / write). Filter, facet and page
+# requests then only scan cards in memory.
+_filterable_cache: dict[str, tuple[tuple, tuple]] = {}
+
+# OM search hits fetched per query before visibility, filters and paging.
+SEARCH_CANDIDATES = 1000
+
+
+async def _filterable_catalog(
+    session: AsyncSession, ctx: dict | None
+) -> tuple[list[dict], dict, list[dict], list[dict]]:
+    """Viewer cards with `info` and `department_display`, + vmap, databases, profiles."""
+    raw = await _catalog_raw(session, ctx)
+    sources = (
+        raw,
+        await _visibility_cache.get(session),
+        await _dataset_info_cache.get(session),
+        await _table_info_cache.get(session),
+    )
+    key = vis.viewer_key(ctx)
+    hit = _filterable_cache.get(key)
+    if hit and all(a is b for a, b in zip(hit[0], sources)):
+        return hit[1]
+    cards, vmap, databases, services = await _viewer_catalog(session, ctx)
+    profiles = _profiles_from_services(services)
+    _with_dept_display(cards, profiles)
+    await _with_dataset_info(session, ctx, cards, databases)
+    built = (cards, vmap, databases, profiles)
+    _filterable_cache[key] = (sources, built)
+    if len(_filterable_cache) > _CATALOG_MAX_USER_KEYS + 2:
+        for k in [k for k in _filterable_cache if k not in ("guest", "admin", key)]:
+            del _filterable_cache[k]
+    return built
+
+
+def _catalog_filters(
+    classification: list[str] | None,
+    tag: list[str] | None,
+    department: list[str] | None,
+    frequency: list[str] | None,
+    api: list[str] | None,
+    steward: list[str] | None,
+    year_from: int | None,
+    year_to: int | None,
+) -> cf.CatalogFilters:
+    """Query parameters -> filters (repeat a parameter to select several)."""
+    def values(raw: list[str] | None) -> frozenset[str]:
+        return frozenset(v.strip() for v in raw or [] if v and v.strip())
+
+    departments: set[str] = set()
+    for d in values(department):
+        departments |= vis.department_candidates(d) | {d}
+    return cf.CatalogFilters(
+        classification=frozenset(v.upper() for v in values(classification)),
+        tags=values(tag),
+        departments=frozenset(departments),
+        frequency=frozenset(cf.frequency_value(v) for v in values(frequency)),
+        api=frozenset(v.lower() for v in values(api)),
+        steward=values(steward),
+        year_from=year_from,
+        year_to=year_to,
+    )
+
+
+def _check_sort(sort: str) -> str:
+    if sort not in cf.SORTS:
+        raise HTTPException(status_code=422, detail=f"sort must be one of {', '.join(cf.SORTS)}")
+    return sort
+
+
 @router.get("/datasets")
 async def list_datasets(
-    department: str | None = None,
+    department: list[str] | None = Query(default=None),
     search: str | None = None,
+    classification: list[str] | None = Query(default=None),
+    tag: list[str] | None = Query(default=None),
+    frequency: list[str] | None = Query(default=None),
+    api: list[str] | None = Query(default=None),
+    steward: list[str] | None = Query(default=None),
+    year_from: int | None = Query(default=None, ge=1000, le=9999),
+    year_to: int | None = Query(default=None, ge=1000, le=9999),
+    sort: str = "relevance",
     page: int = Query(default=1, ge=1),
     size: int = Query(default=500, ge=1, le=1000),
     session: AsyncSession = Depends(db_get_session),
@@ -346,40 +430,73 @@ async def list_datasets(
 ) -> dict:
     """Catalog datasets visible to the caller (full cards + locked teasers).
 
-    Paged via page/size (default 500 covers current catalogs; total is the
-    full visible count). Logged-in callers additionally receive table-level
-    restricted teasers capped to the same page size; guests never receive
-    table names of non-public data.
+    Filters (repeat a parameter to select several values: ORed within a
+    filter, ANDed across filters): department, classification (CAT-1..4),
+    tag, frequency, api (yes/no), steward, year_from/year_to (timeline
+    overlap). `facets` counts every option over the visible catalog, each
+    ignoring its own selection. Sorted (relevance | updated | name), then
+    paged via page/size; `total` is the filtered count. Logged-in callers
+    additionally receive table-level restricted teasers capped to the same
+    page size; guests never receive table names of non-public data.
     """
     ctx = user_context(user)
-    cards, vmap, _databases, services = await _viewer_catalog(session, ctx)
-    profiles = _profiles_from_services(services)
-    if department:
-        wanted = vis.department_candidates(department) | {department}
-        cards = [c for c in cards if c["service"] in wanted]
+    filters = _catalog_filters(classification, tag, department, frequency, api, steward, year_from, year_to)
+    cards, vmap, _databases, profiles = await _filterable_catalog(session, ctx)
     if search:
         needle = search.lower()
         cards = [
             c for c in cards
             if needle in (c["name"] or "").lower() or needle in (c["dataset"] or "").lower()
         ]
-    total = len(cards)
-    start = (page - 1) * size
-    items = cards[start:start + size]
+    matched = cf.sort_items(cf.filter_cards(cards, filters), _check_sort(sort))
+    items = cf.page_of(matched, page, size)
     teasers: list[dict] = []
     if user is not None:
         raw = await _catalog_raw(session, ctx)
         _full, table_teasers = vis.visible_tables(raw["tables"], vmap, ctx)
-        if department:
-            wanted = vis.department_candidates(department) | {department}
+        if filters.departments:
             table_teasers = [
                 t for t in table_teasers
-                if (t.get("fullyQualifiedName") or "").split(".")[0] in wanted
+                if (t.get("fullyQualifiedName") or "").split(".")[0] in filters.departments
             ]
-        teasers = table_teasers[:size]
-    _with_dept_display(items, profiles)
-    _with_dept_display(teasers, profiles)
-    return {"items": items, "teasers": teasers, "total": total, "page": page, "size": size}
+        teasers = _with_dept_display(table_teasers[:size], profiles)
+    return {
+        "items": items,
+        "teasers": teasers,
+        "total": len(matched),
+        "department_count": len({c["service"] for c in matched}),
+        "page": page,
+        "size": size,
+        "facets": cf.facets(cards, filters),
+    }
+
+
+async def _with_dataset_info(
+    session: AsyncSession, ctx: dict | None, cards: list[dict], databases: list[dict]
+) -> None:
+    """Attach dataset facts (owner, steward, frequency, ...) to unlocked cards.
+
+    Locked teasers get none. Summaries cover only the tables this viewer
+    may open in full.
+    """
+    full = [c for c in cards if not c.get("locked")]
+    if not full:
+        return
+    raw = await _catalog_raw(session, ctx)
+    by_id = {t.get("id"): t for t in raw["tables"]}
+    members = {
+        c["dataset"]: [by_id[t.get("id")] for t in c.get("tables") or [] if t.get("id") in by_id]
+        for c in full
+    }
+    infos = await dataset_info_map(session, list(members))
+    table_infos = await table_info_map(
+        session, [t.get("fullyQualifiedName") or "" for ts in members.values() for t in ts]
+    )
+    for card in full:
+        key = card["dataset"]
+        card["info"] = facts_mod.resolve_dataset_info(
+            infos.get(key), _database_entity(databases, key), members[key], table_infos
+        )
 
 
 def _database_entity(databases: list[dict], dataset_fqn: str) -> dict | None:
@@ -429,18 +546,7 @@ async def dataset_by_fqn(
     for card in cards:
         if card["dataset"] == key:
             _with_dept_display([card], profiles)
-            if not card.get("locked"):
-                # Summaries cover only the tables this viewer may open in full.
-                visible_ids = {t.get("id") for t in card.get("tables") or []}
-                raw = await _catalog_raw(session, ctx)
-                members = [t for t in raw["tables"] if t.get("id") in visible_ids]
-                fqns = [t.get("fullyQualifiedName") or "" for t in members]
-                card["info"] = facts_mod.resolve_dataset_info(
-                    (await dataset_info_map(session, [key])).get(key),
-                    _database_entity(databases, key),
-                    members,
-                    await table_info_map(session, fqns),
-                )
+            await _with_dataset_info(session, ctx, [card], databases)
             return card
     # Not visible: confidential (non-admin) -> 404, never admit existence.
     raw = await _catalog_raw(session, ctx)
@@ -719,14 +825,28 @@ def _dataset_allowed_text(
 @router.get("/search")
 async def registry_search(
     q: str = Query(min_length=1),
-    department: str | None = None,
+    department: list[str] | None = Query(default=None),
     scope: str | None = None,
+    classification: list[str] | None = Query(default=None),
+    tag: list[str] | None = Query(default=None),
+    frequency: list[str] | None = Query(default=None),
+    api: list[str] | None = Query(default=None),
+    steward: list[str] | None = Query(default=None),
+    year_from: int | None = Query(default=None, ge=1000, le=9999),
+    year_to: int | None = Query(default=None, ge=1000, le=9999),
+    sort: str = "relevance",
     page: int = Query(default=1, ge=1),
     size: int = Query(default=20, ge=1, le=100),
     session: AsyncSession = Depends(db_get_session),
     user: User | None = Depends(get_optional_user),
 ) -> dict:
     """Grouped registry search: departments, datasets, tables, columns.
+
+    Takes the same filters as GET /datasets (department, classification,
+    tag, frequency, api, steward, year_from/year_to); tables and columns
+    are filtered by their dataset (tables by their own tags). `facets`
+    counts options over the matched datasets. Every group is sorted and
+    paged with page/size; each group's `total` is its filtered count.
 
     The OpenMetadata search runs first; the visibility filter applies after
     it and totals are re-computed post-filter. Departments and datasets stay
@@ -747,8 +867,9 @@ async def registry_search(
     if scope and not wanted_scopes:
         wanted_scopes = set(_VALID_SCOPES)
 
-    cards, vmap, databases, services = await _viewer_catalog(session, ctx)
-    profiles = _profiles_from_services(services)
+    filters = _catalog_filters(classification, tag, department, frequency, api, steward, year_from, year_to)
+    _check_sort(sort)
+    cards, vmap, databases, profiles = await _filterable_catalog(session, ctx)
     raw = await _catalog_raw(session, ctx)
     tables_by_dataset: dict[str, list[dict]] = {}
     for t in raw["tables"]:
@@ -757,16 +878,15 @@ async def registry_search(
 
     async with OpenMetadataClient() as client:
         try:
-            result = await client.search_tables(query=q, limit=size, page=page)
+            # Filters and paging run on our side, so fetch every candidate
+            # once instead of one OM page.
+            result = await client.search_tables(query=q, limit=SEARCH_CANDIDATES, page=1)
             candidates = result.get("data", [])
             fallback = False
         except Exception:
             page_data = await client.list_tables_paged(limit=1000)
             candidates = [t for t in page_data["data"] if _matches(t, needle)]
             fallback = True
-    if department:
-        wanted = vis.department_candidates(department) | {department}
-        candidates = [t for t in candidates if (t.get("fullyQualifiedName") or "").split(".")[0] in wanted]
 
     cards_by_dataset = {c["dataset"]: c for c in cards}
     kept_datasets: dict[str, dict] = {}
@@ -802,10 +922,7 @@ async def registry_search(
             kept_datasets[key] = card
         # else: only structural/column text matched -> discard
 
-    dataset_items = [kept_datasets[k] for k in sorted(kept_datasets)]
-    if department:
-        wanted = vis.department_candidates(department) | {department}
-        dataset_items = [c for c in dataset_items if c["service"] in wanted]
+    dataset_hits = [kept_datasets[k] for k in sorted(kept_datasets)]
 
     table_items: list[dict] = []
     column_items: list[dict] = []
@@ -861,11 +978,7 @@ async def registry_search(
                 "dataset": key,
                 "matched_in": matched_in,
                 "matched_columns": col_hits,
-                "tags": [
-                    tag.get("tagFQN") or tag.get("name")
-                    for tag in t.get("tags") or []
-                    if tag.get("tagFQN") or tag.get("name")
-                ],
+                "tags": vis.table_tags(t),
                 "updated_at": t.get("updatedAt"),
                 "data_classification": facts_mod.classification_of(t)
                 or facts_mod.classification_of(_database_entity(databases, key)),
@@ -884,32 +997,50 @@ async def registry_search(
                 }
             )
 
-    dept_items = [p for p in profiles if needle in _profile_text(p)] if needle else []
-    if department:
-        dept_items = [p for p in dept_items if p["slug"] == department]
+    _with_dept_display(table_items, profiles)
+    dataset_items = cf.filter_cards(dataset_hits, filters)
+    table_items = [
+        t for t in table_items
+        if cf.card_matches(cards_by_dataset[t["dataset"]], filters, tags=t["tags"])
+    ]
+    column_items = [c for c in column_items if cf.card_matches(cards_by_dataset[c["dataset"]], filters)]
+    # A department stays while it owns at least one dataset passing the filters.
+    passing_services = {c["service"] for c in cf.filter_cards(cards, filters)}
+    dept_items = [
+        p for p in (profiles if needle else [])
+        if needle in _profile_text(p)
+        and (not filters.departments or p["slug"] in filters.departments)
+        and (not filters.active or p["slug"] in passing_services)
+    ]
 
     groups = {
-        "departments": {"items": dept_items, "total": len(dept_items)},
-        "datasets": {"items": dataset_items, "total": len(dataset_items)},
-        "tables": {"items": table_items, "total": len(table_items)},
-        "columns": {"items": column_items, "total": len(column_items)},
+        "departments": dept_items,
+        "datasets": dataset_items,
+        "tables": table_items,
+        "columns": column_items,
     }
-    _with_dept_display(dataset_items, profiles)
-    _with_dept_display(table_items, profiles)
-    for name in _VALID_SCOPES:
-        if name not in wanted_scopes:
-            groups[name] = {"items": [], "total": 0}
-    total = sum(groups[n]["total"] for n in _VALID_SCOPES)
-    # Back-compat flat fields for existing clients.
+    out_groups = {
+        name: (
+            {"items": cf.page_of(cf.sort_items(items, sort), page, size), "total": len(items)}
+            if name in wanted_scopes
+            else {"items": [], "total": 0}
+        )
+        for name, items in groups.items()
+    }
+    total = sum(g["total"] for g in out_groups.values())
+    services = {c["service"] for c in dataset_items} | {
+        t["dataset"].split(".")[0] for t in table_items if t.get("dataset")
+    }
     return {
-        "departments": groups["departments"],
-        "datasets": groups["datasets"],
-        "tables": groups["tables"],
-        "columns": groups["columns"],
-        "data": dataset_items,
+        **out_groups,
+        # Back-compat flat field for existing clients (this page of datasets).
+        "data": out_groups["datasets"]["items"],
         "teasers": [],
         "total": total,
+        "department_count": len(services),
         "page": page,
+        "size": size,
+        "facets": cf.facets(dataset_hits, filters),
         "fallback": fallback,
     }
 

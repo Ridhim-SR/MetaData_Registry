@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import {
   listDatasets,
   searchRegistry,
+  type CatalogFilterParams,
   type ColumnHit,
   type DatasetCard as Card,
   type DepartmentHit,
@@ -14,7 +15,7 @@ import { Fragment } from "react";
 import { ErrorBlock, Skeleton } from "../components/registry/StateBlocks";
 import { CatBadge } from "../components/registry/CatBadge";
 import { t } from "../i18n";
-import { catLabel, formatUpdatedAt, humanizeRaw, normalizeClassification, readableTag } from "../utils/format";
+import { CAT_CATEGORIES, catLabel, formatUpdatedAt, humanizeRaw, normalizeClassification, readableTag } from "../utils/format";
 import { useAuth } from "../contexts/AuthContext";
 
 type Scope = "" | "departments" | "datasets" | "tables" | "columns";
@@ -31,10 +32,6 @@ const SORT_OPTIONS: Array<{ value: Sort; label: string }> = [
 
 const RPP_OPTIONS = [15, 30, 50];
 
-function updatedOf(item: { updated_at?: number | null }): number {
-  return item.updated_at ?? -1;
-}
-
 export function ExplorePage() {
   const [params, setParams] = useSearchParams();
   const q = params.get("q") ?? "";
@@ -43,7 +40,12 @@ export function ExplorePage() {
   const [search, setSearch] = useState(q);
   const [scope, setScope] = useState<Scope>(scopeParam);
   const [deptSel, setDeptSel] = useState<string[]>([]);
+  const [catSel, setCatSel] = useState<string[]>([]);
   const [tagSel, setTagSel] = useState<string[]>([]);
+  const [factSel, setFactSel] = useState<Partial<Record<FactField, string[]>>>({});
+  // Timeline: datasets whose years overlap this range (null = open end).
+  const [yearFrom, setYearFrom] = useState<number | null>(null);
+  const [yearTo, setYearTo] = useState<number | null>(null);
   const [sort, setSort] = useState<Sort>("relevance");
   const [rpp, setRpp] = useState(15);
   const [pages, setPages] = useState<Record<string, number>>({});
@@ -61,7 +63,7 @@ export function ExplorePage() {
   // Keep pagination at page 1 whenever filters/sort change so results stay visible.
   useEffect(() => {
     setPages({});
-  }, [deptSel, tagSel, sort]);
+  }, [deptSel, catSel, tagSel, factSel, yearFrom, yearTo, sort, rpp]);
 
   // Department browsing moved to /departments/:slug; keep old links working.
   const deptRedirect = department && !q.trim()
@@ -71,31 +73,51 @@ export function ExplorePage() {
   const trimmed = q.trim();
   const isSearch = trimmed.length > 0;
 
+  const pageFor = (g: string) => pages[g] ?? 1;
+  const pageCount = (total: number) => Math.max(1, Math.ceil(total / rpp));
+
+  // Filtering, facet counts, sorting and paging all run in the API; the
+  // page only sends the selection and renders the page it gets back.
+  const filters: CatalogFilterParams = {
+    department: deptSel.length ? deptSel : department ? [department] : undefined,
+    classification: catSel,
+    tag: tagSel,
+    frequency: factSel.frequency,
+    api: factSel.api,
+    steward: factSel.steward,
+    year_from: yearFrom,
+    year_to: yearTo,
+    sort,
+    size: rpp,
+  };
+
+  // Search pages the open tab; "All" shows each group's first page. Every
+  // group comes back with its total, so tab counts stay right on any tab.
+  const searchPage = scope ? pageFor(scope) : 1;
   const searchQuery = useQuery({
-    queryKey: ["registry-search", trimmed, scope || "all", department],
-    queryFn: () =>
-      searchRegistry({
-        q: trimmed,
-        scope: scope || undefined,
-        department: department || undefined,
-      }),
+    queryKey: ["registry-search", trimmed, filters, searchPage],
+    queryFn: () => searchRegistry({ q: trimmed, ...filters, page: searchPage }),
     enabled: isSearch && !deptRedirect,
     retry: false,
+    // While a filter or page changes, keep the current results (dimmed);
+    // a new search term starts from the loader.
+    placeholderData: (prev, prevQuery) => (prevQuery?.queryKey[1] === trimmed ? prev : undefined),
   });
 
-  // Browse mode (no query): list all datasets across departments once,
-  // paginate + filter client-side so the frontend never renders everything.
+  const browsePage = pageFor("datasets");
   const browseQuery = useQuery({
-    queryKey: ["registry-datasets", department],
-    queryFn: () => listDatasets({ department: department || undefined }),
+    queryKey: ["registry-datasets", filters, browsePage],
+    queryFn: () => listDatasets({ ...filters, page: browsePage }),
     enabled: !isSearch && !deptRedirect,
     retry: false,
+    placeholderData: keepPreviousData,
   });
 
   const data: SearchResult | undefined = searchQuery.data;
-  // Loader on every fetch so previous results never flash as current.
-  const searching = searchQuery.isPending || searchQuery.isFetching;
-  const browsing = browseQuery.isPending || browseQuery.isFetching;
+  const searching = searchQuery.isPending;
+  const browsing = !isSearch && browseQuery.isPending;
+  const refreshing = isSearch ? searchQuery.isPlaceholderData : browseQuery.isPlaceholderData;
+  const facets = isSearch ? data?.facets : browseQuery.data?.facets;
 
   const toggleList = (list: string[], v: string, set: (next: string[]) => void) =>
     set(list.includes(v) ? list.filter((x) => x !== v) : [...list, v]);
@@ -107,7 +129,11 @@ export function ExplorePage() {
     if (scope) next.set("scope", scope);
     if (department) next.set("department", department);
     setDeptSel([]);
+    setCatSel([]);
     setTagSel([]);
+    setFactSel({});
+    setYearFrom(null);
+    setYearTo(null);
     setPages({});
     setParams(next);
   };
@@ -123,158 +149,74 @@ export function ExplorePage() {
 
   const clearAllFilters = () => {
     setDeptSel([]);
+    setCatSel([]);
     setTagSel([]);
+    setFactSel({});
+    setYearFrom(null);
+    setYearTo(null);
     setPages({});
   };
 
   const hasFilters =
-    deptSel.length > 0 || tagSel.length > 0;
+    deptSel.length > 0 || catSel.length > 0 || tagSel.length > 0 || Object.values(factSel).some((v) => v?.length) ||
+    yearFrom !== null || yearTo !== null;
 
-  // ---- client-side filtering (visibility already decided by the backend) ----
-  // In browse mode (no q) filters run over the full dataset list;
-  // in search mode they run over the search hits.
-  const baseDatasetItems = useMemo<Card[]>(
-    () => (isSearch ? (data?.datasets.items ?? []) : (browseQuery.data?.items ?? [])),
-    [isSearch, data, browseQuery.data],
-  );
+  // ---- this page of results, as returned by the API ----
+  const filteredDatasets: Card[] = (isSearch ? data?.datasets.items : browseQuery.data?.items) ?? [];
+  const filteredTables: TableHit[] = data?.tables.items ?? [];
+  const filteredColumns: ColumnHit[] = data?.columns.items ?? [];
+  const filteredDepartments: DepartmentHit[] = data?.departments.items ?? [];
 
   const cardsByDataset = useMemo(() => {
     const map = new Map<string, Card>();
-    for (const c of baseDatasetItems) map.set(c.dataset, c);
+    for (const c of filteredDatasets) map.set(c.dataset, c);
     return map;
-  }, [baseDatasetItems]);
+  }, [filteredDatasets]);
 
-  const deptOptions = useMemo(() => {
-    const map = new Map<string, { slug: string; display: string; count: number }>();
-    for (const d of data?.departments.items ?? []) {
-      if (!isSearch) continue;
-      map.set(d.slug, {
-        slug: d.slug,
-        display: d.display_name || d.slug,
-        count: d.dataset_count ?? 0,
-      });
-    }
-    for (const c of baseDatasetItems) {
-      const slug = c.service;
-      const cur = map.get(slug);
-      if (cur) cur.count += 1;
-      else map.set(slug, { slug, display: c.department_display ?? c.department ?? slug, count: 1 });
-    }
-    return [...map.values()].sort((a, b) => a.display.localeCompare(b.display));
-  }, [data, baseDatasetItems, isSearch]);
-
-  const tagOptions = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const c of baseDatasetItems) {
-      for (const t of c.tags ?? []) map.set(t, (map.get(t) ?? 0) + 1);
-    }
-    if (isSearch) {
-      for (const t of data?.tables.items ?? []) {
-        for (const tag of t.tags ?? []) map.set(tag, (map.get(tag) ?? 0) + 1);
-      }
-    }
-    return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-  }, [baseDatasetItems, data, isSearch]);
-
-  // "MDSF.*" tags are data classification (shown without the prefix; PII is
-  // shown as "Sensitive (PII)"). Everything else stays under Tags with the
-  // "FieldTag."-style namespace stripped for display. Original values are
-  // always kept for filtering; on a display collision the full value is
-  // kept so no label appears twice in the same group.
-  const classificationOptions = useMemo(
-    () =>
-      uniqueFilterLabels(
-        tagOptions.filter(([value]) => value.startsWith("MDSF.")),
-        (value) => {
-          const rest = value.slice("MDSF.".length);
-          return rest.toUpperCase() === "PII" ? "Sensitive (PII)" : rest;
-        },
-      ),
-    [tagOptions],
+  // ---- sidebar options from the API's facet counts ----
+  const deptOptions = (facets?.department ?? []).map((d) => ({
+    slug: d.value,
+    display: d.label ?? d.value,
+    count: d.count,
+  }));
+  const classificationOptions = (facets?.classification ?? []).map(({ value, count }) => {
+    const name = CAT_CATEGORIES.find((c) => `CAT-${c.level}` === value)?.name;
+    return { value, label: name ? `${value} · ${name}` : value, count };
+  });
+  // Tags (FieldTag.*, MDSF.*) show without their namespace; on a display
+  // collision (FieldTag.PII vs MDSF.PII) the namespace is added back.
+  const tagOptions = uniqueFilterLabels(
+    (facets?.tags ?? [])
+      .map(({ value, count }) => [value, count] as [string, number])
+      .sort((a, b) => readableTag({ tagFQN: a[0], name: a[0] }).localeCompare(readableTag({ tagFQN: b[0], name: b[0] }))),
+    (value) => readableTag({ tagFQN: value, name: value }),
   );
-  const fieldTagOptions = useMemo(
-    () =>
-      uniqueFilterLabels(
-        tagOptions.filter(([value]) => !value.startsWith("MDSF.")),
-        (value) => readableTag({ tagFQN: value, name: value }),
-      ),
-    [tagOptions],
-  );
-
-  const passDept = (slug: string) => deptSel.length === 0 || deptSel.includes(slug);
-
-  const filteredDatasets = useMemo(() => {
-    let items = baseDatasetItems.filter(
-      (c) =>
-        passDept(c.service) &&
-        (tagSel.length === 0 || (c.tags ?? []).some((t) => tagSel.includes(t))),
-    );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    if (sort === "name") items = [...items].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-    else if (sort === "updated")
-      items = [...items].sort((a, b) => updatedOf(b) - updatedOf(a));
-    return items;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [baseDatasetItems, deptSel, tagSel, sort]);
-
-  const filteredTables = useMemo(() => {
-    const parentOk = (t: TableHit) => {
-      const service = t.dataset ? t.dataset.split(".")[0] : "";
-      if (!passDept(service)) return false;
-      if (tagSel.length > 0 && !(t.tags ?? []).some((tag) => tagSel.includes(tag))) return false;
-      return true;
-    };
-    let items = (data?.tables.items ?? []).filter(parentOk);
-    if (sort === "name") items = [...items].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-    else if (sort === "updated") items = [...items].sort((a, b) => updatedOf(b) - updatedOf(a));
-    return items;
-  }, [data, deptSel, tagSel, sort]);
-
-  const filteredColumns = useMemo(() => {
-    const parentOk = (c: ColumnHit) => {
-      const service = c.dataset ? c.dataset.split(".")[0] : "";
-      if (!passDept(service)) return false;
-      return true;
-    };
-    let items = (data?.columns.items ?? []).filter(parentOk);
-    if (sort === "name") items = [...items].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-    return items;
-  }, [data, deptSel, sort]);
-
-  const filteredDepartments = useMemo(() => {
-    let items: DepartmentHit[] = (data?.departments.items ?? []).filter((d) =>
-      deptSel.length === 0 ? true : deptSel.includes(d.slug),
-    );
-    if (sort === "name")
-      items = [...items].sort((a, b) => (a.display_name || "").localeCompare(b.display_name || ""));
-    return items;
-  }, [data, deptSel, sort]);
+  const factOptions = Object.fromEntries(
+    FACT_FIELDS.map(({ key }) => [
+      key,
+      (facets?.[key] ?? []).map(({ value, count }) => ({ value, label: factLabel(key, value), count })),
+    ]),
+  ) as Record<FactField, Array<{ value: string; label: string; count: number }>>;
+  const timelineYearOptions = facets?.years
+    ? Array.from({ length: facets.years.max - facets.years.min + 1 }, (_, i) => facets.years!.min + i)
+    : [];
 
   const activeGroups: Scope[] =
     scope === "" ? ["departments", "datasets", "tables", "columns"] : [scope];
 
   const groupTotals: Record<Exclude<Scope, "">, number> = {
-    departments: filteredDepartments.length,
-    datasets: filteredDatasets.length,
-    tables: filteredTables.length,
-    columns: filteredColumns.length,
+    departments: data?.departments.total ?? 0,
+    datasets: data?.datasets.total ?? 0,
+    tables: data?.tables.total ?? 0,
+    columns: data?.columns.total ?? 0,
   };
 
   const filteredTotal =
     groupTotals.departments + groupTotals.datasets + groupTotals.tables + groupTotals.columns;
 
-  const browseDeptCount = useMemo(
-    () => new Set(filteredDatasets.map((c) => c.service)).size,
-    [filteredDatasets],
-  );
-  const searchDeptCount = useMemo(() => {
-    const services = new Set<string>();
-    for (const c of filteredDatasets) services.add(c.service);
-    for (const t of filteredTables) {
-      if (t.dataset) services.add(t.dataset.split(".")[0]);
-    }
-    return services.size;
-  }, [filteredDatasets, filteredTables]);
+  const browseTotal = browseQuery.data?.total ?? 0;
+  const browseDeptCount = browseQuery.data?.department_count ?? 0;
+  const searchDeptCount = data?.department_count ?? 0;
 
   const multiDept = searchDeptCount > 1;
 
@@ -283,13 +225,6 @@ export function ExplorePage() {
     if (!isSearch) return [];
     return [...new Set(trimmed.toLowerCase().split(/\s+/).filter((w) => w.length >= 2))];
   }, [trimmed, isSearch]);
-
-  const pageFor = (g: string) => pages[g] ?? 1;
-  const pageCount = (total: number) => Math.max(1, Math.ceil(total / rpp));
-  const paged = <T,>(items: T[], g: string): T[] => {
-    const p = Math.min(pageFor(g), pageCount(items.length));
-    return items.slice((p - 1) * rpp, p * rpp);
-  };
 
   if (deptRedirect) {
     return <Navigate to={deptRedirect} replace />;
@@ -342,9 +277,39 @@ export function ExplorePage() {
         )}
       </div>
 
-      <h3 className="mt-4 font-medium" style={{ color: "var(--text)", fontSize: "0.875rem" }}>
-        Department
-      </h3>
+      <FilterGroup title={t("classificationFilter")}>
+        <FilterChecklist
+          options={classificationOptions}
+          selected={catSel}
+          onToggle={(value) => toggleList(catSel, value, setCatSel)}
+        />
+      </FilterGroup>
+
+      <FilterGroup title="Tags">
+        {tagOptions.length > 0 ? (
+          <FilterChecklist
+            options={tagOptions}
+            selected={tagSel}
+            onToggle={(value) => toggleList(tagSel, value, setTagSel)}
+          />
+        ) : (
+          <p className="mt-2" style={{ fontSize: "0.875rem", color: "var(--text-muted)" }}>No tags in these results.</p>
+        )}
+      </FilterGroup>
+
+      {FACT_FIELDS.filter(({ key }) => factOptions[key].length > 0).map(({ key, label }) => (
+        <FilterGroup key={key} title={label()}>
+          <FilterChecklist
+            options={factOptions[key]}
+            selected={factSel[key] ?? []}
+            onToggle={(value) =>
+              toggleList(factSel[key] ?? [], value, (next) => setFactSel((prev) => ({ ...prev, [key]: next })))
+            }
+          />
+        </FilterGroup>
+      ))}
+
+      <FilterGroup title="Department">
       {deptOptions.length > 4 && (
         <input
           type="search"
@@ -386,8 +351,9 @@ export function ExplorePage() {
                   checked={deptSel.includes(d.slug)}
                   onChange={() => toggleList(deptSel, d.slug, setDeptSel)}
                 />
-                <span className="flex-1">{humanizeRaw(d.display)}</span>
-                <span style={{ color: "var(--text-muted)" }}>{d.count}</span>
+                <span className="flex-1">
+                  {humanizeRaw(d.display)} <FilterCount count={d.count} />
+                </span>
               </label>
             </li>
           ))}
@@ -395,31 +361,7 @@ export function ExplorePage() {
           <li style={{ fontSize: "0.875rem", color: "var(--text-muted)" }}>No departments in these results.</li>
         )}
       </ul>
-
-      {classificationOptions.length > 0 && (
-        <>
-          <h3 className="mt-4 font-medium" style={{ color: "var(--text)", fontSize: "0.875rem" }}>
-            {t("classificationFilter")}
-          </h3>
-          <FilterChecklist
-            options={classificationOptions}
-            selected={tagSel}
-            onToggle={(value) => toggleList(tagSel, value, setTagSel)}
-          />
-        </>
-      )}
-      {fieldTagOptions.length > 0 && (
-        <>
-          <h3 className="mt-4 font-medium" style={{ color: "var(--text)", fontSize: "0.875rem" }}>
-            Tags
-          </h3>
-          <FilterChecklist
-            options={fieldTagOptions}
-            selected={tagSel}
-            onToggle={(value) => toggleList(tagSel, value, setTagSel)}
-          />
-        </>
-      )}
+      </FilterGroup>
     </div>
   );
 
@@ -551,7 +493,11 @@ export function ExplorePage() {
           </div>
         )}
 
-        <div className="min-w-0 flex-1">
+        <div
+          className="min-w-0 flex-1"
+          aria-busy={refreshing}
+          style={{ opacity: refreshing ? 0.6 : 1, transition: "opacity 0.15s" }}
+        >
           {!isSearch && browsing && (
             <div className="grid grid-cols-1 gap-4" role="status" aria-label="Loading datasets">
               {[0, 1, 2].map((i) => (
@@ -571,7 +517,7 @@ export function ExplorePage() {
             <div>
               <div className="flex flex-wrap items-center gap-3">
                 <h2 className="font-semibold" style={{ color: "var(--navy-900)", fontSize: "1.25rem" }} role="status">
-                  {filteredDatasets.length} result{filteredDatasets.length === 1 ? "" : "s"}
+                  {browseTotal} result{browseTotal === 1 ? "" : "s"}
                   {browseDeptCount > 0 && (
                     <span className="font-normal" style={{ color: "var(--text-muted)", fontSize: "0.9375rem" }}>
                       {" "}· Across {browseDeptCount} department{browseDeptCount === 1 ? "" : "s"}
@@ -590,6 +536,14 @@ export function ExplorePage() {
                       <option key={o.value} value={o.value}>{o.label}</option>
                     ))}
                   </select>
+                  <TimelineRange
+                    idPrefix="browse-timeline"
+                    years={timelineYearOptions}
+                    from={yearFrom}
+                    to={yearTo}
+                    onFrom={setYearFrom}
+                    onTo={setYearTo}
+                  />
                   <label htmlFor="browse-rpp" className="sr-only">Records per page</label>
                   <select
                     id="browse-rpp"
@@ -608,11 +562,11 @@ export function ExplorePage() {
                 <GroupSection
                   title="Datasets"
                   page={pageFor("datasets")}
-                  pages={pageCount(filteredDatasets.length)}
+                  pages={pageCount(browseTotal)}
                   onPage={(p) => setPages((prev) => ({ ...prev, datasets: p }))}
                 >
                   <ul style={{ display: "flex", flexDirection: "column", gap: "12px", listStyle: "none", margin: 0, padding: 0 }}>
-                    {paged(filteredDatasets, "datasets").map((c) => (
+                    {filteredDatasets.map((c) => (
                       <DatasetRow key={c.dataset} card={c} tokens={[]} />
                     ))}
                   </ul>
@@ -665,7 +619,7 @@ export function ExplorePage() {
             />
           )}
 
-          {isSearch && !searching && !searchQuery.error && (data?.total ?? 0) === 0 && (
+          {isSearch && !searching && !searchQuery.error && (data?.total ?? 0) === 0 && !hasFilters && (
             <div>
               <h2 className="font-semibold" style={{ color: "var(--navy-900)", fontSize: "1.25rem" }}>
                 No results for “{trimmed}”.
@@ -707,7 +661,7 @@ export function ExplorePage() {
             </div>
           )}
 
-          {isSearch && !searching && !searchQuery.error && (data?.total ?? 0) > 0 && (
+          {isSearch && !searching && !searchQuery.error && ((data?.total ?? 0) > 0 || hasFilters) && (
             <div>
               <div className="flex flex-wrap items-center gap-3">
                 <h2 className="font-semibold" style={{ color: "var(--navy-900)", fontSize: "1.25rem" }} role="status">
@@ -730,6 +684,14 @@ export function ExplorePage() {
                       <option key={o.value} value={o.value}>{o.label}</option>
                     ))}
                   </select>
+                  <TimelineRange
+                    idPrefix="timeline"
+                    years={timelineYearOptions}
+                    from={yearFrom}
+                    to={yearTo}
+                    onFrom={setYearFrom}
+                    onTo={setYearTo}
+                  />
                   <label htmlFor="rpp" className="sr-only">Records per page</label>
                   <select
                     id="rpp"
@@ -821,14 +783,15 @@ export function ExplorePage() {
                     text: t("viewAllCount", { count: String(groupTotals.departments) }),
                     onClick: () => onScopeChange("departments"),
                     total: groupTotals.departments,
-                    shown: paged(filteredDepartments, "departments").length,
+                    shown: filteredDepartments.length,
                   } : undefined}
+                  hidePager={scope === ""}
                   page={pageFor("departments")}
                   pages={pageCount(groupTotals.departments)}
                   onPage={(p) => setPages((prev) => ({ ...prev, departments: p }))}
                 >
                   <ul className="space-y-0">
-                    {paged(filteredDepartments, "departments").map((d) => (
+                    {filteredDepartments.map((d) => (
                       <li
                         key={d.slug}
                         className="py-3"
@@ -856,18 +819,19 @@ export function ExplorePage() {
                   icon={<DatabaseIcon />}
                   count={groupTotals.datasets}
                   hideTitle={scope !== ""}
+                  hidePager={scope === ""}
                   viewAll={scope === "" ? {
                     text: t("viewAllCount", { count: String(groupTotals.datasets) }),
                     onClick: () => onScopeChange("datasets"),
                     total: groupTotals.datasets,
-                    shown: paged(filteredDatasets, "datasets").length,
+                    shown: filteredDatasets.length,
                   } : undefined}
                   page={pageFor("datasets")}
                   pages={pageCount(groupTotals.datasets)}
                   onPage={(p) => setPages((prev) => ({ ...prev, datasets: p }))}
                 >
                   <ul style={{ display: "flex", flexDirection: "column", gap: "12px", listStyle: "none", margin: 0, padding: 0 }}>
-                    {paged(filteredDatasets, "datasets").map((c) => (
+                    {filteredDatasets.map((c) => (
                       <DatasetRow key={c.dataset} card={c} tokens={highlightTokens} />
                     ))}
                   </ul>
@@ -892,7 +856,7 @@ export function ExplorePage() {
                   onPage={(p) => setPages((prev) => ({ ...prev, tables: p }))}
                 >
                   <ul style={{ display: "flex", flexDirection: "column", gap: "8px", listStyle: "none", margin: 0, padding: 0 }}>
-                    {(scope === "" ? filteredTables.slice(0, 5) : paged(filteredTables, "tables")).map((hit) => (
+                    {(scope === "" ? filteredTables.slice(0, 5) : filteredTables).map((hit) => (
                       <TableResultCard
                         key={hit.fullyQualifiedName ?? hit.id}
                         hit={hit}
@@ -927,7 +891,7 @@ export function ExplorePage() {
                     className="grid grid-cols-1 sm:grid-cols-2"
                     style={{ gap: "12px", listStyle: "none", margin: 0, padding: 0 }}
                   >
-                    {(scope === "" ? filteredColumns.slice(0, 6) : paged(filteredColumns, "columns")).map((c, i) => (
+                    {(scope === "" ? filteredColumns.slice(0, 6) : filteredColumns).map((c, i) => (
                       <ColumnResultCard
                         key={`${c.dataset}-${c.table}-${c.name}-${i}`}
                         col={c}
@@ -1151,6 +1115,81 @@ function tableUrl(dataset: string | undefined, table: string | undefined, column
   return column ? `${base}?column=${encodeURIComponent(column)}` : base;
 }
 
+type FactField = "frequency" | "api" | "steward";
+
+/** Dataset-fact filter groups in the sidebar (Timeline sits next to sort). */
+const FACT_FIELDS: Array<{ key: FactField; label: () => string }> = [
+  { key: "frequency", label: () => "Update frequency" },
+  { key: "api", label: () => t("apiAvailable") },
+  { key: "steward", label: () => "Data steward" },
+];
+
+function factLabel(field: FactField, value: string): string {
+  return field === "api" ? t(value === "yes" ? "yes" : "no") : value;
+}
+
+/** Timeline filter: datasets whose years overlap From..To. */
+function TimelineRange({
+  years, from, to, onFrom, onTo, idPrefix,
+}: {
+  years: number[];
+  from: number | null;
+  to: number | null;
+  onFrom: (y: number | null) => void;
+  onTo: (y: number | null) => void;
+  idPrefix: string;
+}) {
+  if (years.length === 0) return null;
+  const style: React.CSSProperties = {
+    border: "1px solid var(--border)", borderRadius: 6, padding: "0.35rem 0.6rem", fontSize: "0.875rem", background: "var(--bg)",
+  };
+  return (
+    <div className="flex items-center gap-1" role="group" aria-label="Timeline" style={{ fontSize: "0.875rem", color: "var(--text-muted)" }}>
+      <span>Timeline</span>
+      <label htmlFor={`${idPrefix}-from`} className="sr-only">Data from year</label>
+      <select id={`${idPrefix}-from`} value={from ?? ""} onChange={(e) => onFrom(e.target.value ? Number(e.target.value) : null)} style={style}>
+        <option value="">From</option>
+        {years.filter((y) => to === null || y <= to).map((y) => <option key={y} value={y}>{y}</option>)}
+      </select>
+      <span aria-hidden="true">–</span>
+      <label htmlFor={`${idPrefix}-to`} className="sr-only">Data to year</label>
+      <select id={`${idPrefix}-to`} value={to ?? ""} onChange={(e) => onTo(e.target.value ? Number(e.target.value) : null)} style={style}>
+        <option value="">To</option>
+        {years.filter((y) => from === null || y >= from).map((y) => <option key={y} value={y}>{y}</option>)}
+      </select>
+    </div>
+  );
+}
+
+/** Sidebar filter section that folds away under its heading. */
+function FilterGroup({ title, children, defaultOpen = true }: { title: string; children: React.ReactNode; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <section className="mt-3 pb-2" style={{ borderBottom: "1px solid var(--border)" }}>
+      <h3>
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+          className="flex w-full items-center justify-between font-semibold"
+          style={{ color: "var(--navy-900)", fontSize: "0.9375rem", background: "none", border: "none", cursor: "pointer", padding: "0.25rem 0" }}
+        >
+          {title}
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"
+            style={{ transform: open ? "rotate(180deg)" : undefined, transition: "transform 0.15s" }}>
+            <path d="M4 6l4 4 4-4" />
+          </svg>
+        </button>
+      </h3>
+      {open && children}
+    </section>
+  );
+}
+
+function FilterCount({ count }: { count: number }) {
+  return <span style={{ color: "var(--blue-700)", fontWeight: 600 }}>({count})</span>;
+}
+
 /** Display labels for one filter group with collision disambiguation. */
 function uniqueFilterLabels(
   entries: Array<[string, number]>,
@@ -1166,7 +1205,7 @@ function uniqueFilterLabels(
   return entries.map(([value, count], i) => ({
     value,
     count,
-    label: dupes.has(labels[i]) ? value : labels[i],
+    label: dupes.has(labels[i]) && value.includes(".") ? `${labels[i]} (${value.split(".")[0]})` : labels[i],
   }));
 }
 
@@ -1190,8 +1229,9 @@ function FilterChecklist({
                 checked={selected.includes(value)}
                 onChange={() => onToggle(value)}
               />
-              <span className="flex-1" style={{ overflowWrap: "anywhere" }}>{label}</span>
-              <span style={{ color: "var(--text-muted)" }}>{count}</span>
+              <span className="flex-1" style={{ overflowWrap: "anywhere" }}>
+                {label} <FilterCount count={count} />
+              </span>
             </label>
           </li>
         ))}
