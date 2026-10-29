@@ -302,6 +302,22 @@ def soft_delete_table(storage: ObjectStorage, table_id: str) -> dict:
     return row
 
 
+def restore_table(storage: ObjectStorage, table_id: str) -> dict:
+    """Clear a table's soft-delete marker while preserving its history."""
+
+    with storage.lock(TABLES_PATH):
+        rows = storage.read_csv(TABLES_PATH) if storage.exists(TABLES_PATH) else []
+        row = next((r for r in rows if r["table_id"] == table_id), None)
+        if row is None:
+            raise ValueError(f"Unknown table_id '{table_id}' -- not found in {TABLES_PATH}")
+        if not row.get("deleted"):
+            return row
+        row["deleted"] = ""
+        storage.write_csv(TABLES_PATH, rows)
+    logger.info(f"Table restored in the registry: {table_id}")
+    return row
+
+
 def append_run(storage: ObjectStorage, row: dict) -> None:
     """Append one row to the run log (`_lookups/runs.csv`), filling any
     missing field with "" so a partial row (a run that failed early) still
