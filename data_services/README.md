@@ -46,6 +46,43 @@ The backup runs on its own at the end of steps 1 and 3.
 
 **Once a month:** `python3 -m src.storage.backup verify` to check the backup is complete.
 
+### Deleting and purging catalog entities
+
+The default deletion is a reversible soft-delete. It hides the selected
+OpenMetadata entities, marks registry tables as deleted, and retains storage
+and history. Use `--list` to review soft-deleted tables and `--restore` to
+reactivate a scope.
+
+```bash
+python3 -m src.schema_registry.delete --table pwd.vishwakarma.works
+python3 -m src.schema_registry.delete --list
+python3 -m src.schema_registry.delete --table pwd.vishwakarma.works --restore
+```
+
+Permanent deletion is a separate, explicit purge. The target must already be
+soft-deleted; `--purge` permanently removes OpenMetadata, storage, and registry
+rows. Review a dry run before approving it:
+
+```bash
+python3 -m src.schema_registry.delete --table pwd.vishwakarma.works --purge --dry-run
+python3 -m src.schema_registry.delete --table pwd.vishwakarma.works --purge --yes
+```
+
+Both operations require the environment-specific dedicated
+`<ENV>_OPENMETADATA_ADMIN_JWT_TOKEN` (for example,
+`DEV_OPENMETADATA_ADMIN_JWT_TOKEN`).
+The regular ingestion token is intentionally rejected. For S3/Wasabi,
+`<ENV>_WASABI_DELETE_ACCESS_KEY_ID` and
+`<ENV>_WASABI_DELETE_SECRET_ACCESS_KEY` are also required; they must belong
+to a key permitted to delete the selected environment's objects. Local
+filesystem storage does not need S3 credentials.
+
+The command asks for environment confirmation before making changes. `--yes`
+bypasses the prompt for approved automation. Every lifecycle operation is
+recorded in `_lookups/deletions.csv` with the operator, environment, target,
+counts, and status. Dedicated S3 deletion credentials are required only for
+`--purge`.
+
 ---
 
 ## How it works
