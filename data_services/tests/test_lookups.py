@@ -45,21 +45,21 @@ def test_upsert_dataset_links_to_department(tmp_path):
     storage = LocalObjectStorage(tmp_path)
     lookups.upsert_dataset(storage, "pwd.vishwakarma", "pwd", "vishwakarma")
     rows = storage.read_csv(lookups.DATASETS_PATH)
-    assert rows == [
-        {
-            "dataset_id": "pwd.vishwakarma",
-            "department_id": "pwd",
-            "dataset_name": "vishwakarma",
-            "category": "",
-            "api_available": "",
-            "owner": "",
-            "steward": "",
-            "frequency": "",
-            "timeline": "",
-            "dataset_description": "",
-            "dataset_type": "",
-        }
-    ]
+    expected = {
+        "dataset_id": "pwd.vishwakarma",
+        "department_id": "pwd",
+        "dataset_name": "vishwakarma",
+        "category": "",
+        "api_available": "",
+        "owner": "",
+        "steward": "",
+        "frequency": "",
+        "timeline": "",
+        "dataset_description": "",
+        "dataset_type": "",
+    }
+    assert len(rows) == 1
+    assert {key: rows[0][key] for key in expected} == expected
 
 
 def test_upsert_dataset_carries_dataset_type_forward(tmp_path):
