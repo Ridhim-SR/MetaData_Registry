@@ -364,3 +364,48 @@ def test_reingesting_with_a_blank_tag_keeps_the_earlier_answer(tmp_path):
     assert results["t1"]["columns"][0]["tag"] == "Geospatial"
     # while a description the second file does answer still updates
     assert results["t1"]["columns"][0]["business_description"] == "Latitude of the village"
+
+
+# --- the optional `Unit` column, end to end -----------------------------
+
+
+def _write_dictionary_with_unit(tmp_path, rows, name="field_dictionary_unit.csv"):
+    """`rows` are 6-tuples of the plain header plus a Unit cell."""
+    path = tmp_path / name
+    header = "Dataset Name,Dataset Field,Data Description,Format,Mandatory (Y/N),Unit"
+    lines = [header] + [",".join(row) for row in rows]
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return str(path)
+
+
+def test_unit_column_reaches_the_curated_column_normalized(tmp_path):
+    storage = LocalObjectStorage(tmp_path / "storage")
+    lookups.register_department(storage, "welfare", "Social Welfare Department")
+    source = _write_dictionary_with_unit(
+        tmp_path,
+        [("t1", "total_cost", "Total sanctioned cost", "Numeric (12 Digits)", "Y", "₹")],
+    )
+
+    results = run_field_dictionary(department="welfare", dataset="cmsvy", source_file=source, storage=storage)
+
+    column = results["t1"]["columns"][0]
+    assert column["unit"] == "INR"
+    assert column["readable_type"] == "Decimal Number"
+
+
+def test_unit_on_a_text_column_fails_that_table_only(tmp_path):
+    storage = LocalObjectStorage(tmp_path / "storage")
+    lookups.register_department(storage, "welfare", "Social Welfare Department")
+    source = _write_dictionary_with_unit(
+        tmp_path,
+        [
+            ("t1", "total_cost", "Total cost", "Numeric (12 Digits)", "Y", "INR"),
+            ("t2", "branch_name", "Branch name", "Text", "Y", "INR"),
+        ],
+    )
+
+    results = run_field_dictionary(department="welfare", dataset="cmsvy", source_file=source, storage=storage)
+
+    assert results["t1"]["status"] == "ok"
+    assert results["t2"]["status"] == "failed"
+    assert "only allowed on numeric columns" in results["t2"]["error"]

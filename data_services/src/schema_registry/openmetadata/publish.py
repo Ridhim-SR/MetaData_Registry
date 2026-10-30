@@ -268,6 +268,16 @@ def _columns_for_put(columns: list[Column]) -> list[Column]:
     return put_columns
 
 
+def _display_label(row: dict) -> str:
+    """The readable label OpenMetadata should show for one curated column."""
+
+    readable_type = (row.get("readable_type") or "").strip()
+    if not readable_type:
+        return ""
+    unit = (row.get("unit") or "").strip()
+    return f"{readable_type} ({unit})" if unit else readable_type
+
+
 def _to_column(row: dict) -> Column:
     raw_type = row["data_type"].strip().lower()
     data_type = _TYPE_MAP.get(raw_type)
@@ -291,6 +301,13 @@ def _to_column(row: dict) -> Column:
     name_hindi = (row.get("name_hindi") or "").strip()
     if name_hindi:
         kwargs["displayName"] = name_hindi
+    # A plain-language type ("Whole Number", "Text") is what the catalog UI
+    # shows instead of the raw Postgres type; appending the unit makes
+    # "Decimal Number (INR)" readable in the same cell. `unit` still reaches
+    # extraMetadata for machine use.
+    display = _display_label(row)
+    if display:
+        kwargs["dataTypeDisplay"] = display
     if data_type in _LENGTH_REQUIRED_TYPES:
         length = row.get("length")
         kwargs["dataLength"] = int(length) if length else _DEFAULT_LENGTH
@@ -359,6 +376,7 @@ _CUSTOM_PROPERTY_NAMES = {
     "steward": "datasetSteward",
     "frequency": "frequency",
     "timeline": "timeline",
+    "dataset_type": "datasetType",
 }
 
 
@@ -413,7 +431,7 @@ def _resolve_owner(client: OpenMetadata, owner: str) -> EntityReference | None:
 # place in OpenMetadata's own fields -- kept in case it's wanted later.
 EXTRA_METADATA_PROPERTY = "extraMetadata"
 _PUBLISHED_ELSEWHERE = {"table_id", "name", "business_description", "tag", "classification", "glossary_term",
-                        "ingestion_timestamp"}
+                        "ingestion_timestamp", "readable_type"}
 
 
 def _extra_metadata_json(curated_columns: list[dict], curated_path: str) -> str:
@@ -472,10 +490,12 @@ def _ensure_database(
         "/databases",
         _unwrap(database.id),
         {
+            "description": description or "",
             "tags": [t.model_dump(mode="json", exclude_none=True) for t in tags],
             "extension": extension,
             "owners": [o.model_dump(mode="json", exclude_none=True) for o in owners],
         },
+        op="add",
     )
     return database
 
@@ -814,6 +834,7 @@ def publish_table(
             "steward": dataset_row.get("steward", ""),
             "frequency": dataset_row.get("frequency", ""),
             "timeline": dataset_row.get("timeline", ""),
+            "dataset_type": dataset_row.get("dataset_type", ""),
         },
         owner_ref=_resolve_owner(client, dataset_row.get("owner", "")),
     )
@@ -845,6 +866,169 @@ def publish_table(
         "fully_qualified_name": _fqn(table),
         "curated_path": curated_path,
         "column_count": len(curated_columns),
+    }
+
+
+# A recreated table is a new entity: everything that lived on the old one and
+# is not rebuilt by publish_table() is copied back from this captured JSON.
+_RECREATE_BACKUP_PREFIX = "_lookups/om_recreate_backups"
+_RESTORED_TABLE_FIELDS = (
+    "description",
+    "owners",
+    "tags",
+    "tableType",
+    "retentionPeriod",
+    "sourceUrl",
+)
+
+
+def _stale_display_columns(table: Table, curated: list[dict]) -> list[str]:
+    """Column names whose stored `dataTypeDisplay` does not match curate's
+    readable label. Columns OpenMetadata has never seen are skipped: the next
+    publish adds them, and a new column keeps its display."""
+
+    stored = {}
+    for column in table.columns or []:
+        if column is not None:
+            stored[str(_unwrap(column.name))] = str(_unwrap(column.dataTypeDisplay) or "")
+    stale = []
+    for row in curated:
+        expected = _display_label(row)
+        name = str(_unwrap(row.get("name")))
+        if not expected or name not in stored:
+            continue
+        # OpenMetadata lower-cases dataTypeDisplay on write.
+        if stored[name].strip().lower() != expected.strip().lower():
+            stale.append(name)
+    return stale
+
+
+def _restore_table_fields(client: OpenMetadata, fqn: str, before: dict) -> list[str]:
+    """Copy the old table's user-owned fields onto the recreated entity."""
+
+    after = _get_or_none(client, Table, fqn)
+    if after is None:
+        return []
+    after_json = after.model_dump(mode="json")
+    fields = {
+        field: before[field]
+        for field in _RESTORED_TABLE_FIELDS
+        if before.get(field) and before.get(field) != after_json.get(field)
+    }
+    if fields:
+        _replace_entity_fields(client, "/tables", _unwrap(after.id), fields, op="add")
+    return sorted(fields)
+
+
+def publish_table_fixing_display(
+    client: OpenMetadata,
+    storage: ObjectStorage,
+    table_id: str,
+    *,
+    allow_category_below_columns: bool = False,
+    dry_run: bool = False,
+) -> dict:
+    """Publish one table, recreating it only when OpenMetadata kept a stale
+    readable type.
+
+    OpenMetadata 2.0.2's table updater ignores `dataTypeDisplay` for an
+    existing column whose `dataType` did not change, so a readable label added
+    later (curate/backfill) never reaches the UI. A column only keeps a new
+    display when it is created, so the fix is to hard-delete the table and
+    publish it again. Before deleting, the whole entity is written to
+    `_lookups/om_recreate_backups/<table_id>/<timestamp>.json`; user-owned
+    fields (description, owners, table tags, table type, retention, source
+    URL) are copied back afterwards. The registry and the curated snapshots
+    are never touched.
+
+    Returns `status` = created | published | would recreate | recreated.
+    """
+
+    department_id, dataset_slug, table_slug = table_id.split(".")
+    table_row = lookups.get_table(storage, table_id)
+    if table_row is None:
+        raise ValueError(f"Unknown table_id '{table_id}' -- not found in {lookups.TABLES_PATH}")
+    if table_row.get("deleted"):
+        raise ValueError(
+            f"{table_id} was soft-deleted on {table_row['deleted']} -- re-ingest it before recreating."
+        )
+
+    fqn = f"{department_id}.{dataset_slug}.{table_row['schema_name']}.{table_row['table_name']}"
+    curated = storage.read_csv(
+        lookups.latest_curated_snapshot_path(storage, department_id, dataset_slug, table_slug)
+    )
+
+    existing = _get_or_none(client, Table, fqn)
+    if existing is None:
+        published = publish_table(
+            client, storage, table_id, allow_category_below_columns=allow_category_below_columns
+        )
+        return {**published, "status": "created", "columns": []}
+
+    stale = _stale_display_columns(existing, curated)
+    if not stale:
+        published = publish_table(
+            client, storage, table_id, allow_category_below_columns=allow_category_below_columns
+        )
+        return {**published, "status": "published", "columns": []}
+
+    if dry_run:
+        return {
+            "table_id": table_id,
+            "fully_qualified_name": fqn,
+            "status": "would recreate",
+            "columns": stale,
+        }
+
+    from src.schema_registry.pipeline import _timestamp
+
+    ts = _timestamp()
+    backup_path = f"{_RECREATE_BACKUP_PREFIX}/{table_id}/{ts}.json"
+    storage.write_bytes(
+        backup_path,
+        json.dumps(
+            {
+                "table_id": table_id,
+                "fully_qualified_name": fqn,
+                "captured_at": ts,
+                "entity": existing.model_dump(mode="json"),
+            },
+            indent=2,
+            default=str,
+        ).encode("utf-8"),
+    )
+
+    client.delete(entity=Table, entity_id=str(_unwrap(existing.id)), recursive=True, hard_delete=True)
+    logger.warning(
+        f"Hard-deleted {fqn} to refresh dataTypeDisplay ({len(stale)} column(s)); backup -> {backup_path}"
+    )
+
+    try:
+        published = publish_table(
+            client, storage, table_id, allow_category_below_columns=allow_category_below_columns
+        )
+    except Exception as exc:  # noqa: BLE001 -- the backup is the recovery path
+        raise RuntimeError(
+            f"{table_id}: recreated in OpenMetadata but the republish failed; "
+            f"backup at {backup_path}: {exc}"
+        ) from exc
+
+    restored = _restore_table_fields(client, fqn, existing.model_dump(mode="json"))
+    after = _get_or_none(client, Table, fqn)
+    remaining = _stale_display_columns(after, curated) if after is not None else stale
+    if remaining:
+        raise RuntimeError(
+            f"{table_id}: readable type still stale after recreate for {remaining}; "
+            f"backup at {backup_path}"
+        )
+
+    logger.info(f"Recreated {fqn} with readable column types; restored fields: {restored or 'none'}")
+    return {
+        **published,
+        "status": "recreated",
+        "columns": stale,
+        "restored_fields": restored,
+        "backup_path": backup_path,
     }
 
 

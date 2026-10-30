@@ -40,7 +40,7 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 DEFAULT_CATALOG = Path(__file__).resolve().parents[2] / "catalog.yaml"
-_DATASET_FIELD_KEYS = ("category", "owner", "steward", "frequency", "timeline", "api_available", "description")
+_DATASET_FIELD_KEYS = ("category", "dataset_type", "owner", "steward", "frequency", "timeline", "api_available", "description")
 
 
 def input_key(department: str, dataset: str, file_name: str) -> str:

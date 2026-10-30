@@ -5,7 +5,8 @@ updating a department's data".
 
 Checked strictly when loaded: an unknown key (a typo like `ownr:`), a
 category that isn't CAT-1..CAT-4, or an unknown format fails with the exact
-place to fix, instead of being silently ignored.
+place to fix, instead of being silently ignored. So does a `dataset_type`
+that isn't one of DATASET_TYPES.
 """
 
 import re
@@ -18,16 +19,21 @@ from src.schema_registry.registry import lookups
 
 _FORMATS = {"postgres_ddl", "csv"}
 _CATEGORY_RE = re.compile(r"^CAT-[1-4]$")
+# Who the dataset is about: citizens/beneficiaries, or the department's own
+# administration (schemes, budgets, works). Exact spelling, like `category`.
+DATASET_TYPES = ("Citizen Centric", "Administrative")
 
 # catalog key -> datasets.csv field
 _DATASET_FIELD_KEYS = {
     "category": "category",
+    "dataset_type": "dataset_type",
     "api_available": "api_available",
     "owner": "owner",
     "steward": "steward",
     "frequency": "frequency",
     "timeline": "timeline",
     "description": "dataset_description",
+    "source_url": "source_url",
 }
 
 
@@ -101,6 +107,12 @@ def parse_catalog(text: str) -> list[DepartmentEntry]:
             category = _text(ds.get("category"))
             if category and not _CATEGORY_RE.match(category):
                 raise CatalogError(f"{ds_where}.category: '{category}' must be CAT-1, CAT-2, CAT-3 or CAT-4 (or left blank)")
+            dataset_type = _text(ds.get("dataset_type"))
+            if dataset_type and dataset_type not in DATASET_TYPES:
+                raise CatalogError(
+                    f"{ds_where}.dataset_type: '{dataset_type}' must be "
+                    f"{' or '.join(repr(t) for t in DATASET_TYPES)} (or left blank)"
+                )
             dataset = DatasetEntry(
                 name=str(ds_name),
                 fields={csv_field: _text(ds.get(key)) for key, csv_field in _DATASET_FIELD_KEYS.items()},

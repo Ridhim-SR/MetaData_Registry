@@ -192,6 +192,61 @@ def test_a_column_without_a_hindi_name_does_not_gain_the_key():
     assert "name_hindi" not in curated[0]
 
 
+# --- readable_type: derived, never submitted ---------------------------------
+
+
+@pytest.mark.parametrize("data_type,label", [
+    ("integer", "Whole Number"),
+    ("BIGINT", "Whole Number"),
+    ("numeric", "Decimal Number"),
+    ("double precision", "Decimal Number"),
+    ("character varying", "Text"),
+    ("text", "Text"),
+    ("boolean", "Yes / No"),
+    ("date", "Date"),
+    ("timestamp without time zone", "Date & Time"),
+    ("time", "Time"),
+    ("jsonb", "Structured Data"),
+    ("uuid", "ID"),
+    ("bytea", "File"),
+])
+def test_readable_type_is_derived_from_the_data_type(data_type, label):
+    curated = curate_schema([_col("c", data_type)])
+    assert curated[0]["readable_type"] == label
+
+
+def test_readable_type_cannot_be_overridden_by_business_metadata():
+    """The label must describe the type the parser actually read, so a
+    metadata file cannot make an integer column claim to be Text."""
+    curated = curate_schema([_col("sno", "integer")], {"sno": {"readable_type": "Text"}})
+    assert curated[0]["readable_type"] == "Whole Number"
+
+
+# --- unit: reviewed answer, numeric columns only ------------------------------
+
+
+@pytest.mark.parametrize("submitted,expected", [
+    ("₹", "INR"), ("Rs", "INR"), ("Rs.", "INR"), ("rupees", "INR"), ("INR", "INR"),
+    ("$", "USD"), ("usd", "USD"),
+    ("percent", "%"), ("%", "%"),
+    ("hectare", "hectare"),  # open-ended units are kept as submitted
+    ("  days  ", "days"),
+])
+def test_unit_spellings_are_normalized(submitted, expected):
+    curated = curate_schema([_col("amount", "numeric")], {"amount": {"unit": submitted}})
+    assert curated[0]["unit"] == expected
+
+
+def test_a_column_without_a_unit_gets_a_blank_one():
+    curated = curate_schema([_col("amount", "numeric")])
+    assert curated[0]["unit"] == ""
+
+
+def test_unit_on_a_non_numeric_column_is_rejected():
+    with pytest.raises(ValueError, match="only allowed on numeric columns"):
+        curate_schema([_col("branch_name", "character varying")], {"branch_name": {"unit": "INR"}})
+
+
 # --- auto_classify: whole-token matching for the short, ambiguous words ----------------------------
 
 @pytest.mark.parametrize("name,level", [

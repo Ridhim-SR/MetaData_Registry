@@ -27,9 +27,16 @@ def test_valid_catalog_parses():
     (ds,) = dept.datasets
     assert ds.fields["category"] == "CAT-3" and ds.fields["owner"] == "PWD IT Cell"
     assert ds.fields["frequency"] == ""
+    assert ds.fields["dataset_type"] == ""
     v, works = ds.tables
     assert (v.format, v.schema, v.metadata) == ("postgres_ddl", "public", None)
     assert (works.format, works.schema, works.metadata) == ("csv", "ops", "storage:inputs/pwd/works_meta.csv")
+
+
+def test_dataset_type_values_parse():
+    for value in ("Citizen Centric", "Administrative"):
+        (dept,) = parse_catalog(_VALID.replace("owner: PWD IT Cell", f"dataset_type: {value}"))
+        assert dept.datasets[0].fields["dataset_type"] == value
 
 
 @pytest.mark.parametrize(
@@ -37,6 +44,7 @@ def test_valid_catalog_parses():
     [
         (_VALID.replace("owner:", "ownr:"), r"unknown key\(s\) \['ownr'\]"),
         (_VALID.replace("CAT-3", "cat3"), "must be CAT-1, CAT-2, CAT-3 or CAT-4"),
+        (_VALID.replace("owner: PWD IT Cell", "dataset_type: citizen"), "dataset_type: 'citizen' must be 'Citizen Centric' or 'Administrative'"),
         (_VALID.replace("format: csv", "format: excel"), "format: 'excel' must be one of"),
         (_VALID.replace("          works:", "          Vishwakarma-T:"), "same table id 'vishwakarma_t'"),
         (_VALID.replace("source: storage:inputs/pwd/v.txt", "schema: public"), r"missing required key\(s\) \['source'\]"),
@@ -73,8 +81,25 @@ def test_shipped_catalog_is_valid():
     from src.schema_registry.catalog import load_catalog
 
     departments = load_catalog("catalog.yaml")
-    # All three live departments, pwd first exactly as main has it. pwd is
+    # Every live department, pwd first exactly as main has it. pwd is
     # another team's; commenting it out here would silently disable their
     # data the moment this branch merges into main, so the list is asserted
     # in full rather than by membership.
-    assert [d.id for d in departments] == ["pwd", "agri_dept", "rural_development_department"]
+    assert [d.id for d in departments] == [
+        "pwd",
+        "agri_dept",
+        "rural_development_department",
+        "women_and_child_development_department",
+        "non_proprietary_data",
+    ]
+
+    # Kanya Sumangala is Women & Child Development, not Agriculture: two
+    # citizen-facing datasets, both personal data (CAT-3), each described by
+    # one multi-table Field Dictionary in storage.
+    wcd = next(d for d in departments if d.id == "women_and_child_development_department")
+    assert wcd.name == "Women and Child Development Department"
+    assert [ds.name for ds in wcd.datasets] == ["kanya_sumangla_portal", "pm_matru_vandana_yojana"]
+    assert all(ds.fields["category"] == "CAT-3" for ds in wcd.datasets)
+    assert all(ds.fields["dataset_type"] == "Citizen Centric" for ds in wcd.datasets)
+    assert all(ds.field_dictionary and ds.field_dictionary.startswith("storage:inputs/")
+               for ds in wcd.datasets)

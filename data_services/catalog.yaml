@@ -6,6 +6,7 @@
 #
 # Per dataset (all optional; blank = not set):
 #   category      CAT-1 | CAT-2 | CAT-3 | CAT-4
+#   dataset_type  Citizen Centric | Administrative
 #   owner, steward, frequency, timeline, api_available (Y/N), description
 # Per table:
 #   source        storage:<key> of the department's file (required)
@@ -31,10 +32,11 @@ departments:
         category: CAT-3
         owner: Public Works Department (PWD)
         steward:
+        dataset_type: Administrative
         frequency: Daily
-        timeline:
+        timeline: "01-06-2019 - ongoing"
         api_available:
-        description: "Works managed by the Public Works Department under the Vishwakarma scheme: road and bridge works with their costs, year-wise funds, tenders, agreements, contractors, progress and locations."
+        description: "System to monitor all activities related to financial management of the sanctioned projects online. It is an end-to-end integration of all financial activities, right from sanction of the project to its completion, including all checks and balances."
         tables:
           vishwakarma_T:
             source: storage:inputs/pwd/vishwakarma/pwd_vishwakarma_full_raw_columns.txt
@@ -47,6 +49,7 @@ departments:
         category: CAT-3
         owner: Agriculture Department
         steward:
+        dataset_type: Citizen Centric
         frequency:
         timeline:
         api_available:
@@ -81,6 +84,7 @@ departments:
         category: CAT-3
         owner: Agriculture Department
         steward:
+        dataset_type: Citizen Centric
         frequency:
         timeline:
         api_available:
@@ -98,6 +102,7 @@ departments:
         category: CAT-3
         owner: Agriculture Department
         steward:
+        dataset_type: Administrative
         frequency:
         timeline:
         api_available:
@@ -126,6 +131,7 @@ departments:
         category: CAT-1
         owner: Rural Development Department
         steward:
+        dataset_type: Citizen Centric
         frequency: yearly
         timeline: 2014-15 to 2025-26
         api_available: N
@@ -141,6 +147,7 @@ departments:
         category: CAT-1
         owner: Rural Development Department
         steward:
+        dataset_type: Administrative
         frequency: yearly
         timeline: 2023-27
         api_available: N
@@ -160,6 +167,7 @@ departments:
         category: CAT-1
         owner: Rural Development Department
         steward:
+        dataset_type: Citizen Centric
         frequency:
         timeline:
         api_available: N
@@ -850,3 +858,54 @@ departments:
             source: storage:inputs/horticulture_department/dbt_schemes/YearMaster.csv
             format: csv
             metadata: storage:inputs/horticulture_department/dbt_schemes/YearMaster_metadata.csv
+  women_and_child_development_department:
+    name: Women and Child Development Department
+    datasets:
+      kanya_sumangla_portal:
+        category: CAT-3
+        owner: Women and Child Development Department
+        steward:
+        dataset_type: Citizen Centric
+        frequency:
+        timeline:
+        api_available:
+        description: >-
+          Beneficiary records for the Kanya Sumangala Yojana portal: applicant
+          and family registration, Aadhaar and bank details, and the six
+          stage-wise assistance claims (birth, immunisation, Class 1, Class 6,
+          Class 9 and higher education).
+        field_dictionary: storage:inputs/women_and_child_development_department/kanya_sumangla_portal_field_dictionary.csv
+      pm_matru_vandana_yojana:
+        category: CAT-3
+        owner: Women and Child Development Department
+        steward:
+        dataset_type: Citizen Centric
+        frequency:
+        timeline:
+        api_available:
+        description: >-
+          Applications under the Pradhan Mantri Matru Vandana Yojana: beneficiary
+          and husband identity, address and bank details, undertakings, document
+          checklist, prior enrolment and field verification.
+        field_dictionary: storage:inputs/women_and_child_development_department/pm_matru_vandana_yojana_field_dictionary.csv
+  non_proprietary_data:
+    name: Non-Proprietary Data
+    datasets:
+      night_time_light_over_india:
+        category: CAT-1
+        dataset_type:
+        owner: National Remote Sensing Centre, ISRO
+        steward:
+        source_url : https://bhuvan-app1.nrsc.gov.in/bhuvan_ntl/
+        frequency: Annual
+        timeline:
+        api_available: No
+        description: >-
+          State-wise annual night-time light (NTL) radiance for India, derived
+          from satellite imagery. Source: National Remote Sensing Centre (NRSC),
+          ISRO.
+        tables:
+          NightTimeLight:
+            source: storage:inputs/non_proprietary_data/night_time_light_ntl_over_india/NTL_schema_metadata.csv
+            format: csv
+            metadata: storage:inputs/non_proprietary_data/night_time_light_ntl_over_india/NTL_metadata.csv

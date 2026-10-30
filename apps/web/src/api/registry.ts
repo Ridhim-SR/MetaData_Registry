@@ -6,6 +6,10 @@ export interface RegistryStats {
   departments: number;
   datasets: number;
   tables: number;
+  /** Visible datasets per CAT category ("CAT-1".."CAT-4", "unclassified"); sums to `datasets`. */
+  by_classification?: Record<string, number>;
+  /** Visible datasets per type ("Citizen Centric", "Administrative", "unspecified"); sums to `datasets`. */
+  by_dataset_type?: Record<string, number>;
 }
 
 export interface Department {
@@ -129,6 +133,8 @@ export interface DatasetCard {
   access_level: AccessLevel;
   /** Dataset CAT category ("CAT-1".."CAT-4") from OM DataSensitivity tags; drives access. */
   classification?: string | null;
+  /** "Citizen Centric" | "Administrative" from the OM datasetType custom property; null when not set. */
+  dataset_type?: string | null;
   department?: string | null;
   department_display?: string | null;
   /** Teaser cards carry locked:true and no tables. Full cards carry tables. */
@@ -138,14 +144,54 @@ export interface DatasetCard {
   tags?: string[];
   /** Max member-table updatedAt (epoch ms), null when unknown/hidden. */
   updated_at?: number | null;
-  /** Dataset-level facts; only on unlocked cards from getDataset. */
+  /** Dataset-level facts; only on unlocked cards (list and getDataset). */
   info?: DatasetInfo | null;
+}
+
+export interface FacetOption {
+  value: string;
+  count: number;
+  /** Display name (departments only). */
+  label?: string;
+}
+
+/** Filter option counts from the API; each ignores its own selection. */
+export interface CatalogFacets {
+  classification: FacetOption[];
+  tags: FacetOption[];
+  department: FacetOption[];
+  frequency: FacetOption[];
+  /** "yes" / "no". */
+  api: FacetOption[];
+  steward: FacetOption[];
+  /** Overall timeline span, null when no dataset has a timeline. */
+  years: { min: number; max: number } | null;
+}
+
+/** Catalog filters: values ORed within a filter, filters ANDed. */
+export interface CatalogFilterParams {
+  department?: string | string[];
+  classification?: string[];
+  tag?: string[];
+  frequency?: string[];
+  api?: string[];
+  steward?: string[];
+  year_from?: number | null;
+  year_to?: number | null;
+  sort?: "relevance" | "updated" | "name";
+  page?: number;
+  size?: number;
 }
 
 export interface DatasetList {
   items: DatasetCard[];
   teasers?: RegistryTable[];
+  /** Filtered count (all pages). */
   total: number;
+  department_count?: number;
+  page?: number;
+  size?: number;
+  facets?: CatalogFacets;
 }
 
 export interface SearchGroup<T> {
@@ -190,7 +236,10 @@ export interface SearchResult {
   data: DatasetCard[];
   teasers?: RegistryTable[];
   total: number;
+  department_count?: number;
   page: number;
+  size?: number;
+  facets?: CatalogFacets;
   fallback?: boolean;
 }
 
@@ -212,9 +261,29 @@ export function listPublicDatasets() {
   return apiGet<DatasetList>("/registry/datasets/public");
 }
 
-export function listDatasets(params: { department?: string; search?: string } = {}) {
+/** Append filters to a query string (repeated keys for several values). */
+function appendFilters(qs: URLSearchParams, params: CatalogFilterParams) {
+  const lists: Array<[string, string | string[] | undefined]> = [
+    ["department", params.department],
+    ["classification", params.classification],
+    ["tag", params.tag],
+    ["frequency", params.frequency],
+    ["api", params.api],
+    ["steward", params.steward],
+  ];
+  for (const [key, value] of lists) {
+    for (const v of Array.isArray(value) ? value : value ? [value] : []) qs.append(key, v);
+  }
+  if (params.year_from != null) qs.set("year_from", String(params.year_from));
+  if (params.year_to != null) qs.set("year_to", String(params.year_to));
+  if (params.sort && params.sort !== "relevance") qs.set("sort", params.sort);
+  if (params.page) qs.set("page", String(params.page));
+  if (params.size) qs.set("size", String(params.size));
+}
+
+export function listDatasets(params: CatalogFilterParams & { search?: string } = {}) {
   const qs = new URLSearchParams();
-  if (params.department) qs.set("department", params.department);
+  appendFilters(qs, params);
   if (params.search) qs.set("search", params.search);
   const suffix = qs.toString();
   return apiGet<DatasetList>(`/registry/datasets${suffix ? `?${suffix}` : ""}`);
@@ -245,18 +314,10 @@ export function getTableLineage(tableId: string) {
   return apiGet<TableLineage>(`/openmetadata/metadata/tables/${encodeURIComponent(tableId)}/lineage`);
 }
 
-export function searchRegistry(params: {
-  q: string;
-  department?: string;
-  scope?: string;
-  page?: number;
-  size?: number;
-}) {
+export function searchRegistry(params: CatalogFilterParams & { q: string; scope?: string }) {
   const qs = new URLSearchParams({ q: params.q });
-  if (params.department) qs.set("department", params.department);
+  appendFilters(qs, params);
   if (params.scope) qs.set("scope", params.scope);
-  if (params.page) qs.set("page", String(params.page));
-  if (params.size) qs.set("size", String(params.size));
   return apiGet<SearchResult>(`/registry/search?${qs.toString()}`);
 }
 
