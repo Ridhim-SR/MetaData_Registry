@@ -62,6 +62,7 @@ class DatasetEntry:
 class DepartmentEntry:
     id: str
     name: str
+    description: str = ""
     datasets: list[DatasetEntry] = field(default_factory=list)
 
 
@@ -97,8 +98,12 @@ def parse_catalog(text: str) -> list[DepartmentEntry]:
         where = f"departments.{dept_id}"
         if lookups.slugify(str(dept_id)) != str(dept_id):
             raise CatalogError(f"{where}: department id must be lowercase letters, digits and _ (try '{lookups.slugify(str(dept_id))}')")
-        dept = _check_keys(where, dept, {"name", "datasets"}, {"name"})
-        entry = DepartmentEntry(id=str(dept_id), name=_text(dept["name"]))
+        dept = _check_keys(where, dept, {"name", "description", "datasets"}, {"name"})
+        entry = DepartmentEntry(
+            id=str(dept_id),
+            name=_text(dept["name"]),
+            description=_text(dept.get("description")),
+        )
 
         for ds_name, ds in (dept.get("datasets") or {}).items():
             ds_where = f"{where}.datasets.{ds_name}"

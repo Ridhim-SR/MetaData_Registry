@@ -157,31 +157,61 @@ AUTO_CLASSIFICATION_RULES: list[tuple[str, re.Pattern]] = [
     ("Public", re.compile(r"(scheme|program|project|initiative|policy|guideline)", re.IGNORECASE)),
 ]
 
-# (tag, pattern over field name) -- first match wins, order matters
+# (tag, pattern over field name) -- first match wins, order matters. These
+# rules provide draft suggestions; curate_schema() does not auto-tag published
+# metadata without a reviewed dictionary value.
 AUTO_TAG_RULES: list[tuple[str, re.Pattern]] = [
-    ("Financial", re.compile(r"(cost|amount|budget|expense|deposit|surrender|saving|fund|price)", re.IGNORECASE)),
+    ("Financial", re.compile(
+        r"(bank_account|account_no|account_number|ifsc|branch_name|bank_name|"
+        r"cost|amount|budget|expense|expenditure|deposit|surrender|saving|fund|price|"
+        r"income|benefit|salary|wage|pension|allowance|allocation|sanction|disbursement|"
+        r"subsidy|transaction|bill|loan|credit|debit|interest|repayment|fee|"
+        r"(^|_)share($|_))",
+        re.IGNORECASE,
+    )),
+    ("Status/Workflow", re.compile(
+        r"(^|_)status(_|$)|(^|_)(is|has|was|were)_[a-z0-9_]+$|"
+        r"(_|^)(flag|validity|declaration|decl|available|functional|provided|"
+        r"developed|registered|completed|paid|received)$",
+        re.IGNORECASE,
+    )),
     ("Firm/Contractor-Identifier", re.compile(r"(firm_pannumber|firm_name|bidder_name|contractor)", re.IGNORECASE)),
-    ("Geospatial", re.compile(r"^(lat|longs?|chainage_|geofanc_)", re.IGNORECASE)),
-    ("Status/Workflow", re.compile(r"_status$", re.IGNORECASE)),
-    ("Date/Timestamp", re.compile(r"(_date|_at)$", re.IGNORECASE)),
+    ("Geospatial", re.compile(
+        r"^(lat|longs?|chainage_|geofanc_)|"
+        r"(^|_)(state|district|block|gp|gram_panchayat|village|tehsil|taluka|taluk|"
+        r"town|city|ward|latitude|longitude|pincode|pin_code|postal_code|"
+        r"area_type|location_type|mohalla|post_office|landmark|birth_place|"
+        r"place_of_birth|sign_place)(_|$)",
+        re.IGNORECASE,
+    )),
+    ("Date/Timestamp", re.compile(r"(_date|_at)$|(^|_)(year|financial_year|fy)$", re.IGNORECASE)),
+    ("Identifier", re.compile(r"(^|_)(id|uuid)$|(_id|_no|_number|_code)$", re.IGNORECASE)),
+    ("Quantity", re.compile(
+        r"(^|_)(no_of_|total_|count_|num_|cumul_)[a-z0-9_]+$|"
+        r"(_count|_quantity|_qty|_workers?|_jobcards?|_persondays|_mandays|"
+        r"_duration(_years?)?|_threshold|_instalments?|_age|_members|"
+        r"_(hh|pers|indiv)|_land|_area)$|"
+        r"(^|_)(fam_completed_100_days|completed_100_days)$|"
+        r"(^|_)(land_)?area_(hectares?|acres?|sq_?m|sq_?ft)$|"
+        r"(^|_)quantity$|(^|_)maxno(_|$)|"
+        r"(^|_)(lowest|highest)_class$",
+        re.IGNORECASE,
+    )),
+    ("Remarks", re.compile(r"(^|_)(remarks|notes?)$", re.IGNORECASE)),
 ]
 
 # The controlled vocabulary for a column's `tag`. Two kinds of value live
 # here, and only the first kind may ever be auto-assigned:
 #
-#   * everything AUTO_TAG_RULES can detect from a field name. Adding a rule
-#     rewrites tagging for every department, so a new entry there is a
-#     behaviour change, not a vocabulary change.
+#   * everything AUTO_TAG_RULES can suggest from a field name. A rule change
+#     affects AI-generated drafts for every department, but does not silently
+#     tag published metadata; those tags still require review.
 #
-#   * values that are real but not name-inferable -- a human supplied them
-#     and the vocabulary merely permits them. PII (already used by real
-#     Field Dictionaries), Sensitive (the MDSF s5.1 sensitive attributes
-#     ai_metadata's apply_rules() writes), and PWD's own field dictionary:
-#     Remarks, Identifier, Administrative-Unit and Quantity. That file was
-#     curated on 2026-10-13, before validate_tag() existed, so all four are
-#     already published under OpenMetadata's FieldTag Classification. They
-#     are allowed here so a republish passes, and deliberately kept out of
-#     AUTO_TAG_RULES so the auto-tagger never starts inventing them.
+#   * values the vocabulary permits even though no generic name rule assigns
+#     them. PII and Sensitive are applied by ai_metadata's privacy rules;
+#     Administrative-Unit is retained from PWD's reviewed dictionary.
+#     Remarks, Identifier and Quantity also occur in that dictionary and have
+#     conservative name rules above for AI draft suggestions.
 #
 # Anything outside this set is a typo or an invented value, and publishing
 # it would silently create a brand-new tag under the FieldTag Classification

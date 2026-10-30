@@ -8,6 +8,8 @@
 #   category      CAT-1 | CAT-2 | CAT-3 | CAT-4
 #   dataset_type  Citizen Centric | Administrative
 #   owner, steward, frequency, timeline, api_available (Y/N), description
+# Per department:
+#   description   About text shown on its OpenMetadata database service
 # Per table:
 #   source        storage:<key> of the department's file (required)
 #   format        postgres_ddl (default) | csv
@@ -27,6 +29,13 @@ departments:
   #     python3 -m src.schema_registry.sync --department agri_dept
   pwd:
     name: Public Works Department
+    description: >-
+      The Public Works Department (PWD) plans, designs, constructs, and
+      maintains state highways, major district roads, bridges, and government
+      administrative buildings. It records data on road network lengths,
+      surface types, construction tender milestones, bridge structural audits,
+      contractor certifications, and maintenance activities and project
+      expenditures.
     datasets:
       vishwakarma:
         category: CAT-3
@@ -45,6 +54,12 @@ departments:
             metadata: storage:inputs/pwd/vishwakarma/pwd_vishwakarma_full_raw_columns_metadata.csv
   agri_dept:
     name: Agriculture Department
+    description: >-
+      The Agriculture Department formulates agricultural policies, enhances
+      crop productivity, and distributes subsidized seeds, fertilizers, and
+      farm equipment across the state. It records data on landholding patterns,
+      soil health cards, seasonal crop sowing and yields, farm machinery
+      subsidies, and direct benefit transfers under schemes like PM-KISAN.
     datasets:
       distribution_record_dataset:
         category: CAT-3
@@ -130,6 +145,12 @@ departments:
             metadata: storage:inputs/agri_dept/scheme_physical_financial_progress_dataset/grant_wise_bill_generation_metadata.csv
   rural_development_department:
     name: Rural Development Department
+    description: >-
+      The Rural Development Department spearheads rural poverty alleviation,
+      infrastructure building, and employment generation programs across rural
+      districts. It records data on MGNREGA job cards, person-days generated,
+      wage payments, rural housing sanctions (PMAY-G), village road assets, and
+      rural self-help group capitalization.
     datasets:
       mgnrega:
         category: CAT-1
@@ -871,6 +892,13 @@ departments:
             metadata: storage:inputs/horticulture_department/dbt_schemes/YearMaster_metadata.csv
   women_and_child_development_department:
     name: Women and Child Development Department
+    description: >-
+      The Women and Child Development Department executes child protection
+      initiatives, adolescent welfare programs, and nutritional interventions
+      for mothers and infants. It records data on Anganwadi center operations,
+      child growth and malnutrition metrics, supplementary nutrition
+      distribution, juvenile justice cases, and financial aid under schemes
+      like Mukhyamantri Kanya Sumangala Yojana.
     datasets:
       kanya_sumangla_portal:
         category: CAT-3

@@ -6,10 +6,11 @@
   Review it, then load it with:  add <raw file> ... --metadata <that csv>
 - Prints a suggested dataset description and classification. Nothing is
   written for them: copy them into catalog.yaml yourself once the dataset is there.
-- Identifier and sensitive-attribute tags (PII / Sensitive) are applied by rules from the
-  MeitY Model Data Sharing Framework (s5.1), not left to the model. Any PII column forces
-  the table to CAT-3 at minimum. A dataset's category is the HIGHEST across its tables,
-  so take the maximum yourself when you enter it in catalog.yaml.
+- PII and Sensitive tags are enforced by rules from the MeitY Model Data Sharing
+  Framework (s5.1); shared registry rules fill other blank tags as reviewable
+  suggestions. Any PII or Sensitive column forces the table to CAT-3 at minimum.
+  A dataset's category is the HIGHEST across its tables, so take the maximum
+  yourself when you enter it in catalog.yaml.
 
 Only field names and types are sent to Claude, never records. It is a manual
 step run ahead of `add`; the pipeline itself never calls it.
@@ -27,6 +28,11 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from src.schema_registry.add import guess_format
+from src.schema_registry.curate import (
+    KNOWN_TAGS as CURATED_KNOWN_TAGS,
+    auto_tag,
+    validate_tag,
+)
 from src.schema_registry.pipeline import parse_source
 from src.utils.logger import get_logger
 
@@ -34,10 +40,7 @@ logger = get_logger(__name__)
 
 MODEL = "claude-sonnet-5-5"
 DEFAULT_DEFINITIONS = Path(__file__).resolve().parents[2] / "samples" / "cat_definitions.txt"
-KNOWN_TAGS = (
-    "PII", "Sensitive", "Financial", "Firm/Contractor-Identifier",
-    "Geospatial", "Status/Workflow", "Date/Timestamp",
-)
+KNOWN_TAGS = tuple(CURATED_KNOWN_TAGS)
 CATEGORY_ORDER = ["CAT-1", "CAT-2", "CAT-3", "CAT-4"]
 
 # Framework s5.1 direct identifiers and quasi-identifiers -> PII.
@@ -48,16 +51,71 @@ CATEGORY_ORDER = ["CAT-1", "CAT-2", "CAT-3", "CAT-4"]
 # / rashan_card (and only those), and registration_no stays covered by its
 # own alternative. `mobile_verified` is deliberately not excluded here --
 # NOT_PII below handles it, because "mobile" is a match anywhere.
+# These patterns are intentionally based on field meaning, not department
+# names, so they also cover newly added schemas from other departments:
+#   * a person's name in any role -- child, mother, husband, applicant,
+#     account holder, teacher, officer or family head. The role word must sit
+#     immediately before "name", so place and organisation names (district_name,
+#     school_name, bank_name, village_name) stay out of it.
+#   * identity and benefit documents -- a certificate, proof, receipt,
+#     marksheet, card scan or passbook copy is the same disclosure as the
+#     passport/Aadhaar it reproduces.
+#   * the beneficiary chain's own identifiers -- parivar (household) id,
+#     PFMS id, Aadhaar enrolment (eid) number, alternate id, school
+#     enrolment number, health id -- each identifies one person exactly as
+#     registration_no already did.
+#   * the dwelling's street/house line, which is the residential address
+#     s5.1 names, written one level finer.
+#   * a scanned signature or thumb impression, a biometric under s5.1.
+#   * uploaded documents and audit actor fields, which can carry a person's
+#     identity even when a new schema uses an unfamiliar department prefix.
+# A checklist flag (chk_bank_passbook) and a proof *type*
+# (beneficiary_id_proof_type) are not the uploaded document or the number:
+# document prefixes and file suffixes identify actual uploads, while ID rules
+# name the exact column rather than matching every "beneficiary_id" field.
 DIRECT_ID = re.compile(
     r"(^name$|farmer_name|father_name|vendor_name|hindi_(name|father_name|address)|"
     r"mobile|email|aadh?a{1,2}r|adhar|pan_?(no|number)|passport|voter|licen[cs]e|"
     r"account_no|account_number|registration_no|rashan|(^|_)ration|"
-    r"(^|_)address$|date_of_birth|(^|_)dob$|^image$|photo)",
+    r"application_(no|number|id)|(^|_)address$|date_of_birth|(^|_)dob$|^image$|photo|"
+    r"(^|_)(first|middle|last|full|child|mother|parent|guardian|husband|wife|"
+    r"beneficiary|applicant|student|candidate|patient|holder|account_holder|"
+    r"bride|groom|teacher|employee|official|officer|principal|head|user|operator|"
+    r"asha|anm|supervisor|hof|hos)_name($|_)|"
+    r"parivar_id|pfms_beneficiary_id|(^|_)eid_(no|number)$|alt_id_no|enroll?ment_no|health_id|"
+    r"street_house_no|house_building|passbook_(pdf_)?file|"
+    r"_(cert|proof|receipt|card|marksheet|id|pdf)_file$|"
+    r"(^|_)(epic_no|hrn_no|doc_ref_no|bpl_card_no|job_card_no)$|"
+    r"(^|_)sign_thumb|"
+    r"(^|_)(student|teacher)_(national_)?code$|(^|_)admission_number$|"
+    r"(^|_)doc_(?!id($|_)|name($|_))[a-z0-9_]+|"
+    r"(^|_)(attached_file|upload_document|bill_upload)$|"
+    r"(^|_)(created|modified|updated|deleted|assigned|approved|reviewed|"
+    r"verified|uploaded|rejected|cancelled|processed|entered)_by$|"
+    r"(^|_)assign(ed)?_(by|to)$|"
+    r"(^|_)(biometric|fingerprint|iris)($|_))",
     re.I,
 )
-NOT_PII = re.compile(r"mobile_verified", re.I)  # a status flag, not the number itself
-# Framework s5.1 sensitive attributes -> Sensitive
-SENSITIVE = re.compile(r"(caste|religion|disab|health|criminal|migrat)", re.I)
+NOT_PII = re.compile(
+    r"mobile_verified|caste_application_(no|number|id)",
+    re.I,
+)  # verification flag / caste-record reference, not a direct identifier
+# Sensitive attributes include demographic, health, justice, education and
+# welfare information found across department schemas. Social-group labels
+# match aggregate workforce/household measures, not unrelated SC/ST tokens.
+SENSITIVE = re.compile(
+    r"(caste|religion|disab|health|criminal|migrat|gender|(^|_)sex($|_)|"
+    r"immuni[sz]|vaccin|pregnan|(^|_)dose(_|$)|(^|_)lmp(_|$)|blood_?group|"
+    r"social_category|caste_category|caste_desc|category_desc|living_status|"
+    r"marital_status|cwsn|minority|(^|_)bpl($|_)|(^|_)token($|_)|"
+    r"(^|_)(academic_record|exam_score|marks_obtained|attendance_record)($|_)|"
+    r"(^|_)(sc|st|sts|others|women)(_|$).*"
+    r"(workers?|jobcards?|accounts?|beneficiaries|registered|active|cumul)|"
+    r"(?=.*(^|_)(sc|st|sts|others|women)(_|$))"
+    r"(^|_)(workers?|jobcards?|accounts?|beneficiaries|registered|active|cumul)(_|$)|"
+    r"(^|_)(join_acc_women|total_acc_women)$)",
+    re.I,
+)
 
 
 def _prompt(columns: list[dict], definitions: str | None) -> str:
@@ -69,15 +127,18 @@ def _prompt(columns: list[dict], definitions: str | None) -> str:
     return f"""You are documenting a government department's database table for a data catalogue.
 From the field names and types only, return JSON with:
 - "columns": a list with one object per field: {{"name": <exactly as given>, "business_description": <one plain sentence>, "tag": <short label or "">}}.
-  Prefer these tags when they fit: {", ".join(KNOWN_TAGS)}. Leave tag "" if none fits. If a name is unclear, say so in the description rather than guessing.
-  Use PII only for a direct identifier of a person or an account: their name (farmer_name, father_name,
-  vendor_name and the hindi_* forms), Aadhaar, PAN, passport, voter ID, driving licence, mobile number,
-  email, residential address, date of birth, photograph, bank account number, ration card number, or a
-  registration number. registration_id / vendor_registration_id are internal keys, not identifiers, and
-  a verification flag such as mobile_verified is not the number it refers to -- neither is PII.
-  Use Sensitive for caste, religion, health, disability, criminal record or migration status.
-  PII and Sensitive are re-applied from the MDSF s5.1 rules after you answer, so a tag that disagrees
-  with them is discarded; a tag the rules do not cover is kept as you wrote it.
+  Use only these approved tags: {", ".join(KNOWN_TAGS)}. Use Identifier for non-personal IDs, Administrative-Unit for administrative geography, Quantity for counts, and Remarks for notes. Leave tag "" if none fits. If a name is unclear, say so in the description rather than guessing.
+  Use PII for a direct person/account identifier, including names in person roles, national/student/teacher IDs,
+  government identity or benefit-document numbers, uploaded identity documents, biometric data, contact details,
+  residential addresses, dates of birth, bank account numbers, and application numbers. Place and organization
+  names (such as district_name and school_name) are not personal names. registration_id /
+  vendor_registration_id are internal keys, not identifiers, and a verification flag such as mobile_verified
+  is not the number it refers to -- neither is PII. A field such as created_by
+  or uploaded_by can itself identify an operator and is treated as PII.
+  Use Sensitive for caste, religion, gender, health, disability, criminal record, migration status, and
+  similarly sensitive demographic, welfare, or individual education attributes.
+  PII and Sensitive are re-applied from the MDSF s5.1 rules after you answer. Other blank tags are filled
+  from the shared registry's extensible name rules; an explicit approved tag is preserved.
 - "dataset": {{"description": <one or two sentences on what the table holds>, {category}, "reason": <one line>}}
 Return only the JSON.
 
@@ -98,7 +159,7 @@ def draft(columns: list[dict], definitions: str | None) -> dict:
 
 
 def apply_rules(columns: list[dict], drafted: list[dict]) -> tuple[list[dict], list[str]]:
-    """Rule-based PII / Sensitive tags override the model. PII wins over Financial.
+    """Privacy rules override the model; shared tag rules fill only blank tags.
 
     Also adds an entry for any field the model skipped, so the rules still cover it.
     Returns (drafted, names whose tag the rules changed) so the changes can be reviewed.
@@ -114,10 +175,17 @@ def apply_rules(columns: list[dict], drafted: list[dict]) -> tuple[list[dict], l
         elif SENSITIVE.search(name):
             new = "Sensitive"
         else:
-            continue
-        if d.get("tag") != new:
-            changed.append(f"{name}: '{d.get('tag', '')}' -> {new}")
-            d["tag"] = new
+            new = d.get("tag") or auto_tag(name) or ""
+
+        old = d.get("tag") or ""
+        if old != new:
+            changed.append(f"{name}: '{old}' -> {new}")
+        d["tag"] = new
+        if new and not validate_tag(new):
+            raise ValueError(
+                f"{name}: unknown tag {new!r} -- allowed tags are "
+                f"{', '.join(KNOWN_TAGS)}."
+            )
     return list(by_name.values()), changed
 
 
