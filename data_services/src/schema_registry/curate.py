@@ -13,6 +13,53 @@ KNOWN_POSTGRES_TYPES = {
     "timestamp with time zone", "time", "json", "jsonb", "uuid", "bytea",
 }
 
+# Raw Postgres type -> the label a non-technical reader understands. Derived,
+# never submitted: the curated file must not be able to disagree with the type
+# the parser actually read. A closed mapping for the same reason as
+# KNOWN_POSTGRES_TYPES -- an unmapped type means curate/publish are out of
+# sync, not that a new label should be invented.
+READABLE_DATA_TYPES = {
+    "integer": "Whole Number",
+    "bigint": "Whole Number",
+    "smallint": "Whole Number",
+    "serial": "Whole Number",
+    "bigserial": "Whole Number",
+    "numeric": "Decimal Number",
+    "decimal": "Decimal Number",
+    "double precision": "Decimal Number",
+    "real": "Decimal Number",
+    "character varying": "Text",
+    "varchar": "Text",
+    "character": "Text",
+    "text": "Text",
+    "boolean": "Yes / No",
+    "date": "Date",
+    "timestamp without time zone": "Date & Time",
+    "timestamp with time zone": "Date & Time",
+    "time": "Time",
+    "json": "Structured Data",
+    "jsonb": "Structured Data",
+    "uuid": "ID",
+    "bytea": "File",
+}
+
+# A unit describes a quantity, so it only makes sense on a number. Enforced
+# because "INR" on a text column is a submission mistake, not a unit worth
+# publishing.
+NUMERIC_DATA_TYPES = {
+    "integer", "bigint", "smallint", "serial", "bigserial",
+    "numeric", "decimal", "double precision", "real",
+}
+
+# The currency/percentage spellings departments actually write, mapped to one
+# canonical code. Only these are rewritten: other units (hectare, day, count,
+# ...) are open-ended and are kept exactly as submitted.
+_UNIT_ALIASES = {
+    "₹": "INR", "rs": "INR", "rs.": "INR", "rupee": "INR", "rupees": "INR", "inr": "INR",
+    "$": "USD", "us$": "USD", "usd": "USD",
+    "%": "%", "percent": "%", "percentage": "%",
+}
+
 # MDSF Classification Levels (per field, not per dataset)
 # Ordered from least to most restrictive
 CLASSIFICATION_LEVELS = [
@@ -174,6 +221,44 @@ def auto_classify(field_name: str) -> str:
     return ""
 
 
+def readable_data_type(data_type: str) -> str:
+    """The non-technical label for a Postgres type, e.g. integer -> Whole
+    Number, character varying -> Text. Raises on an unmapped type so a new
+    type is added here (and to KNOWN_POSTGRES_TYPES) instead of the curated
+    file quietly getting a blank/guessed label."""
+
+    label = READABLE_DATA_TYPES.get((data_type or "").strip().lower())
+    if label is None:
+        raise ValueError(
+            f"No readable label for data type {data_type!r} -- add it to "
+            f"READABLE_DATA_TYPES in curate.py."
+        )
+    return label
+
+
+def normalize_unit(unit: str) -> str:
+    """Collapse the spellings people use for the same unit (₹ / Rs / rupees
+    -> INR, $ -> USD, percent -> %) into one code. Anything else is returned
+    trimmed and unchanged."""
+
+    text = (unit or "").strip()
+    return _UNIT_ALIASES.get(text.lower(), text)
+
+
+def validate_unit(unit: str, data_type: str) -> str:
+    """Normalize a submitted unit and refuse it on a non-numeric column: a
+    unit on text/date is a mistake in the submission, not something to
+    silently publish."""
+
+    normalized = normalize_unit(unit)
+    if normalized and (data_type or "").strip().lower() not in NUMERIC_DATA_TYPES:
+        raise ValueError(
+            f"unit {normalized!r} is only allowed on numeric columns, but this "
+            f"field is {data_type!r}. Remove the unit or fix the column type."
+        )
+    return normalized
+
+
 def validate_classification(classification: str) -> bool:
     """Validate that classification is a known level."""
     return classification in CLASSIFICATION_LEVELS
@@ -249,7 +334,8 @@ def curate_schema(
 ) -> list[dict]:
     """Standardize raw columns (already checked by validate_schema), merging
     in business metadata (business description / tag / glossary term / active
-    / classification / Hindi name) keyed by field name where it's available. Fields without
+    / classification / Hindi name / unit) keyed by field name where it's
+    available. `readable_type` is derived from the column's data type. Fields without
     an answer yet are left blank rather than guessed -- including `tag`, which
     used to fall back to a rule-based auto-tag; that fallback is switched off
     (see the tag line below), so a tag now only ever comes from a submitted
@@ -333,13 +419,25 @@ def curate_schema(
         # over the carried-forward value, so an edited label takes effect.
         name_hindi = (column.get("name_hindi") or meta.get("name_hindi") or "").strip()
 
+        # Derived every run from the type actually parsed -- reading it back
+        # from a hand-edited curated file would let a label drift away from
+        # the column it describes.
+        readable_type = readable_data_type(column["data_type"])
+
+        # `unit` is a reviewed answer like `tag`: no unit rule guesses it from
+        # the field name. `validate_unit` normalizes INR/USD/% spellings and
+        # rejects a unit on a non-numeric column.
+        unit = validate_unit(meta.get("unit", ""), column["data_type"])
+
         curated = {
             **column,
+            "readable_type": readable_type,
             "business_description": meta.get("business_description", ""),
             "tag": tag,
             "glossary_term": glossary_term,
             "active": meta.get("active", True),
             "classification": classification,
+            "unit": unit,
         }
         if name_hindi:
             curated["name_hindi"] = name_hindi

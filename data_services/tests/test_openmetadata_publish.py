@@ -7,7 +7,14 @@ import requests
 from metadata.ingestion.ometa.client import APIError
 
 from src.schema_registry.curate import CLASSIFICATION_LEVELS
-from src.schema_registry.openmetadata.publish import _create_or_update, _get_by_name, _to_column, _unwrap, publish_table
+from src.schema_registry.openmetadata.publish import (
+    _create_or_update,
+    _extra_metadata_json,
+    _get_by_name,
+    _to_column,
+    _unwrap,
+    publish_table,
+)
 from src.schema_registry.registry import lookups
 from src.schema_registry.pipeline import run
 from src.storage.local import LocalObjectStorage
@@ -937,6 +944,20 @@ def test_publish_table_stores_unpublished_column_details_as_json_property(tmp_pa
     assert [c["name"] for c in extra["columns"]] == ["sno", "firm_name", "total_cost"]
     sno = extra["columns"][0]
     assert sno["data_type"] == "integer" and "business_description" not in sno and "tag" not in sno
+    # the readable label is already the column's dataTypeDisplay; only the
+    # machine-readable unit still needs the JSON blob
+    assert "readable_type" not in sno
+
+
+def test_unit_reaches_extra_metadata_even_though_it_is_also_in_the_display():
+    extra = json.loads(_extra_metadata_json(
+        [{"name": "total_cost", "data_type": "numeric", "readable_type": "Decimal Number",
+          "unit": "INR", "ingestion_timestamp": "TS"}],
+        "department/pwd/ds/t/curated/schemas/TS.csv",
+    ))
+
+    assert extra["columns"][0]["unit"] == "INR"
+    assert "readable_type" not in extra["columns"][0]
 
 
 _DENIED = Exception("Principal: CatalogPrincipal{name='ingestion-bot'} operation EditDisplayName denied by role "
@@ -1012,3 +1033,24 @@ def test_a_column_without_a_hindi_name_has_no_display_name():
     )
 
     assert column.displayName is None
+
+
+def test_readable_type_becomes_the_openmetadata_data_type_display():
+    column = _to_column(
+        {"name": "sno", "data_type": "integer", "readable_type": "Whole Number"}
+    )
+
+    assert _unwrap(column.dataTypeDisplay) == "Whole Number"
+
+
+def test_unit_is_appended_to_the_data_type_display():
+    column = _to_column(
+        {
+            "name": "total_cost",
+            "data_type": "numeric",
+            "readable_type": "Decimal Number",
+            "unit": "INR",
+        }
+    )
+
+    assert _unwrap(column.dataTypeDisplay) == "Decimal Number (INR)"

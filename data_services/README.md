@@ -46,6 +46,43 @@ The backup runs on its own at the end of steps 1 and 3.
 
 **Once a month:** `python3 -m src.storage.backup verify` to check the backup is complete.
 
+### Deleting and purging catalog entities
+
+The default deletion is a reversible soft-delete. It hides the selected
+OpenMetadata entities, marks registry tables as deleted, and retains storage
+and history. Use `--list` to review soft-deleted tables and `--restore` to
+reactivate a scope.
+
+```bash
+python3 -m src.schema_registry.delete --table pwd.vishwakarma.works
+python3 -m src.schema_registry.delete --list
+python3 -m src.schema_registry.delete --table pwd.vishwakarma.works --restore
+```
+
+Permanent deletion is a separate, explicit purge. The target must already be
+soft-deleted; `--purge` permanently removes OpenMetadata, storage, and registry
+rows. Review a dry run before approving it:
+
+```bash
+python3 -m src.schema_registry.delete --table pwd.vishwakarma.works --purge --dry-run
+python3 -m src.schema_registry.delete --table pwd.vishwakarma.works --purge --yes
+```
+
+Both operations require the environment-specific dedicated
+`<ENV>_OPENMETADATA_ADMIN_JWT_TOKEN` (for example,
+`DEV_OPENMETADATA_ADMIN_JWT_TOKEN`).
+The regular ingestion token is intentionally rejected. For S3/Wasabi,
+`<ENV>_WASABI_DELETE_ACCESS_KEY_ID` and
+`<ENV>_WASABI_DELETE_SECRET_ACCESS_KEY` are also required; they must belong
+to a key permitted to delete the selected environment's objects. Local
+filesystem storage does not need S3 credentials.
+
+The command asks for environment confirmation before making changes. `--yes`
+bypasses the prompt for approved automation. Every lifecycle operation is
+recorded in `_lookups/deletions.csv` with the operator, environment, target,
+counts, and status. Dedicated S3 deletion credentials are required only for
+`--purge`.
+
 ---
 
 ## How it works
@@ -413,11 +450,17 @@ table_id)`, does the Service → Database → Schema → Table create-or-update.
 
 **Mapping**: department → service, dataset → database, `schema_name` →
 schema, `table_name` → table. Columns come from the curated CSV's
-`data_type` (unrecognized types fail loudly, never guessed). Each column's
-`tag`/`classification`/`glossary_term` are pushed as TagLabels — `tag`
+`data_type` (unrecognized types fail loudly, never guessed), and gets a
+`readable_type` label derived from it (Whole Number / Decimal Number / Text /
+Date & Time) so the catalog reads plainly to non-technical users. Each
+column's `tag`/`classification`/`glossary_term` are pushed as TagLabels — `tag`
 under a `FieldTag` Classification, the column's MDSF `classification`
 level under `MDSF`, `glossary_term` under a `BusinessGlossary` — created on
-first use, reused after. The dataset's own `category` (CAT-1..CAT-4,
+first use, reused after. `readable_type`, plus `unit` when a department
+answered one (`₹`/`Rs` → `INR`, `$` → `USD`), becomes the column's built-in
+`dataTypeDisplay` (`Decimal Number (INR)`); `unit` also stays in
+`extraMetadata` for machine use. Units are only accepted on numeric columns.
+The dataset's own `category` (CAT-1..CAT-4,
 validated against the MDSF vocabulary — an unknown one is rejected rather
 than published as a new tag) and `dataset_description` are pushed the same
 way, one level up, onto the Database entity. A resolved `owner` (an
@@ -501,6 +544,8 @@ Log file: logs/sync_20261007_164556.log
 | Republish one table | `TABLE_ID=pwd.vishwakarma.vishwakarma_t python3 -m src.schema_registry.openmetadata.publish` |
 | Batch many tables from a manifest CSV | `MANIFEST_FILE=manifest.csv python3 -m src.schema_registry.batch` (add `OPENMETADATA_JWT_TOKEN` to publish each) |
 | Republish everything that never reached OpenMetadata | `python3 -m src.schema_registry.republish` (reads `_lookups/runs.csv`; exit 1 if any still fail) |
+| Backfill readable types into existing curated snapshots | `python3 -m src.schema_registry.backfill_readable [--dry-run] [--department <id>] [--exclude <table_id>] [--publish]` |
+| Readable type not showing in OpenMetadata | Add `--recreate` (with `--publish`): backs the entity up under `_lookups/om_recreate_backups/`, hard-deletes and republishes only tables whose stored `dataTypeDisplay` is stale |
 | Remove a (renamed/orphaned) table from OpenMetadata + the registry | `TABLE_ID=<id> python3 -m src.schema_registry.openmetadata.delete_table` (re-ingesting the id later brings it back) |
 | See who ran what, and whether it published | `storage/_lookups/runs.csv` (one row per run, including failed ones) |
 | Run all tests | `python3 -m pytest tests/` |
@@ -534,7 +579,7 @@ _lookups/departments.csv, datasets.csv, tables.csv   lists of departments, datas
 department/<dept>/<dataset>/<table>/
     raw/source/<time>__<file>                        the exact file used, + .sha256
     raw/schemas/<time>.csv                           columns as read from the file
-    curated/schemas/<time>.csv                       + descriptions, tags, classification
+    curated/schemas/<time>.csv                       + descriptions, tags, classification, readable type, unit
     diffs/<time>.csv                                 what this run added/removed/changed vs the previous snapshot
 department/<dept>/<dataset>/_source/                 a multi-table field dictionary
 _locks/                                              stops two people writing at once
@@ -549,7 +594,7 @@ Every run adds new files with the time in the name, so the full history stays. O
 | Department (`pwd`) | Database service. Its name is the id (`pwd`); the full department name from the catalog is shown as its display name |
 | Dataset (`vishwakarma`) | Database: description, category tag, and owner / steward / frequency / timeline / API as custom properties |
 | `schema:` (default `public`) | Schema |
-| Table | Table: columns, types, descriptions, plus an `extraMetadata` custom property: JSON with the column details not shown elsewhere (nullable, default, scale, ...) and the curated file it came from, kept for later use |
+| Table | Table: columns with a plain-language type (`dataTypeDisplay`, e.g. `Decimal Number (INR)`), descriptions, plus an `extraMetadata` custom property: JSON with the column details not shown elsewhere (nullable, default, scale, unit, ...) and the curated file it came from, kept for later use |
 | Column tags | `FieldTag` (Financial, Geospatial, ...), `DataSensitivity` (CAT-1 to CAT-4), `BusinessGlossary` terms |
 
 - Columns whose names look like personal data (Aadhaar, PAN, mobile, email, ...) get CAT-3 automatically, unless the metadata file says otherwise.
@@ -559,6 +604,7 @@ Every run adds new files with the time in the name, so the full history stays. O
 
 - Renaming or removing a table leaves the old one in OpenMetadata: `TABLE_ID=<id> python3 -m src.schema_registry.openmetadata.delete_table` removes it there and marks the registry row deleted (re-ingesting the id brings it back).
 - A renamed column needs `allow_column_removal`, and its description doesn't carry over.
+- OpenMetadata 2.0.2 ignores a changed `dataTypeDisplay` on an existing column whose type is unchanged; `backfill_readable --publish --recreate` hard-deletes and republishes the table (with a backup in storage) to make a later readable type visible.
 - Columns marked `active: false` are still published.
 - Personal-data detection misses many names (e.g. `bride_name`, `groom_dob`, `account_no`). Check sensitive tables by hand.
 - Numeric precision/scale (e.g. `numeric(10,2)`) is kept in the curated file for Postgres column lists only, and isn't sent to OpenMetadata.

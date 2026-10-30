@@ -137,6 +137,16 @@ class S3ObjectStorage(ObjectStorage):
         ]
         return sorted(keys)
 
+    def delete_prefix(self, prefix: str) -> int:
+        keys = self.list(prefix)
+        for key in keys:
+            try:
+                self.client.delete_object(Bucket=self.bucket, Key=self._key(key))
+            except ClientError as exc:
+                self._log_client_error(exc, "delete", key)
+                raise
+        return len(keys)
+
     @contextmanager
     def lock(self, path: str) -> Iterator[None]:
         """Hold `_locks/<path>.lock` for the duration of the `with` block.

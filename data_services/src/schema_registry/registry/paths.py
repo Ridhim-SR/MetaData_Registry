@@ -42,6 +42,10 @@ def curated_schemas_prefix(department_id: str, dataset_slug: str, table_slug: st
     return f"{table_prefix(department_id, dataset_slug, table_slug)}/curated/schemas/"
 
 
+def raw_schemas_prefix(department_id: str, dataset_slug: str, table_slug: str) -> str:
+    return f"{table_prefix(department_id, dataset_slug, table_slug)}/raw/schemas/"
+
+
 def pipeline_lock_path(department_id: str, dataset_slug: str, table_slug: str) -> str:
     return f"{table_prefix(department_id, dataset_slug, table_slug)}/pipeline"
 

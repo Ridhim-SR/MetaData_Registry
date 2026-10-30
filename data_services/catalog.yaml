@@ -181,6 +181,36 @@ departments:
             source: storage:inputs/rural_development_department/awas/awas_pmayg_category_progress_raw_columns.csv
             format: csv
             metadata: storage:inputs/rural_development_department/awas/awas_pmayg_category_progress_raw_columns_metadata.csv
+  women_and_child_development_department:
+    name: Women and Child Development Department
+    datasets:
+      kanya_sumangla_portal:
+        category: CAT-3
+        owner: Women and Child Development Department
+        steward:
+        dataset_type: Citizen Centric
+        frequency:
+        timeline:
+        api_available:
+        description: >-
+          Beneficiary records for the Kanya Sumangala Yojana portal: applicant
+          and family registration, Aadhaar and bank details, and the six
+          stage-wise assistance claims (birth, immunisation, Class 1, Class 6,
+          Class 9 and higher education).
+        field_dictionary: storage:inputs/women_and_child_development_department/kanya_sumangla_portal_field_dictionary.csv
+      pm_matru_vandana_yojana:
+        category: CAT-3
+        owner: Women and Child Development Department
+        steward:
+        dataset_type: Citizen Centric
+        frequency:
+        timeline:
+        api_available:
+        description: >-
+          Applications under the Pradhan Mantri Matru Vandana Yojana: beneficiary
+          and husband identity, address and bank details, undertakings, document
+          checklist, prior enrolment and field verification.
+        field_dictionary: storage:inputs/women_and_child_development_department/pm_matru_vandana_yojana_field_dictionary.csv
   non_proprietary_data:
     name: Non-Proprietary Data
     datasets:
