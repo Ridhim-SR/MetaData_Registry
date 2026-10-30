@@ -291,6 +291,7 @@ export function ExplorePage() {
             options={tagOptions}
             selected={tagSel}
             onToggle={(value) => toggleList(tagSel, value, setTagSel)}
+            searchLabel="Search tags"
           />
         ) : (
           <p className="mt-2" style={{ fontSize: "0.875rem", color: "var(--text-muted)" }}>No tags in these results.</p>
@@ -1209,17 +1210,42 @@ function uniqueFilterLabels(
   }));
 }
 
+/** Lowercase, with "_", "-" and "/" read as spaces, so "banking info" finds "Banking_Information". */
+const normalizeFilterText = (s: string) => s.toLowerCase().replace(/[_/-]+/g, " ").replace(/\s+/g, " ").trim();
+
 function FilterChecklist({
-  options, selected, onToggle,
+  options, selected, onToggle, searchLabel,
 }: {
   options: Array<{ value: string; label: string; count: number }>;
   selected: string[];
   onToggle: (value: string) => void;
+  /** When set, a search box above the list filters options by label. */
+  searchLabel?: string;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const visible = expanded ? options : options.slice(0, 5);
+  const [query, setQuery] = useState("");
+  const needle = normalizeFilterText(query);
+  const matches = needle ? options.filter((o) => normalizeFilterText(o.label).includes(needle)) : options;
+  // While searching, show every match; the 5-item fold is only for browsing.
+  const visible = expanded || needle ? matches : matches.slice(0, 5);
   return (
     <>
+      {searchLabel && options.length > 5 && (
+        <input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder={`${searchLabel}…`}
+          aria-label={searchLabel}
+          className="mt-2 w-full"
+          style={{ border: "1px solid var(--border)", borderRadius: 6, padding: "0.35rem 0.6rem", fontSize: "0.875rem" }}
+        />
+      )}
+      {needle && matches.length === 0 && (
+        <p className="mt-2" style={{ color: "var(--text-muted)", fontSize: "0.875rem" }}>
+          No matches for &ldquo;{query.trim()}&rdquo;
+        </p>
+      )}
       <ul className="mt-2 max-h-48 space-y-1 overflow-y-auto">
         {visible.map(({ value, label, count }) => (
           <li key={value}>
@@ -1236,7 +1262,7 @@ function FilterChecklist({
           </li>
         ))}
       </ul>
-      {options.length > 5 && (
+      {!needle && options.length > 5 && (
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
