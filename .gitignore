@@ -289,3 +289,13 @@ CLAUDE.md
 /data_services/data/
 /data_services/src/utils/env.py
 /data_services/configs/sample.yaml
+
+# Local dev OpenMetadata tokens and one-off publish/verification helpers
+/dev_token*.txt
+/om_token.txt
+/publish_wcd_to_dev.py
+/verify_others.py
+/verify_stack.py
+/verify_wcd.py
+/PWD_PUBLISH_BLOCKER_QA.md
+.vscode/settings.json
