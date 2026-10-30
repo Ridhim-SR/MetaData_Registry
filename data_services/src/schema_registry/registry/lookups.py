@@ -151,6 +151,7 @@ def upsert_dataset(
     timeline: str = "",
     dataset_description: str = "",
     dataset_type: str = "",
+    schema_source: str = "",
 ) -> None:
     """Dataset-level fields (per the governance meeting): `category` (MDSF
     CAT-1/2/3/4 -- the dataset's overall classification, separate from
@@ -185,6 +186,7 @@ def upsert_dataset(
             # Set from catalog.yaml by sync (set_dataset_fields); carried
             # forward here so a pipeline run never blanks it.
             "dataset_type": dataset_type or existing.get("dataset_type", ""),
+            "schema_source": schema_source or existing.get("schema_source", ""),
         }
 
     # The carry-forward merge runs inside _upsert's lock -- reading the
@@ -195,7 +197,7 @@ def upsert_dataset(
 
 
 DATASET_FIELDS = (
-    "category", "dataset_type", "api_available", "owner", "steward", "frequency", "timeline", "dataset_description",
+    "category", "dataset_type", "schema_source", "api_available", "owner", "steward", "frequency", "timeline", "dataset_description",
 )
 
 

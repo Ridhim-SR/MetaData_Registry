@@ -377,6 +377,7 @@ _CUSTOM_PROPERTY_NAMES = {
     "frequency": "frequency",
     "timeline": "timeline",
     "dataset_type": "datasetType",
+    "schema_source": "schemaSource",
 }
 
 
@@ -835,6 +836,7 @@ def publish_table(
             "frequency": dataset_row.get("frequency", ""),
             "timeline": dataset_row.get("timeline", ""),
             "dataset_type": dataset_row.get("dataset_type", ""),
+            "schema_source": dataset_row.get("schema_source", ""),
         },
         owner_ref=_resolve_owner(client, dataset_row.get("owner", "")),
     )
