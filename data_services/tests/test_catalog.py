@@ -89,6 +89,7 @@ def test_shipped_catalog_is_valid():
         "pwd",
         "agri_dept",
         "rural_development_department",
+        "horticulture_department",
         "women_and_child_development_department",
         "non_proprietary_data",
     ]

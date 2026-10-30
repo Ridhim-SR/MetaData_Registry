@@ -187,7 +187,8 @@ departments:
       janhit_horticulture:
         category: CAT-3
         owner: Horticulture Department
-        steward: 
+        steward:
+        dataset_type: 
         frequency: 
         timeline: ongoing
         api_available: N
@@ -416,7 +417,8 @@ departments:
       dbt_schemes:
         category: CAT-3
         owner: Horticulture Department
-        steward: 
+        steward:
+        dataset_type: 
         frequency: 
         timeline: ongoing
         api_available: N
