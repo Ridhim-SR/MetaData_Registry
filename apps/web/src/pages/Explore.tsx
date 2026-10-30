@@ -85,6 +85,7 @@ export function ExplorePage() {
     frequency: factSel.frequency,
     api: factSel.api,
     steward: factSel.steward,
+    schema_source: factSel.schema_source,
     year_from: yearFrom,
     year_to: yearTo,
     sort,
@@ -1116,13 +1117,14 @@ function tableUrl(dataset: string | undefined, table: string | undefined, column
   return column ? `${base}?column=${encodeURIComponent(column)}` : base;
 }
 
-type FactField = "frequency" | "api" | "steward";
+type FactField = "frequency" | "api" | "steward" | "schema_source";
 
 /** Dataset-fact filter groups in the sidebar (Timeline sits next to sort). */
 const FACT_FIELDS: Array<{ key: FactField; label: () => string }> = [
   { key: "frequency", label: () => "Update frequency" },
   { key: "api", label: () => t("apiAvailable") },
   { key: "steward", label: () => "Data steward" },
+  { key: "schema_source", label: () => "Schema source" },
 ];
 
 function factLabel(field: FactField, value: string): string {
