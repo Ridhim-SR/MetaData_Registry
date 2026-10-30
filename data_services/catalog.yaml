@@ -211,13 +211,15 @@ departments:
             metadata: storage:inputs/rural_development_department/awas/awas_pmayg_category_progress_raw_columns_metadata.csv
   horticulture_department:
     name: Horticulture Department
+    description: >-
+      
     datasets:
       janhit_horticulture:
         category: CAT-3
         owner: Horticulture Department
         steward:
         dataset_type: 
-        schema_source:
+        schema_source: Department Provided
         frequency: 
         timeline: ongoing
         api_available: N
@@ -448,7 +450,7 @@ departments:
         owner: Horticulture Department
         steward:
         dataset_type: 
-        schema_source:
+        schema_source: Department Provided
         frequency: 
         timeline: ongoing
         api_available: N
