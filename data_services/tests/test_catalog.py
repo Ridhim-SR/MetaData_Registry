@@ -28,6 +28,7 @@ def test_valid_catalog_parses():
     assert ds.fields["category"] == "CAT-3" and ds.fields["owner"] == "PWD IT Cell"
     assert ds.fields["frequency"] == ""
     assert ds.fields["dataset_type"] == ""
+    assert ds.fields["schema_source"] == ""
     v, works = ds.tables
     assert (v.format, v.schema, v.metadata) == ("postgres_ddl", "public", None)
     assert (works.format, works.schema, works.metadata) == ("csv", "ops", "storage:inputs/pwd/works_meta.csv")
@@ -39,12 +40,19 @@ def test_dataset_type_values_parse():
         assert dept.datasets[0].fields["dataset_type"] == value
 
 
+def test_schema_source_values_parse():
+    for value in ("Department Provided", "Public Extraction"):
+        (dept,) = parse_catalog(_VALID.replace("owner: PWD IT Cell", f"schema_source: {value}"))
+        assert dept.datasets[0].fields["schema_source"] == value
+
+
 @pytest.mark.parametrize(
     "bad, message",
     [
         (_VALID.replace("owner:", "ownr:"), r"unknown key\(s\) \['ownr'\]"),
         (_VALID.replace("CAT-3", "cat3"), "must be CAT-1, CAT-2, CAT-3 or CAT-4"),
         (_VALID.replace("owner: PWD IT Cell", "dataset_type: citizen"), "dataset_type: 'citizen' must be 'Citizen Centric' or 'Administrative'"),
+        (_VALID.replace("owner: PWD IT Cell", "schema_source: Extracted"), "schema_source: 'Extracted' must be 'Department Provided' or 'Public Extraction'"),
         (_VALID.replace("format: csv", "format: excel"), "format: 'excel' must be one of"),
         (_VALID.replace("          works:", "          Vishwakarma-T:"), "same table id 'vishwakarma_t'"),
         (_VALID.replace("source: storage:inputs/pwd/v.txt", "schema: public"), r"missing required key\(s\) \['source'\]"),

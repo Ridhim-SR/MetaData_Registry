@@ -33,6 +33,7 @@ departments:
         owner: Public Works Department (PWD)
         steward:
         dataset_type: Administrative
+        schema_source:
         frequency: Daily
         timeline: "01-06-2019 - ongoing"
         api_available:
@@ -50,6 +51,7 @@ departments:
         owner: Agriculture Department
         steward:
         dataset_type: Citizen Centric
+        schema_source:
         frequency:
         timeline:
         api_available:
@@ -85,6 +87,7 @@ departments:
         owner: Agriculture Department
         steward:
         dataset_type: Citizen Centric
+        schema_source:
         frequency:
         timeline:
         api_available:
@@ -103,6 +106,7 @@ departments:
         owner: Agriculture Department
         steward:
         dataset_type: Administrative
+        schema_source:
         frequency:
         timeline:
         api_available:
@@ -132,6 +136,7 @@ departments:
         owner: Rural Development Department
         steward:
         dataset_type: Citizen Centric
+        schema_source:
         frequency: yearly
         timeline: 2014-15 to 2025-26
         api_available: N
@@ -148,6 +153,7 @@ departments:
         owner: Rural Development Department
         steward:
         dataset_type: Administrative
+        schema_source:
         frequency: yearly
         timeline: 2023-27
         api_available: N
@@ -168,6 +174,7 @@ departments:
         owner: Rural Development Department
         steward:
         dataset_type: Citizen Centric
+        schema_source:
         frequency:
         timeline:
         api_available: N
@@ -189,6 +196,7 @@ departments:
         owner: Horticulture Department
         steward:
         dataset_type: 
+        schema_source:
         frequency: 
         timeline: ongoing
         api_available: N
@@ -419,6 +427,7 @@ departments:
         owner: Horticulture Department
         steward:
         dataset_type: 
+        schema_source:
         frequency: 
         timeline: ongoing
         api_available: N
@@ -868,6 +877,7 @@ departments:
         owner: Women and Child Development Department
         steward:
         dataset_type: Citizen Centric
+        schema_source:
         frequency:
         timeline:
         api_available:
@@ -882,6 +892,7 @@ departments:
         owner: Women and Child Development Department
         steward:
         dataset_type: Citizen Centric
+        schema_source:
         frequency:
         timeline:
         api_available:
@@ -896,6 +907,7 @@ departments:
       night_time_light_over_india:
         category: CAT-1
         dataset_type:
+        schema_source:
         owner: National Remote Sensing Centre, ISRO
         steward:
         source_url : https://bhuvan-app1.nrsc.gov.in/bhuvan_ntl/
