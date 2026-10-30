@@ -19,6 +19,21 @@ def test_register_department_is_deduped(tmp_path):
     assert len(rows) == 1
 
 
+def test_register_department_stores_and_preserves_description(tmp_path):
+    storage = LocalObjectStorage(tmp_path)
+    lookups.register_department(storage, "pwd", "PWD", "Department overview.")
+    lookups.register_department(storage, "pwd", "PWD")
+
+    assert lookups.department_description(storage, "pwd") == "Department overview."
+    assert storage.read_csv(lookups.DEPARTMENTS_PATH) == [
+        {
+            "department_id": "pwd",
+            "department_name": "PWD",
+            "department_description": "Department overview.",
+        }
+    ]
+
+
 def test_department_exists(tmp_path):
     storage = LocalObjectStorage(tmp_path)
     assert lookups.department_exists(storage, "pwd") is False

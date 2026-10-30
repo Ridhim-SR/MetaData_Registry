@@ -6,6 +6,7 @@ _VALID = """
 departments:
   pwd:
     name: Public Works Department
+    description: Department overview.
     datasets:
       vishwakarma:
         category: CAT-3
@@ -24,6 +25,7 @@ departments:
 def test_valid_catalog_parses():
     (dept,) = parse_catalog(_VALID)
     assert (dept.id, dept.name) == ("pwd", "Public Works Department")
+    assert dept.description == "Department overview."
     (ds,) = dept.datasets
     assert ds.fields["category"] == "CAT-3" and ds.fields["owner"] == "PWD IT Cell"
     assert ds.fields["frequency"] == ""

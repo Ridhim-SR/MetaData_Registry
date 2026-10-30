@@ -89,7 +89,12 @@ def _upsert(
         return existing
 
 
-def register_department(storage: ObjectStorage, department_id: str, department_name: str) -> None:
+def register_department(
+    storage: ObjectStorage,
+    department_id: str,
+    department_name: str,
+    description: str = "",
+) -> None:
     """Explicitly add a department to the controlled registry.
 
     This is a deliberate one-time action, not something pipeline.run()
@@ -104,7 +109,15 @@ def register_department(storage: ObjectStorage, department_id: str, department_n
         DEPARTMENTS_PATH,
         "department_id",
         department_id,
-        lambda _: {"department_id": department_id, "department_name": department_name},
+        lambda existing: {
+            "department_id": department_id,
+            "department_name": department_name,
+            **(
+                {"department_description": description or existing.get("department_description", "")}
+                if description or (existing and "department_description" in existing)
+                else {}
+            ),
+        },
     )
     logger.info(f"Department {'re-registered' if existing else 'registered'}: {department_id} ({department_name})")
 
@@ -116,6 +129,16 @@ def department_name(storage: ObjectStorage, department_id: str) -> str:
         return ""
     return next((r["department_name"] for r in storage.read_csv(DEPARTMENTS_PATH)
                  if r["department_id"] == department_id), "")
+
+
+def department_description(storage: ObjectStorage, department_id: str) -> str:
+    if not storage.exists(DEPARTMENTS_PATH):
+        return ""
+    return next(
+        (r.get("department_description", "") for r in storage.read_csv(DEPARTMENTS_PATH)
+         if r["department_id"] == department_id),
+        "",
+    )
 
 
 def department_exists(storage: ObjectStorage, department_id: str) -> bool:

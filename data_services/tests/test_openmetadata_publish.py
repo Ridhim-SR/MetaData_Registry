@@ -133,6 +133,7 @@ def test_publish_table_builds_full_entity_chain(tmp_path):
     table_request = next(r for r in created if type(r).__name__ == "CreateTableRequest")
 
     assert _unwrap(service_request.name) == "pwd"  # service defaults to department_id
+    assert _unwrap(service_request.description) is None
     assert _unwrap(database_request.name) == "vishwakarma"  # database == dataset slug
     assert _unwrap(schema_request.name) == "public"  # schema_name from tables.csv
     assert _unwrap(table_request.name) == "TBD_confirm_with_pwd"
@@ -499,7 +500,7 @@ def test_apply_rules_overrides_the_model_and_covers_skipped_fields():
     assert by_name["farmer_name"]["tag"] == "PII"          # PII wins over Financial
     assert by_name["caste"]["tag"] == "Sensitive"          # skipped field still covered
     assert by_name["mobile_verified"]["tag"] == ""         # a flag, not the number
-    assert by_name["district_name"]["tag"] == ""           # no rule, left to auto-tag
+    assert by_name["district_name"]["tag"] == "Geospatial"  # filled by the shared geography rule
     assert by_name["status"]["tag"] == "Status/Workflow"   # untouched
     assert by_name["caste"]["business_description"] == ""  # no description invented
     assert any(line.startswith("farmer_name:") for line in changed)
@@ -899,6 +900,7 @@ def _existing_service(display_name):
     service = MagicMock(fullyQualifiedName="pwd")
     service.id = "service-id"
     service.displayName = display_name
+    service.description = None
     return service
 
 
@@ -927,6 +929,40 @@ def test_existing_service_with_the_right_display_name_is_left_alone(tmp_path):
     publish_table(client, storage, "pwd.vishwakarma.tbd_confirm_with_pwd")
 
     assert not [c for c in client.client.patch.call_args_list if "databaseServices" in c.kwargs["path"]]
+
+
+def test_department_description_is_added_to_existing_service(tmp_path):
+    storage = _ingested_storage(tmp_path)
+    lookups.register_department(storage, "pwd", "Public Works Department", "Department overview.")
+    client = _fake_client()
+    existing = _existing_service("Public Works Department")
+    client.get_by_name.side_effect = None
+    client.get_by_name.return_value = existing
+
+    publish_table(client, storage, "pwd.vishwakarma.tbd_confirm_with_pwd")
+
+    service_patches = [
+        call for call in client.client.patch.call_args_list
+        if "databaseServices" in call.kwargs["path"]
+    ]
+    assert len(service_patches) == 1
+    assert json.loads(service_patches[0].kwargs["data"]) == [
+        {"op": "add", "path": "/description", "value": "Department overview."}
+    ]
+
+
+def test_department_description_is_included_when_service_is_created(tmp_path):
+    storage = _ingested_storage(tmp_path)
+    lookups.register_department(storage, "pwd", "Public Works Department", "Department overview.")
+    client = _fake_client()
+
+    publish_table(client, storage, "pwd.vishwakarma.tbd_confirm_with_pwd")
+
+    service_request = next(
+        request for request in (call.args[0] for call in client.create_or_update.call_args_list)
+        if type(request).__name__ == "CreateDatabaseServiceRequest"
+    )
+    assert _unwrap(service_request.description) == "Department overview."
 
 
 def test_publish_table_stores_unpublished_column_details_as_json_property(tmp_path):

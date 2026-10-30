@@ -318,13 +318,18 @@ def _is_denied(exc: Exception) -> bool:
     return getattr(exc, "status_code", None) == 403 or "denied" in str(exc).lower()
 
 
-def _ensure_service(client: OpenMetadata, service_name: str, display_name: str = "") -> DatabaseService:
+def _ensure_service(
+    client: OpenMetadata,
+    service_name: str,
+    display_name: str = "",
+    description: str = "",
+) -> DatabaseService:
     """Get or create the department's service. `service_name` (the id, e.g.
     pwd) is what identifies it; `display_name` (the full department name) is
-    only the label people see. Setting it is best effort: OpenMetadata's
-    ingestion bot is not allowed to edit display names by default, and that
-    must never stop a table from being published -- it's a warning, and the
-    name can be set once in the UI."""
+    only the label people see. A description is published as the service's
+    About text. Setting the display name is best effort: OpenMetadata's
+    ingestion bot may not be allowed to edit it, and that must never stop a
+    table from being published."""
 
     existing = _get_or_none(client, DatabaseService, service_name)
     if existing:
@@ -337,6 +342,15 @@ def _ensure_service(client: OpenMetadata, service_name: str, display_name: str =
                 if not _is_denied(exc):
                     raise
                 logger.warning(_display_name_denied(service_name, display_name))
+        current_description = _unwrap(getattr(existing, "description", None)) or ""
+        if description and current_description != description:
+            _replace_entity_fields(
+                client,
+                "/services/databaseServices",
+                _unwrap(existing.id),
+                {"description": description},
+                op="add",
+            )
         return existing
 
     def create(with_display_name: bool):
@@ -345,6 +359,7 @@ def _ensure_service(client: OpenMetadata, service_name: str, display_name: str =
             CreateDatabaseServiceRequest(
                 name=service_name,
                 displayName=(display_name or None) if with_display_name else None,
+                description=description or None,
                 serviceType=DatabaseServiceType.CustomDatabase,
                 connection=DatabaseConnection(
                     config=CustomDatabaseConnection(type="CustomDatabase", sourcePythonClass="custom")
@@ -819,7 +834,12 @@ def publish_table(
     else:
         _check_category_covers_columns(table_id, category, curated_columns)
 
-    service = _ensure_service(client, service_name or department_id, lookups.department_name(storage, department_id))
+    service = _ensure_service(
+        client,
+        service_name or department_id,
+        lookups.department_name(storage, department_id),
+        lookups.department_description(storage, department_id),
+    )
     if category:
         _ensure_sensitivity_tag(client, category)
     database = _ensure_database(
