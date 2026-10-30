@@ -33,7 +33,7 @@ departments:
         owner: Public Works Department (PWD)
         steward:
         dataset_type: Administrative
-        schema_source:
+        schema_source: Department Provided
         frequency: Daily
         timeline: "01-06-2019 - ongoing"
         api_available:
