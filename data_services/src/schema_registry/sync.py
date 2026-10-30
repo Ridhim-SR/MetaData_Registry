@@ -88,12 +88,16 @@ def _ensure_department(storage: ObjectStorage, dept: DepartmentEntry, dry_run: b
          if r["department_id"] == dept.id),
         None,
     )
-    if existing and existing["department_name"] == dept.name:
+    if (
+        existing
+        and existing["department_name"] == dept.name
+        and (not dept.description or existing.get("department_description", "") == dept.description)
+    ):
         return
     if dry_run:
         logger.info(f"[dry run] would register department {dept.id} ({dept.name})")
         return
-    lookups.register_department(storage, dept.id, dept.name)
+    lookups.register_department(storage, dept.id, dept.name, dept.description)
 
 
 def _ingest_dataset(storage: ObjectStorage, dept: DepartmentEntry, ds: DatasetEntry, dry_run: bool, reclassify: bool = False) -> list[Outcome]:

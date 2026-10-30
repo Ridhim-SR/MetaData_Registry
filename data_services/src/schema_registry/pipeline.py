@@ -231,6 +231,7 @@ def run(
     frequency: str = "",
     timeline: str = "",
     dataset_description: str = "",
+    schema_source: str = "",
     openmetadata_client: OpenMetadata | None = None,
     allow_column_removal: bool = False,
     allow_category_below_columns: bool = False,
@@ -474,6 +475,7 @@ def run(
             storage, dataset_id, department_id, dataset,
             category=category, api_available=api_available, owner=owner, steward=steward,
             frequency=frequency, timeline=timeline, dataset_description=dataset_description,
+            schema_source=schema_source,
         )
         lookups.upsert_table(storage, table_id, dataset_id, table_name, schema_name)
 

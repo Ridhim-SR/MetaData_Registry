@@ -89,7 +89,12 @@ def _upsert(
         return existing
 
 
-def register_department(storage: ObjectStorage, department_id: str, department_name: str) -> None:
+def register_department(
+    storage: ObjectStorage,
+    department_id: str,
+    department_name: str,
+    description: str = "",
+) -> None:
     """Explicitly add a department to the controlled registry.
 
     This is a deliberate one-time action, not something pipeline.run()
@@ -104,7 +109,15 @@ def register_department(storage: ObjectStorage, department_id: str, department_n
         DEPARTMENTS_PATH,
         "department_id",
         department_id,
-        lambda _: {"department_id": department_id, "department_name": department_name},
+        lambda existing: {
+            "department_id": department_id,
+            "department_name": department_name,
+            **(
+                {"department_description": description or existing.get("department_description", "")}
+                if description or (existing and "department_description" in existing)
+                else {}
+            ),
+        },
     )
     logger.info(f"Department {'re-registered' if existing else 'registered'}: {department_id} ({department_name})")
 
@@ -116,6 +129,16 @@ def department_name(storage: ObjectStorage, department_id: str) -> str:
         return ""
     return next((r["department_name"] for r in storage.read_csv(DEPARTMENTS_PATH)
                  if r["department_id"] == department_id), "")
+
+
+def department_description(storage: ObjectStorage, department_id: str) -> str:
+    if not storage.exists(DEPARTMENTS_PATH):
+        return ""
+    return next(
+        (r.get("department_description", "") for r in storage.read_csv(DEPARTMENTS_PATH)
+         if r["department_id"] == department_id),
+        "",
+    )
 
 
 def department_exists(storage: ObjectStorage, department_id: str) -> bool:
@@ -151,6 +174,7 @@ def upsert_dataset(
     timeline: str = "",
     dataset_description: str = "",
     dataset_type: str = "",
+    schema_source: str = "",
 ) -> None:
     """Dataset-level fields (per the governance meeting): `category` (MDSF
     CAT-1/2/3/4 -- the dataset's overall classification, separate from
@@ -185,6 +209,7 @@ def upsert_dataset(
             # Set from catalog.yaml by sync (set_dataset_fields); carried
             # forward here so a pipeline run never blanks it.
             "dataset_type": dataset_type or existing.get("dataset_type", ""),
+            "schema_source": schema_source or existing.get("schema_source", ""),
         }
 
     # The carry-forward merge runs inside _upsert's lock -- reading the
@@ -195,7 +220,7 @@ def upsert_dataset(
 
 
 DATASET_FIELDS = (
-    "category", "dataset_type", "api_available", "owner", "steward", "frequency", "timeline", "dataset_description",
+    "category", "dataset_type", "schema_source", "api_available", "owner", "steward", "frequency", "timeline", "dataset_description",
 )
 
 

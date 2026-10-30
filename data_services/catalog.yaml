@@ -8,6 +8,8 @@
 #   category      CAT-1 | CAT-2 | CAT-3 | CAT-4
 #   dataset_type  Citizen Centric | Administrative
 #   owner, steward, frequency, timeline, api_available (Y/N), description
+# Per department:
+#   description   About text shown on its OpenMetadata database service
 # Per table:
 #   source        storage:<key> of the department's file (required)
 #   format        postgres_ddl (default) | csv
@@ -27,12 +29,20 @@ departments:
   #     python3 -m src.schema_registry.sync --department agri_dept
   pwd:
     name: Public Works Department
+    description: >-
+      The Public Works Department (PWD) plans, designs, constructs, and
+      maintains state highways, major district roads, bridges, and government
+      administrative buildings. It records data on road network lengths,
+      surface types, construction tender milestones, bridge structural audits,
+      contractor certifications, and maintenance activities and project
+      expenditures.
     datasets:
       vishwakarma:
         category: CAT-3
         owner: Public Works Department (PWD)
         steward:
         dataset_type: Administrative
+        schema_source: Department Provided
         frequency: Daily
         timeline: "01-06-2019 - ongoing"
         api_available:
@@ -44,12 +54,19 @@ departments:
             metadata: storage:inputs/pwd/vishwakarma/pwd_vishwakarma_full_raw_columns_metadata.csv
   agri_dept:
     name: Agriculture Department
+    description: >-
+      The Agriculture Department formulates agricultural policies, enhances
+      crop productivity, and distributes subsidized seeds, fertilizers, and
+      farm equipment across the state. It records data on landholding patterns,
+      soil health cards, seasonal crop sowing and yields, farm machinery
+      subsidies, and direct benefit transfers under schemes like PM-KISAN.
     datasets:
       distribution_record_dataset:
         category: CAT-3
         owner: Agriculture Department
         steward:
         dataset_type: Citizen Centric
+        schema_source: Department Provided
         frequency:
         timeline:
         api_available:
@@ -85,6 +102,7 @@ departments:
         owner: Agriculture Department
         steward:
         dataset_type: Citizen Centric
+        schema_source: Department Provided
         frequency:
         timeline:
         api_available:
@@ -103,6 +121,7 @@ departments:
         owner: Agriculture Department
         steward:
         dataset_type: Administrative
+        schema_source: Department Provided
         frequency:
         timeline:
         api_available:
@@ -126,12 +145,19 @@ departments:
             metadata: storage:inputs/agri_dept/scheme_physical_financial_progress_dataset/grant_wise_bill_generation_metadata.csv
   rural_development_department:
     name: Rural Development Department
+    description: >-
+      The Rural Development Department spearheads rural poverty alleviation,
+      infrastructure building, and employment generation programs across rural
+      districts. It records data on MGNREGA job cards, person-days generated,
+      wage payments, rural housing sanctions (PMAY-G), village road assets, and
+      rural self-help group capitalization.
     datasets:
       mgnrega:
         category: CAT-1
         owner: Rural Development Department
         steward:
         dataset_type: Citizen Centric
+        schema_source: Public Extraction
         frequency: yearly
         timeline: 2014-15 to 2025-26
         api_available: N
@@ -148,6 +174,7 @@ departments:
         owner: Rural Development Department
         steward:
         dataset_type: Administrative
+        schema_source: Public Extraction
         frequency: yearly
         timeline: 2023-27
         api_available: N
@@ -168,6 +195,7 @@ departments:
         owner: Rural Development Department
         steward:
         dataset_type: Citizen Centric
+        schema_source: Public Extraction
         frequency:
         timeline:
         api_available: N
@@ -181,14 +209,703 @@ departments:
             source: storage:inputs/rural_development_department/awas/awas_pmayg_category_progress_raw_columns.csv
             format: csv
             metadata: storage:inputs/rural_development_department/awas/awas_pmayg_category_progress_raw_columns_metadata.csv
+  horticulture_department:
+    name: Horticulture Department
+    datasets:
+      janhit_horticulture:
+        category: CAT-3
+        owner: Horticulture Department
+        steward:
+        dataset_type: 
+        schema_source:
+        frequency: 
+        timeline: ongoing
+        api_available: N
+        description: >-
+          Service-delivery data from the Horticulture Department's Janhit portal: nursery/paudhshala
+          and cold-storage registration, licensing and renewal, farmer and firm registration,
+          production, payments, training, success stories, and the Darpan service-delivery/timeline
+          tracking tables.
+        tables:
+          challandetails:
+            source: storage:inputs/horticulture_department/janhit_horticulture/challandetails.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/challandetails_metadata.csv
+          challanheads:
+            source: storage:inputs/horticulture_department/janhit_horticulture/CHALLANHEADS.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/CHALLANHEADS_metadata.csv
+          challan_info:
+            source: storage:inputs/horticulture_department/janhit_horticulture/challanInfo.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/challanInfo_metadata.csv
+          cm_otplog:
+            source: storage:inputs/horticulture_department/janhit_horticulture/CM_OTPLog.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/CM_OTPLog_metadata.csv
+          cmdarpan_drill_down_data:
+            source: storage:inputs/horticulture_department/janhit_horticulture/CMDarpanDrillDownData.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/CMDarpanDrillDownData_metadata.csv
+          cold_licence:
+            source: storage:inputs/horticulture_department/janhit_horticulture/coldLicence.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/coldLicence_metadata.csv
+          cold_reg:
+            source: storage:inputs/horticulture_department/janhit_horticulture/ColdReg.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/ColdReg_metadata.csv
+          cold_storage_details:
+            source: storage:inputs/horticulture_department/janhit_horticulture/ColdStorageDetails.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/ColdStorageDetails_metadata.csv
+          cold_storage_entry:
+            source: storage:inputs/horticulture_department/janhit_horticulture/ColdStorageEntry.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/ColdStorageEntry_metadata.csv
+          cold_storage_login:
+            source: storage:inputs/horticulture_department/janhit_horticulture/ColdStorageLogin.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/ColdStorageLogin_metadata.csv
+          contact:
+            source: storage:inputs/horticulture_department/janhit_horticulture/contact.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/contact_metadata.csv
+          covid:
+            source: storage:inputs/horticulture_department/janhit_horticulture/Covid.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/Covid_metadata.csv
+          darpan_officer:
+            source: storage:inputs/horticulture_department/janhit_horticulture/DarpanOfficer.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/DarpanOfficer_metadata.csv
+          darpan_otplog:
+            source: storage:inputs/horticulture_department/janhit_horticulture/DarpanOTPLog.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/DarpanOTPLog_metadata.csv
+          darpan_pending_days:
+            source: storage:inputs/horticulture_department/janhit_horticulture/DarpanPendingDays.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/DarpanPendingDays_metadata.csv
+          digital_reg:
+            source: storage:inputs/horticulture_department/janhit_horticulture/DigitalReg.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/DigitalReg_metadata.csv
+          district:
+            source: storage:inputs/horticulture_department/janhit_horticulture/District.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/District_metadata.csv
+          district_master:
+            source: storage:inputs/horticulture_department/janhit_horticulture/DistrictMaster.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/DistrictMaster_metadata.csv
+          division:
+            source: storage:inputs/horticulture_department/janhit_horticulture/DIVISION.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/DIVISION_metadata.csv
+          empdetails:
+            source: storage:inputs/horticulture_department/janhit_horticulture/empdetails.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/empdetails_metadata.csv
+          farmer_data:
+            source: storage:inputs/horticulture_department/janhit_horticulture/farmerData.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/farmerData_metadata.csv
+          firmcatogery:
+            source: storage:inputs/horticulture_department/janhit_horticulture/firmcatogery.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/firmcatogery_metadata.csv
+          firm_data:
+            source: storage:inputs/horticulture_department/janhit_horticulture/firmData.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/firmData_metadata.csv
+          fpname:
+            source: storage:inputs/horticulture_department/janhit_horticulture/fpname.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/fpname_metadata.csv
+          fpnamefirm:
+            source: storage:inputs/horticulture_department/janhit_horticulture/fpnamefirm.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/fpnamefirm_metadata.csv
+          fpname_nursary:
+            source: storage:inputs/horticulture_department/janhit_horticulture/fpnameNursary.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/fpnameNursary_metadata.csv
+          fproduction:
+            source: storage:inputs/horticulture_department/janhit_horticulture/fproduction.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/fproduction_metadata.csv
+          fproduction_nur:
+            source: storage:inputs/horticulture_department/janhit_horticulture/fproductionNur.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/fproductionNur_metadata.csv
+          log_action:
+            source: storage:inputs/horticulture_department/janhit_horticulture/LogAction.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/LogAction_metadata.csv
+          login_details:
+            source: storage:inputs/horticulture_department/janhit_horticulture/loginDetails.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/loginDetails_metadata.csv
+          log_reg:
+            source: storage:inputs/horticulture_department/janhit_horticulture/logReg.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/logReg_metadata.csv
+          meeting:
+            source: storage:inputs/horticulture_department/janhit_horticulture/meeting.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/meeting_metadata.csv
+          nbb:
+            source: storage:inputs/horticulture_department/janhit_horticulture/nbb.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/nbb_metadata.csv
+          new_license:
+            source: storage:inputs/horticulture_department/janhit_horticulture/NewLicense.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/NewLicense_metadata.csv
+          nursary_details:
+            source: storage:inputs/horticulture_department/janhit_horticulture/nursaryDetails.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/nursaryDetails_metadata.csv
+          nursary_licence:
+            source: storage:inputs/horticulture_department/janhit_horticulture/nursaryLicence.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/nursaryLicence_metadata.csv
+          nursery_private_reg:
+            source: storage:inputs/horticulture_department/janhit_horticulture/NurseryPrivateReg.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/NurseryPrivateReg_metadata.csv
+          nursery_reg:
+            source: storage:inputs/horticulture_department/janhit_horticulture/NurseryReg.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/NurseryReg_metadata.csv
+          officersdetails:
+            source: storage:inputs/horticulture_department/janhit_horticulture/officersdetails.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/officersdetails_metadata.csv
+          otpdetail:
+            source: storage:inputs/horticulture_department/janhit_horticulture/OTPDetail.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/OTPDetail_metadata.csv
+          post_details:
+            source: storage:inputs/horticulture_department/janhit_horticulture/postDetails.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/postDetails_metadata.csv
+          registration:
+            source: storage:inputs/horticulture_department/janhit_horticulture/Registration.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/Registration_metadata.csv
+          registration_info:
+            source: storage:inputs/horticulture_department/janhit_horticulture/RegistrationInfo.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/RegistrationInfo_metadata.csv
+          re_new_licence:
+            source: storage:inputs/horticulture_department/janhit_horticulture/ReNewLicence.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/ReNewLicence_metadata.csv
+          role_master:
+            source: storage:inputs/horticulture_department/janhit_horticulture/RoleMaster.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/RoleMaster_metadata.csv
+          sector:
+            source: storage:inputs/horticulture_department/janhit_horticulture/Sector.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/Sector_metadata.csv
+          sub_category:
+            source: storage:inputs/horticulture_department/janhit_horticulture/SubCategory.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/SubCategory_metadata.csv
+          success_story:
+            source: storage:inputs/horticulture_department/janhit_horticulture/SuccessStory.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/SuccessStory_metadata.csv
+          table_data_darpan:
+            source: storage:inputs/horticulture_department/janhit_horticulture/Table-DataDarpan.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/Table-DataDarpan_metadata.csv
+          table_log:
+            source: storage:inputs/horticulture_department/janhit_horticulture/table-log.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/table-log_metadata.csv
+          training_data:
+            source: storage:inputs/horticulture_department/janhit_horticulture/trainingData.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/trainingData_metadata.csv
+          treasury:
+            source: storage:inputs/horticulture_department/janhit_horticulture/TREASURY.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/TREASURY_metadata.csv
+          uregistration:
+            source: storage:inputs/horticulture_department/janhit_horticulture/URegistration.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/URegistration_metadata.csv
+          verification_report:
+            source: storage:inputs/horticulture_department/janhit_horticulture/verificationReport.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/janhit_horticulture/verificationReport_metadata.csv
+      dbt_schemes:
+        category: CAT-3
+        owner: Horticulture Department
+        steward:
+        dataset_type: 
+        schema_source:
+        frequency: 
+        timeline: ongoing
+        api_available: N
+        description: >-
+          Direct Benefit Transfer (DBT) schemes data from the Horticulture Department's DBT portal:
+          scheme applications, beneficiary and family details, land and bank details, DBT
+          distribution and IDs, PMKSY micro-irrigation components and sanctions, and
+          verification/payment records.
+        tables:
+          account_info:
+            source: storage:inputs/horticulture_department/dbt_schemes/AccountInfo.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/AccountInfo_metadata.csv
+          agency_report_master:
+            source: storage:inputs/horticulture_department/dbt_schemes/agencyReportMaster.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/agencyReportMaster_metadata.csv
+          application_activity:
+            source: storage:inputs/horticulture_department/dbt_schemes/applicationActivity.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/applicationActivity_metadata.csv
+          apply_item_name:
+            source: storage:inputs/horticulture_department/dbt_schemes/ApplyItemName.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/ApplyItemName_metadata.csv
+          apply_scheme:
+            source: storage:inputs/horticulture_department/dbt_schemes/ApplyScheme.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/ApplyScheme_metadata.csv
+          apply_scheme_stage:
+            source: storage:inputs/horticulture_department/dbt_schemes/ApplySchemeStage.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/ApplySchemeStage_metadata.csv
+          apply_scheme_verification:
+            source: storage:inputs/horticulture_department/dbt_schemes/ApplySchemeVerification.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/ApplySchemeVerification_metadata.csv
+          backbenedetails:
+            source: storage:inputs/horticulture_department/dbt_schemes/backbenedetails.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/backbenedetails_metadata.csv
+          bank_details:
+            source: storage:inputs/horticulture_department/dbt_schemes/BankDetails.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/BankDetails_metadata.csv
+          bank_name:
+            source: storage:inputs/horticulture_department/dbt_schemes/BankName.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/BankName_metadata.csv
+          beejlatterdata:
+            source: storage:inputs/horticulture_department/dbt_schemes/beejlatterdata.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/beejlatterdata_metadata.csv
+          beneficiary_details:
+            source: storage:inputs/horticulture_department/dbt_schemes/BeneficiaryDetails.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/BeneficiaryDetails_metadata.csv
+          billing_end:
+            source: storage:inputs/horticulture_department/dbt_schemes/BillingEnd.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/BillingEnd_metadata.csv
+          cash_kind_mapping:
+            source: storage:inputs/horticulture_department/dbt_schemes/CashKindMapping.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/CashKindMapping_metadata.csv
+          category:
+            source: storage:inputs/horticulture_department/dbt_schemes/Category.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/Category_metadata.csv
+          challandetails:
+            source: storage:inputs/horticulture_department/dbt_schemes/challandetails.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/challandetails_metadata.csv
+          challanheads:
+            source: storage:inputs/horticulture_department/dbt_schemes/CHALLANHEADS.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/CHALLANHEADS_metadata.csv
+          cold_licence:
+            source: storage:inputs/horticulture_department/dbt_schemes/coldLicence.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/coldLicence_metadata.csv
+          cold_reg:
+            source: storage:inputs/horticulture_department/dbt_schemes/ColdReg.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/ColdReg_metadata.csv
+          cold_storage_master:
+            source: storage:inputs/horticulture_department/dbt_schemes/ColdStorageMaster.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/ColdStorageMaster_metadata.csv
+          complaint_req:
+            source: storage:inputs/horticulture_department/dbt_schemes/ComplaintReq.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/ComplaintReq_metadata.csv
+          contact:
+            source: storage:inputs/horticulture_department/dbt_schemes/Contact.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/Contact_metadata.csv
+          contact_details:
+            source: storage:inputs/horticulture_department/dbt_schemes/contactDetails.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/contactDetails_metadata.csv
+          crop_submission_cold_storage:
+            source: storage:inputs/horticulture_department/dbt_schemes/CropSubmissionColdStorage.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/CropSubmissionColdStorage_metadata.csv
+          darpan_district:
+            source: storage:inputs/horticulture_department/dbt_schemes/darpan_district.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/darpan_district_metadata.csv
+          darpan_drill_down_data:
+            source: storage:inputs/horticulture_department/dbt_schemes/DarpanDrillDownData.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/DarpanDrillDownData_metadata.csv
+          darpan_pending_days:
+            source: storage:inputs/horticulture_department/dbt_schemes/DarpanPendingDays.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/DarpanPendingDays_metadata.csv
+          dbtdistribution:
+            source: storage:inputs/horticulture_department/dbt_schemes/DBTDistribution.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/DBTDistribution_metadata.csv
+          dbtid:
+            source: storage:inputs/horticulture_department/dbt_schemes/DBTID.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/DBTID_metadata.csv
+          dbttarget_discription_master:
+            source: storage:inputs/horticulture_department/dbt_schemes/DBTTargetDiscriptionMaster.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/DBTTargetDiscriptionMaster_metadata.csv
+          district:
+            source: storage:inputs/horticulture_department/dbt_schemes/District.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/District_metadata.csv
+          district_avl_scc:
+            source: storage:inputs/horticulture_department/dbt_schemes/District_Avl_SCC.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/District_Avl_SCC_metadata.csv
+          district_janhit:
+            source: storage:inputs/horticulture_department/dbt_schemes/DistrictJanhit.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/DistrictJanhit_metadata.csv
+          district_master:
+            source: storage:inputs/horticulture_department/dbt_schemes/DistrictMaster.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/DistrictMaster_metadata.csv
+          districtwise_target:
+            source: storage:inputs/horticulture_department/dbt_schemes/DistrictwiseTarget.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/DistrictwiseTarget_metadata.csv
+          division:
+            source: storage:inputs/horticulture_department/dbt_schemes/DIVISION.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/DIVISION_metadata.csv
+          division_master:
+            source: storage:inputs/horticulture_department/dbt_schemes/DivisionMaster.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/DivisionMaster_metadata.csv
+          doc_list:
+            source: storage:inputs/horticulture_department/dbt_schemes/DocList.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/DocList_metadata.csv
+          family:
+            source: storage:inputs/horticulture_department/dbt_schemes/FAMILY.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/FAMILY_metadata.csv
+          financial_year:
+            source: storage:inputs/horticulture_department/dbt_schemes/FinancialYear.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/FinancialYear_metadata.csv
+          firm_name:
+            source: storage:inputs/horticulture_department/dbt_schemes/firmName.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/firmName_metadata.csv
+          firm_type_master:
+            source: storage:inputs/horticulture_department/dbt_schemes/FirmTypeMaster.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/FirmTypeMaster_metadata.csv
+          fproduction:
+            source: storage:inputs/horticulture_department/dbt_schemes/fproduction.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/fproduction_metadata.csv
+          fr_doc:
+            source: storage:inputs/horticulture_department/dbt_schemes/FrDoc.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/FrDoc_metadata.csv
+          graminbankbranch:
+            source: storage:inputs/horticulture_department/dbt_schemes/Graminbankbranch.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/Graminbankbranch_metadata.csv
+          harvest_type:
+            source: storage:inputs/horticulture_department/dbt_schemes/HarvestType.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/HarvestType_metadata.csv
+          ifsc:
+            source: storage:inputs/horticulture_department/dbt_schemes/IFSC.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/IFSC_metadata.csv
+          kccinfo:
+            source: storage:inputs/horticulture_department/dbt_schemes/KCCInfo.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/KCCInfo_metadata.csv
+          kind_dbtdistribution:
+            source: storage:inputs/horticulture_department/dbt_schemes/KindDBTDistribution.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/KindDBTDistribution_metadata.csv
+          land_info:
+            source: storage:inputs/horticulture_department/dbt_schemes/LandInfo.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/LandInfo_metadata.csv
+          landinfo_doc:
+            source: storage:inputs/horticulture_department/dbt_schemes/landinfoDoc.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/landinfoDoc_metadata.csv
+          lekha:
+            source: storage:inputs/horticulture_department/dbt_schemes/Lekha.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/Lekha_metadata.csv
+          locations:
+            source: storage:inputs/horticulture_department/dbt_schemes/Locations.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/Locations_metadata.csv
+          log_action:
+            source: storage:inputs/horticulture_department/dbt_schemes/LogAction.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/LogAction_metadata.csv
+          login_details:
+            source: storage:inputs/horticulture_department/dbt_schemes/loginDetails.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/loginDetails_metadata.csv
+          log_reg:
+            source: storage:inputs/horticulture_department/dbt_schemes/logReg.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/logReg_metadata.csv
+          mi_boqfarmer:
+            source: storage:inputs/horticulture_department/dbt_schemes/MI_BOQFarmer.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/MI_BOQFarmer_metadata.csv
+          mi_layout:
+            source: storage:inputs/horticulture_department/dbt_schemes/MI_Layout.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/MI_Layout_metadata.csv
+          min_land_req:
+            source: storage:inputs/horticulture_department/dbt_schemes/MinLandReq.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/MinLandReq_metadata.csv
+          new_license:
+            source: storage:inputs/horticulture_department/dbt_schemes/NewLicense.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/NewLicense_metadata.csv
+          nursary_licence:
+            source: storage:inputs/horticulture_department/dbt_schemes/nursaryLicence.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/nursaryLicence_metadata.csv
+          nursery_private_reg:
+            source: storage:inputs/horticulture_department/dbt_schemes/NurseryPrivateReg.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/NurseryPrivateReg_metadata.csv
+          nursery_reg:
+            source: storage:inputs/horticulture_department/dbt_schemes/NurseryReg.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/NurseryReg_metadata.csv
+          otpdetail:
+            source: storage:inputs/horticulture_department/dbt_schemes/OTPDetail.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/OTPDetail_metadata.csv
+          parikshan:
+            source: storage:inputs/horticulture_department/dbt_schemes/Parikshan.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/Parikshan_metadata.csv
+          personal_info:
+            source: storage:inputs/horticulture_department/dbt_schemes/PersonalInfo.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/PersonalInfo_metadata.csv
+          pmksy_comp_list:
+            source: storage:inputs/horticulture_department/dbt_schemes/PMKSY_CompList.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/PMKSY_CompList_metadata.csv
+          pmksy_comp_rate_list:
+            source: storage:inputs/horticulture_department/dbt_schemes/PMKSY_CompRateList.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/PMKSY_CompRateList_metadata.csv
+          pmksy_drip_irrigation:
+            source: storage:inputs/horticulture_department/dbt_schemes/PMKSY_DripIrrigation.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/PMKSY_DripIrrigation_metadata.csv
+          pmksy_large_sprinkler:
+            source: storage:inputs/horticulture_department/dbt_schemes/PMKSY_LargeSprinkler.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/PMKSY_LargeSprinkler_metadata.csv
+          pmksy_micro_sprinkler:
+            source: storage:inputs/horticulture_department/dbt_schemes/PMKSY_MicroSprinkler.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/PMKSY_MicroSprinkler_metadata.csv
+          pmksy_midealer:
+            source: storage:inputs/horticulture_department/dbt_schemes/PMKSY_MIDealer.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/PMKSY_MIDealer_metadata.csv
+          pmksy_mifirm:
+            source: storage:inputs/horticulture_department/dbt_schemes/PMKSY_MIFirm.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/PMKSY_MIFirm_metadata.csv
+          pmksy_mifirm_component:
+            source: storage:inputs/horticulture_department/dbt_schemes/PMKSY_MIFirmComponent.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/PMKSY_MIFirmComponent_metadata.csv
+          pmksy_mini_sprinkler:
+            source: storage:inputs/horticulture_department/dbt_schemes/PMKSY_MiniSprinkler.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/PMKSY_MiniSprinkler_metadata.csv
+          pmksy_portable_sprinkler:
+            source: storage:inputs/horticulture_department/dbt_schemes/PMKSY_PortableSprinkler.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/PMKSY_PortableSprinkler_metadata.csv
+          pmksy_rate_list_sub_type:
+            source: storage:inputs/horticulture_department/dbt_schemes/PMKSY_RateListSubType.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/PMKSY_RateListSubType_metadata.csv
+          pmksy_rate_list_type:
+            source: storage:inputs/horticulture_department/dbt_schemes/PMKSY_RateListType.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/PMKSY_RateListType_metadata.csv
+          pmksy_sanction_ltr:
+            source: storage:inputs/horticulture_department/dbt_schemes/PMKSY_SanctionLtr.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/PMKSY_SanctionLtr_metadata.csv
+          registration:
+            source: storage:inputs/horticulture_department/dbt_schemes/Registration.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/Registration_metadata.csv
+          registration_janhit:
+            source: storage:inputs/horticulture_department/dbt_schemes/RegistrationJanhit.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/RegistrationJanhit_metadata.csv
+          reject_reason:
+            source: storage:inputs/horticulture_department/dbt_schemes/RejectReason.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/RejectReason_metadata.csv
+          re_new_licence:
+            source: storage:inputs/horticulture_department/dbt_schemes/ReNewLicence.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/ReNewLicence_metadata.csv
+          req_sccategory:
+            source: storage:inputs/horticulture_department/dbt_schemes/ReqSCCategory.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/ReqSCCategory_metadata.csv
+          restaurent_detail:
+            source: storage:inputs/horticulture_department/dbt_schemes/restaurentDetail.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/restaurentDetail_metadata.csv
+          restaurent_master:
+            source: storage:inputs/horticulture_department/dbt_schemes/restaurentMaster.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/restaurentMaster_metadata.csv
+          role_master:
+            source: storage:inputs/horticulture_department/dbt_schemes/RoleMaster.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/RoleMaster_metadata.csv
+          save_message_master:
+            source: storage:inputs/horticulture_department/dbt_schemes/saveMessageMaster.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/saveMessageMaster_metadata.csv
+          sccategory:
+            source: storage:inputs/horticulture_department/dbt_schemes/SCCategory.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/SCCategory_metadata.csv
+          sccategory_spacing:
+            source: storage:inputs/horticulture_department/dbt_schemes/SCCategorySpacing.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/SCCategorySpacing_metadata.csv
+          sccategory_type:
+            source: storage:inputs/horticulture_department/dbt_schemes/SCCategoryType.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/SCCategoryType_metadata.csv
+          sccdescription:
+            source: storage:inputs/horticulture_department/dbt_schemes/SCCDescription.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/SCCDescription_metadata.csv
+          scheme_district_mapping:
+            source: storage:inputs/horticulture_department/dbt_schemes/SchemeDistrictMapping.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/SchemeDistrictMapping_metadata.csv
+          slec_master:
+            source: storage:inputs/horticulture_department/dbt_schemes/slecMaster.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/slecMaster_metadata.csv
+          stage_master:
+            source: storage:inputs/horticulture_department/dbt_schemes/stageMaster.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/stageMaster_metadata.csv
+          sub_category:
+            source: storage:inputs/horticulture_department/dbt_schemes/SubCategory.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/SubCategory_metadata.csv
+          sub_category_janhit:
+            source: storage:inputs/horticulture_department/dbt_schemes/SubCategoryJanhit.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/SubCategoryJanhit_metadata.csv
+          table_log:
+            source: storage:inputs/horticulture_department/dbt_schemes/table-log.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/table-log_metadata.csv
+          tehsil_master:
+            source: storage:inputs/horticulture_department/dbt_schemes/TehsilMaster.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/TehsilMaster_metadata.csv
+          time_zone_master:
+            source: storage:inputs/horticulture_department/dbt_schemes/timeZoneMaster.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/timeZoneMaster_metadata.csv
+          training_data:
+            source: storage:inputs/horticulture_department/dbt_schemes/trainingData.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/trainingData_metadata.csv
+          training_program_master:
+            source: storage:inputs/horticulture_department/dbt_schemes/TrainingProgramMaster.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/TrainingProgramMaster_metadata.csv
+          treasury:
+            source: storage:inputs/horticulture_department/dbt_schemes/TREASURY.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/TREASURY_metadata.csv
+          uregistration:
+            source: storage:inputs/horticulture_department/dbt_schemes/URegistration.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/URegistration_metadata.csv
+          user_profile:
+            source: storage:inputs/horticulture_department/dbt_schemes/UserProfile.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/UserProfile_metadata.csv
+          verification_report:
+            source: storage:inputs/horticulture_department/dbt_schemes/verificationReport.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/verificationReport_metadata.csv
+          villagemaster:
+            source: storage:inputs/horticulture_department/dbt_schemes/villagemaster.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/villagemaster_metadata.csv
+          year_master:
+            source: storage:inputs/horticulture_department/dbt_schemes/YearMaster.csv
+            format: csv
+            metadata: storage:inputs/horticulture_department/dbt_schemes/YearMaster_metadata.csv
   women_and_child_development_department:
     name: Women and Child Development Department
+    description: >-
+      The Women and Child Development Department executes child protection
+      initiatives, adolescent welfare programs, and nutritional interventions
+      for mothers and infants. It records data on Anganwadi center operations,
+      child growth and malnutrition metrics, supplementary nutrition
+      distribution, juvenile justice cases, and financial aid under schemes
+      like Mukhyamantri Kanya Sumangala Yojana.
     datasets:
       kanya_sumangla_portal:
         category: CAT-3
         owner: Women and Child Development Department
         steward:
         dataset_type: Citizen Centric
+        schema_source: Department Provided
         frequency:
         timeline:
         api_available:
@@ -203,6 +920,7 @@ departments:
         owner: Women and Child Development Department
         steward:
         dataset_type: Citizen Centric
+        schema_source: Department Provided
         frequency:
         timeline:
         api_available:
@@ -217,6 +935,7 @@ departments:
       night_time_light_over_india:
         category: CAT-1
         dataset_type:
+        schema_source: Public Extraction
         owner: National Remote Sensing Centre, ISRO
         steward:
         source_url : https://bhuvan-app1.nrsc.gov.in/bhuvan_ntl/

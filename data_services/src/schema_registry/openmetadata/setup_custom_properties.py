@@ -1,6 +1,6 @@
 """One-time setup: register the OpenMetadata Custom Properties that
 `openmetadata/publish.py`'s `_ensure_database()` pushes values into for the
-dataset-level fields (`api_available`/`owner`/`steward`/`frequency`/`timeline`/`dataset_type`) that
+dataset-level fields (`api_available`/`owner`/`steward`/`frequency`/`timeline`/`dataset_type`/`schema_source`) that
 have no built-in Database field. Entity *type* changes like this aren't
 something the regular create-or-update entity APIs can make, so this is a
 separate, run-once-per-OpenMetadata-instance step -- re-running it is safe
@@ -28,6 +28,7 @@ _DESCRIPTIONS = {
     "frequency": "How often this dataset is refreshed/submitted.",
     "timeline": "The period/date range this dataset covers.",
     "datasetType": "Who the dataset is about: 'Citizen Centric' or 'Administrative'.",
+    "schemaSource": "Where the schema came from: 'Department Provided' or 'Public Extraction'.",
     "extraMetadata": "JSON with the column details not shown elsewhere (nullable, default, scale, ...), kept for later use.",
 }
 
