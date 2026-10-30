@@ -411,6 +411,7 @@ def _catalog_filters(
     frequency: list[str] | None,
     api: list[str] | None,
     steward: list[str] | None,
+    schema_source: list[str] | None,
     year_from: int | None,
     year_to: int | None,
 ) -> cf.CatalogFilters:
@@ -428,6 +429,7 @@ def _catalog_filters(
         frequency=frozenset(cf.frequency_value(v) for v in values(frequency)),
         api=frozenset(v.lower() for v in values(api)),
         steward=values(steward),
+        schema_source=values(schema_source),
         year_from=year_from,
         year_to=year_to,
     )
@@ -461,6 +463,7 @@ async def list_datasets(
     frequency: list[str] | None = Query(default=None),
     api: list[str] | None = Query(default=None),
     steward: list[str] | None = Query(default=None),
+    schema_source: list[str] | None = Query(default=None),
     year_from: int | None = Query(default=None, ge=1000, le=9999),
     year_to: int | None = Query(default=None, ge=1000, le=9999),
     sort: str = "relevance",
@@ -473,7 +476,7 @@ async def list_datasets(
 
     Filters (repeat a parameter to select several values: ORed within a
     filter, ANDed across filters): department, classification (CAT-1..4),
-    tag, frequency, api (yes/no), steward, year_from/year_to (timeline
+    tag, frequency, api (yes/no), steward, schema_source, year_from/year_to (timeline
     overlap). `facets` counts every option over the visible catalog, each
     ignoring its own selection. Sorted (relevance | updated | name), then
     paged via page/size; `total` is the filtered count. Logged-in callers
@@ -481,7 +484,9 @@ async def list_datasets(
     page size; guests never receive table names of non-public data.
     """
     ctx = user_context(user)
-    filters = _catalog_filters(classification, tag, department, frequency, api, steward, year_from, year_to)
+    filters = _catalog_filters(
+        classification, tag, department, frequency, api, steward, schema_source, year_from, year_to
+    )
     cards, vmap, _databases, profiles = await _filterable_catalog(session, ctx)
     if search:
         needle = search.lower()
@@ -873,6 +878,7 @@ async def registry_search(
     frequency: list[str] | None = Query(default=None),
     api: list[str] | None = Query(default=None),
     steward: list[str] | None = Query(default=None),
+    schema_source: list[str] | None = Query(default=None),
     year_from: int | None = Query(default=None, ge=1000, le=9999),
     year_to: int | None = Query(default=None, ge=1000, le=9999),
     sort: str = "relevance",
@@ -884,7 +890,7 @@ async def registry_search(
     """Grouped registry search: departments, datasets, tables, columns.
 
     Takes the same filters as GET /datasets (department, classification,
-    tag, frequency, api, steward, year_from/year_to); tables and columns
+    tag, frequency, api, steward, schema_source, year_from/year_to); tables and columns
     are filtered by their dataset (tables by their own tags). `facets`
     counts options over the matched datasets. Every group is sorted and
     paged with page/size; each group's `total` is its filtered count.
@@ -908,7 +914,9 @@ async def registry_search(
     if scope and not wanted_scopes:
         wanted_scopes = set(_VALID_SCOPES)
 
-    filters = _catalog_filters(classification, tag, department, frequency, api, steward, year_from, year_to)
+    filters = _catalog_filters(
+        classification, tag, department, frequency, api, steward, schema_source, year_from, year_to
+    )
     _check_sort(sort)
     cards, vmap, databases, profiles = await _filterable_catalog(session, ctx)
     raw = await _catalog_raw(session, ctx)

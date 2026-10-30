@@ -120,6 +120,8 @@ export interface DatasetInfo {
   /** Dataset classification tag, else the most restrictive among its tables. */
   data_classification?: string | null;
   data_classification_description?: string | null;
+  /** Where the schema came from: "Department Provided" or "Public Extraction" (OM schemaSource). */
+  schema_source?: string | null;
 }
 
 export interface DatasetCard {
@@ -164,6 +166,8 @@ export interface CatalogFacets {
   /** "yes" / "no". */
   api: FacetOption[];
   steward: FacetOption[];
+  /** "Department Provided" / "Public Extraction"; absent from older APIs. */
+  schema_source?: FacetOption[];
   /** Overall timeline span, null when no dataset has a timeline. */
   years: { min: number; max: number } | null;
 }
@@ -176,6 +180,7 @@ export interface CatalogFilterParams {
   frequency?: string[];
   api?: string[];
   steward?: string[];
+  schema_source?: string[];
   year_from?: number | null;
   year_to?: number | null;
   sort?: "relevance" | "updated" | "name";
@@ -270,6 +275,7 @@ function appendFilters(qs: URLSearchParams, params: CatalogFilterParams) {
     ["frequency", params.frequency],
     ["api", params.api],
     ["steward", params.steward],
+    ["schema_source", params.schema_source],
   ];
   for (const [key, value] of lists) {
     for (const v of Array.isArray(value) ? value : value ? [value] : []) qs.append(key, v);
