@@ -11,6 +11,7 @@ import {
 import { ApiError } from "../api/client";
 import { displayName } from "../api/auth";
 import { EmptyBlock, ErrorBlock, LoadingBlock } from "../components/registry/StateBlocks";
+import { CompletenessCard } from "../components/registry/CompletenessCard";
 import { t } from "../i18n";
 import {
   catLabel,
@@ -19,6 +20,7 @@ import {
   isSensitiveTag,
   normalizeClassification,
   readableTag,
+  tableCompletenessItems,
   type DataClassification,
 } from "../utils/format";
 import { useAuth } from "../contexts/AuthContext";
@@ -243,9 +245,6 @@ export function TablePage() {
     datasetQuery.isPending ||
     datasetQuery.isFetching ||
     (tableEnabled && (tableQuery.isPending || tableQuery.isFetching));
-  const info = table && !table.locked ? table.info ?? null : null;
-  const facts = table && !table.locked ? table.facts ?? null : null;
-  const apiAvailable: boolean | null = isFull ? (facts?.api_available ?? info?.api_available ?? null) : null;
   const tableTags = table && !table.locked ? (table.tags ?? []) : [];
   const datasetTagNames: string[] = !isFull && card ? ((card as { tags?: string[] }).tags ?? []) : [];
 
@@ -264,33 +263,14 @@ export function TablePage() {
     { id: "lineage", label: "Lineage", show: hasLineage },
   ];
 
-  const describedCols = (table?.columns ?? []).filter((c) => (c.description ?? "").trim()).length;
   const totalCols = table?.columns?.length ?? 0;
 
-  // Completeness is computed from 3 strict table-level items (owner and
-  // steward are dataset-level): a column-descriptions item counts as done
-  // only when every column has a description.
+  // Table-level completeness only; classification and API availability are
+  // dataset-level and scored on the dataset page.
   const completenessItems = useMemo(
-    () => [
-      { key: "classification", label: "Data classification", done: Boolean(classification), count: null as string | null },
-      { key: "api", label: "API availability", done: apiAvailable != null, count: null as string | null },
-      {
-        key: "columns",
-        label: "Column descriptions",
-        done: totalCols > 0 && describedCols === totalCols,
-        count: `${describedCols} / ${totalCols}`,
-      },
-    ],
-    [classification, apiAvailable, describedCols, totalCols],
+    () => (table && !table.locked ? tableCompletenessItems(table) : []),
+    [table],
   );
-  const completenessDone = completenessItems.filter((i) => i.done).length;
-  const completenessPct = Math.round((completenessDone / completenessItems.length) * 100);
-  const completenessColor =
-    completenessPct < 40
-      ? "var(--confid-fg)"
-      : completenessPct < 80
-        ? "var(--restricted-fg)"
-        : "var(--public-fg)";
 
 
 
@@ -681,102 +661,21 @@ export function TablePage() {
                 </div>
               </div>
 
-              {isFull && canEdit && (
-                <div style={{ border: "0.5px solid var(--border)", borderRadius: 12, background: "var(--bg)", padding: "12px 16px" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.5rem" }}>
-                    <h2
-                      className="font-semibold"
-                      style={{ display: "flex", alignItems: "center", gap: "0.35rem", color: "var(--navy-900)", fontSize: "1rem" }}
-                    >
-                      Metadata completeness
-                      <span
-                        tabIndex={0}
-                        aria-label="Share of key metadata fields filled in"
-                        className="completeness-info"
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          width: "16px",
-                          height: "16px",
-                          borderRadius: "50%",
-                          border: "1px solid var(--text-muted)",
-                          color: "var(--text-muted)",
-                          fontSize: "11px",
-                          fontWeight: 700,
-                        }}
-                      >
-                        <span aria-hidden="true">i</span>
-                        <span role="tooltip" className="completeness-info-tip">
-                          Share of key metadata fields filled in
-                        </span>
-                      </span>
-                    </h2>
-                    <span style={{ color: completenessColor, fontSize: "1rem", fontWeight: 700 }}>
-                      {completenessPct}%
-                    </span>
-                  </div>
-                  <div
-                    role="progressbar"
-                    aria-valuenow={completenessPct}
-                    aria-valuemin={0}
-                    aria-valuemax={100}
-                    aria-label="Metadata completeness"
-                    className="mt-2"
-                    style={{ height: "6px", borderRadius: 999, background: "var(--bg-alt)" }}
-                  >
-                    <div
-                      style={{
-                        width: `${completenessPct}%`,
-                        height: "100%",
-                        borderRadius: 999,
-                        background: completenessColor,
-                      }}
-                    />
-                  </div>
-                  <p className="mt-1" style={{ color: "var(--text-muted)", fontSize: "0.8125rem" }}>
-                    {t("documentedCount", { done: String(completenessDone), total: String(completenessItems.length) })}
-                  </p>
-                  <ul className="mt-1" style={{ fontSize: "0.875rem" }}>
-                    {completenessItems.map((item) => (
-                      <li
-                        key={item.key}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "0.5rem",
-                          borderTop: "1px solid var(--border)",
-                          paddingTop: "7px",
-                          paddingBottom: "7px",
-                          color: item.done ? "var(--text)" : "var(--text-muted)",
-                        }}
-                      >
-                        {item.done ? (
-                          <span aria-hidden style={{ color: "var(--public-fg)", fontWeight: 700 }}>
-                            ✓
-                          </span>
-                        ) : (
-                          <span
-                            aria-hidden
-                            style={{
-                              width: "14px",
-                              height: "14px",
-                              flexShrink: 0,
-                              borderRadius: "50%",
-                              border: "1.5px dashed var(--text-muted)",
-                            }}
-                          />
-                        )}
-                        <span className="min-w-0 flex-1">{item.label}</span>
-                        {item.count !== null && (
-                          <span style={{ color: "var(--text-muted)", fontSize: "0.8125rem", whiteSpace: "nowrap" }}>
-                            {item.count}
-                          </span>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
+              {isFull && canEdit && card && (
+                <CompletenessCard
+                  title="Table metadata completeness"
+                  tooltip="Share of this table's own metadata filled in"
+                  items={completenessItems}
+                  footer={
+                    <>
+                      Classification and API availability are dataset-level;{" "}
+                      <Link to={`/datasets/${encodeURIComponent(card.dataset)}`} style={{ color: "var(--blue-700)" }}>
+                        see the dataset page
+                      </Link>
+                      .
+                    </>
+                  }
+                />
               )}
 
               {(tableTags.length > 0 || datasetTagNames.length > 0) && (

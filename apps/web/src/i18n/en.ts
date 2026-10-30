@@ -16,6 +16,7 @@ export const en = {
   viewing: "Viewing",
   viewAllTables: "View all {count} tables →",
   documentedCount: "{done} of {total} items documented",
+  tablesFullyDocumented: "{done} of {total} tables fully documented",
   deptFind: "Find a department",
   deptFindPlaceholder: "Find a department…",
   deptClearSearch: "Clear search",
