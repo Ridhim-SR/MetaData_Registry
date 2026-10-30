@@ -66,7 +66,7 @@ departments:
         owner: Agriculture Department
         steward:
         dataset_type: Citizen Centric
-        schema_source:
+        schema_source: Department Provided
         frequency:
         timeline:
         api_available:
@@ -102,7 +102,7 @@ departments:
         owner: Agriculture Department
         steward:
         dataset_type: Citizen Centric
-        schema_source:
+        schema_source: Department Provided
         frequency:
         timeline:
         api_available:
@@ -121,7 +121,7 @@ departments:
         owner: Agriculture Department
         steward:
         dataset_type: Administrative
-        schema_source:
+        schema_source: Department Provided
         frequency:
         timeline:
         api_available:
@@ -157,7 +157,7 @@ departments:
         owner: Rural Development Department
         steward:
         dataset_type: Citizen Centric
-        schema_source:
+        schema_source: Public Extraction
         frequency: yearly
         timeline: 2014-15 to 2025-26
         api_available: N
@@ -174,7 +174,7 @@ departments:
         owner: Rural Development Department
         steward:
         dataset_type: Administrative
-        schema_source:
+        schema_source: Public Extraction
         frequency: yearly
         timeline: 2023-27
         api_available: N
@@ -195,7 +195,7 @@ departments:
         owner: Rural Development Department
         steward:
         dataset_type: Citizen Centric
-        schema_source:
+        schema_source: Public Extraction
         frequency:
         timeline:
         api_available: N
@@ -905,7 +905,7 @@ departments:
         owner: Women and Child Development Department
         steward:
         dataset_type: Citizen Centric
-        schema_source:
+        schema_source: Department Provided
         frequency:
         timeline:
         api_available:
@@ -920,7 +920,7 @@ departments:
         owner: Women and Child Development Department
         steward:
         dataset_type: Citizen Centric
-        schema_source:
+        schema_source: Department Provided
         frequency:
         timeline:
         api_available:
@@ -935,7 +935,7 @@ departments:
       night_time_light_over_india:
         category: CAT-1
         dataset_type:
-        schema_source:
+        schema_source: Public Extraction
         owner: National Remote Sensing Centre, ISRO
         steward:
         source_url : https://bhuvan-app1.nrsc.gov.in/bhuvan_ntl/
