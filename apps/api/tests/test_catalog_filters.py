@@ -91,3 +91,18 @@ def test_sort_and_page():
     assert names(cf.sort_items(CARDS, "updated")) == ["awas", "ntl", "mgnrega", "farmers"]
     assert names(cf.sort_items(CARDS, "relevance")) == names(CARDS)
     assert names(cf.page_of(CARDS, 2, 3)) == ["farmers"]
+
+
+def test_schema_source_filter_and_facet():
+    cards = [
+        _card("awas", "rd", "CAT-1", schema_source="Department Provided"),
+        _card("mgnrega", "rd", "CAT-1", schema_source=" Public Extraction "),
+        _card("ntl", "npd", "CAT-1", schema_source=""),  # blank: not provided
+        _card("farmers", "agri", "CAT-3"),  # locked teaser: no facts
+    ]
+    f = cf.CatalogFilters(schema_source=frozenset({"Public Extraction"}))
+    assert f.active
+    assert names(cf.filter_cards(cards, f)) == ["mgnrega"]
+    out = cf.facets(cards, cf.CatalogFilters(schema_source=frozenset({"Department Provided"}), departments=frozenset({"rd"})))
+    # Ignores its own selection, honours the others; blanks are not an option.
+    assert {i["value"]: i["count"] for i in out["schema_source"]} == {"Department Provided": 1, "Public Extraction": 1}

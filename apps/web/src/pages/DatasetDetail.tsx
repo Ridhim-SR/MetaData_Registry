@@ -250,6 +250,7 @@ function DatasetFacts({ info }: { info: DatasetInfo }) {
           )}
         </dd>
       </div>
+      <DatasetFact label="Schema source" value={info.schema_source} />
     </dl>
   );
 }
@@ -283,7 +284,7 @@ function DatasetCompleteness({ card, info }: { card: DatasetCard; info: DatasetI
   if (!canEdit) return null;
   return (
     <CompletenessMeter
-      label="Metadata completeness"
+      label="Dataset Metadata completeness"
       items={items}
       note={
         tables.length > 0
