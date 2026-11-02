@@ -299,6 +299,69 @@ input[type="search"]::-webkit-search-decoration {
   display: block;
 }
 
+/* Compact completeness meter: missing items pop over on hover and focus */
+.completeness-meter {
+  position: relative;
+  min-width: 200px;
+  padding: 0.6rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  cursor: help;
+}
+.completeness-meter:focus-visible {
+  outline: 2px solid var(--blue-700);
+  outline-offset: 2px;
+}
+.completeness-meter-pop {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: max-content;
+  min-width: max(100%, 240px);
+  max-width: 300px;
+  background: var(--navy-900);
+  color: #fff;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  padding: 0.6rem 0.75rem;
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+  z-index: 30;
+}
+.completeness-meter-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 4px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+.completeness-meter-check {
+  width: 14px;
+  color: #7ee2a8;
+  font-weight: 700;
+  text-align: center;
+}
+.completeness-meter-todo {
+  width: 12px;
+  height: 12px;
+  margin: 0 1px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1.5px dashed rgba(255, 255, 255, 0.7);
+}
+.completeness-meter-note {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.2);
+  opacity: 0.85;
+}
+.completeness-meter:hover .completeness-meter-pop,
+.completeness-meter:focus-within .completeness-meter-pop {
+  display: block;
+}
+
 /* Data category (CAT) info icon + tooltip: shows on hover and keyboard
    focus. Raised above card "stretched links" so hovering it works. */
 .cat-info {

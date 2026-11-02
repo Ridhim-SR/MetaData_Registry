@@ -27,7 +27,7 @@ def run_batch(manifest_file: str, storage: ObjectStorage, openmetadata_client: O
     unlike pipeline.run() which refuses to auto-create departments from
     arbitrary text), allow_column_removal (optional, y/yes/true/1 -- see
     pipeline.run()), and the dataset-level fields category, api_available,
-    owner, frequency, timeline, dataset_description (all optional, blank
+    owner, frequency, timeline, dataset_description, schema_source (all optional, blank
     carries forward whatever the dataset already has -- see
     pipeline.run()/README's Concepts).
 
@@ -69,6 +69,7 @@ def run_batch(manifest_file: str, storage: ObjectStorage, openmetadata_client: O
                 frequency=row.get("frequency") or "",
                 timeline=row.get("timeline") or "",
                 dataset_description=row.get("dataset_description") or "",
+                schema_source=row.get("schema_source") or "",
                 openmetadata_client=openmetadata_client,
                 allow_column_removal=row.get("allow_column_removal", "").strip().lower() in {"y", "yes", "true", "1"},
             )

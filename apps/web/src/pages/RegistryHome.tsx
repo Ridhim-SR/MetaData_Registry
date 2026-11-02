@@ -1,5 +1,6 @@
 import { Hero } from "../components/registry/Hero";
 import { StatsBar } from "../components/registry/StatsBar";
+import { DatasetsAtAGlance } from "../components/registry/DatasetsAtAGlance";
 import { DepartmentGrid } from "../components/registry/DepartmentGrid";
 import { PublicDataSection } from "../components/registry/PublicDataSection";
 import { HowItWorks } from "../components/registry/HowItWorks";
@@ -10,6 +11,7 @@ export function RegistryHomePage() {
     <div>
       <Hero />
       <StatsBar />
+      <DatasetsAtAGlance />
       <DepartmentGrid compact />
       <PublicDataSection />
       <HowItWorks />

@@ -4,7 +4,6 @@ import { displayName } from "../../api/auth";
 import { useAuth } from "../../contexts/AuthContext";
 
 const TEXT_SIZES = [0.875, 1, 1.125];
-const POPULAR_DEPT_ICON = "🏛";
 
 function useTextSize() {
   const [idx, setIdx] = useState(1);
@@ -100,9 +99,6 @@ export function RegistryHeader() {
           <a href="#main-content" className="skip-link">
             Skip to main content
           </a>
-          <span style={{ color: "var(--text-muted)" }} aria-hidden>
-            {POPULAR_DEPT_ICON} Uttar Pradesh Government Portal
-          </span>
           <div className="ml-auto flex items-center gap-1" role="group" aria-label="Text size">
             <button
               type="button"

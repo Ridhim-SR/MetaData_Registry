@@ -25,7 +25,8 @@ ENVIRONMENTS = {
 _WASABI_SETTINGS = (
     "WASABI_BUCKET", "WASABI_ENDPOINT_URL", "WASABI_REGION", "WASABI_ACCESS_KEY_ID",
     "WASABI_SECRET_ACCESS_KEY", "WASABI_BACKUP_BUCKET", "WASABI_BACKUP_REGION",
-    "WASABI_BACKUP_ENDPOINT_URL",
+    "WASABI_BACKUP_ENDPOINT_URL", "WASABI_DELETE_ACCESS_KEY_ID",
+    "WASABI_DELETE_SECRET_ACCESS_KEY",
 )
 # local must bring its own account: these can't fall back to the company one.
 _LOCAL_REQUIRED = ("WASABI_BUCKET", "WASABI_ENDPOINT_URL", "WASABI_ACCESS_KEY_ID", "WASABI_SECRET_ACCESS_KEY")
@@ -149,7 +150,7 @@ def load_env() -> str:
     os.environ["ENVIRONMENT"] = env
 
     prefix, wasabi_folder = ENVIRONMENTS[env]
-    for setting in ("OPENMETADATA_HOST_PORT", "OPENMETADATA_JWT_TOKEN"):
+    for setting in ("OPENMETADATA_HOST_PORT", "OPENMETADATA_JWT_TOKEN", "OPENMETADATA_ADMIN_JWT_TOKEN"):
         os.environ.setdefault(setting, os.environ.get(f"{prefix}_{setting}", ""))
     for setting in _WASABI_SETTINGS:
         own = os.environ.get(f"{prefix}_{setting}", "")

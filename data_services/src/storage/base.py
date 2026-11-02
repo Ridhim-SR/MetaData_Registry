@@ -62,6 +62,11 @@ class ObjectStorage(ABC):
         ...
 
     @abstractmethod
+    def delete_prefix(self, prefix: str) -> int:
+        """Delete every object below a relative prefix and return its count."""
+        ...
+
+    @abstractmethod
     def write_bytes(self, path: str, data: bytes) -> None:
         """Store a file exactly as given -- e.g. a department's original
         submission, kept byte for byte as evidence of what was parsed."""

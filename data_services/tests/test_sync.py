@@ -13,6 +13,7 @@ _CATALOG = """
 departments:
   pwd:
     name: Public Works Department
+    description: Department overview.
     datasets:
       vishwakarma:
         category: CAT-3
@@ -70,6 +71,7 @@ def test_first_sync_fills_storage_and_openmetadata_from_nothing(storage):
 
     setup.assert_called_once()
     assert lookups.department_exists(storage, "pwd")
+    assert lookups.department_description(storage, "pwd") == "Department overview."
     assert {t: (o.ingest, o.publish) for t, o in outcomes.items()} == {
         "pwd.vishwakarma.works": ("ingested", "published"),
         "pwd.vishwakarma.tenders": ("ingested", "published"),

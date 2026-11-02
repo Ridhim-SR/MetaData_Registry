@@ -5,7 +5,8 @@ updating a department's data".
 
 Checked strictly when loaded: an unknown key (a typo like `ownr:`), a
 category that isn't CAT-1..CAT-4, or an unknown format fails with the exact
-place to fix, instead of being silently ignored.
+place to fix, instead of being silently ignored. So does a `dataset_type` or `schema_source`
+that isn't one of DATASET_TYPES.
 """
 
 import re
@@ -18,16 +19,23 @@ from src.schema_registry.registry import lookups
 
 _FORMATS = {"postgres_ddl", "csv"}
 _CATEGORY_RE = re.compile(r"^CAT-[1-4]$")
+# Who the dataset is about: citizens/beneficiaries, or the department's own
+# administration (schemes, budgets, works). Exact spelling, like `category`.
+DATASET_TYPES = ("Citizen Centric", "Administrative")
+SCHEMA_SOURCES = ("Department Provided", "Public Extraction")
 
 # catalog key -> datasets.csv field
 _DATASET_FIELD_KEYS = {
     "category": "category",
+    "dataset_type": "dataset_type",
+    "schema_source": "schema_source",
     "api_available": "api_available",
     "owner": "owner",
     "steward": "steward",
     "frequency": "frequency",
     "timeline": "timeline",
     "description": "dataset_description",
+    "source_url": "source_url",
 }
 
 
@@ -54,6 +62,7 @@ class DatasetEntry:
 class DepartmentEntry:
     id: str
     name: str
+    description: str = ""
     datasets: list[DatasetEntry] = field(default_factory=list)
 
 
@@ -105,8 +114,12 @@ def parse_catalog(text: str) -> list[DepartmentEntry]:
         where = f"departments.{dept_id}"
         if lookups.slugify(str(dept_id)) != str(dept_id):
             raise CatalogError(f"{where}: department id must be lowercase letters, digits and _ (try '{lookups.slugify(str(dept_id))}')")
-        dept = _check_keys(where, dept, {"name", "datasets"}, {"name"})
-        entry = DepartmentEntry(id=str(dept_id), name=_text(dept["name"]))
+        dept = _check_keys(where, dept, {"name", "description", "datasets"}, {"name"})
+        entry = DepartmentEntry(
+            id=str(dept_id),
+            name=_text(dept["name"]),
+            description=_text(dept.get("description")),
+        )
         seen_datasets: dict[str, str] = {}
 
         for ds_name, ds in (dept.get("datasets") or {}).items():
@@ -124,6 +137,18 @@ def parse_catalog(text: str) -> list[DepartmentEntry]:
             category = _text(ds.get("category"))
             if category and not _CATEGORY_RE.match(category):
                 raise CatalogError(f"{ds_where}.category: '{category}' must be CAT-1, CAT-2, CAT-3 or CAT-4 (or left blank)")
+            dataset_type = _text(ds.get("dataset_type"))
+            if dataset_type and dataset_type not in DATASET_TYPES:
+                raise CatalogError(
+                    f"{ds_where}.dataset_type: '{dataset_type}' must be "
+                    f"{' or '.join(repr(t) for t in DATASET_TYPES)} (or left blank)"
+                )
+            schema_source = _text(ds.get("schema_source"))
+            if schema_source and schema_source not in SCHEMA_SOURCES:
+                raise CatalogError(
+                    f"{ds_where}.schema_source: '{schema_source}' must be "
+                    f"{' or '.join(repr(s) for s in SCHEMA_SOURCES)} (or left blank)"
+                )
             dataset = DatasetEntry(
                 name=str(ds_name),
                 fields={csv_field: _text(ds.get(key)) for key, csv_field in _DATASET_FIELD_KEYS.items()

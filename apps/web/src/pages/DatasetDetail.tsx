@@ -1,12 +1,21 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { getDataset, requestAccess, type DatasetInfo } from "../api/registry";
-import { catLabel, classificationBadgeClass, humanizeRaw, normalizeClassification } from "../utils/format";
+import { getDataset, requestAccess, type DatasetCard, type DatasetInfo } from "../api/registry";
+import { displayName } from "../api/auth";
+import {
+  catLabel,
+  classificationBadgeClass,
+  datasetCompletenessItems,
+  humanizeRaw,
+  normalizeClassification,
+  tableCompletenessItems,
+} from "../utils/format";
 import { t } from "../i18n";
 import { ApiError } from "../api/client";
 import { EmptyBlock, ErrorBlock, LoadingBlock } from "../components/registry/StateBlocks";
 import { CatBadge } from "../components/registry/CatBadge";
+import { CompletenessMeter } from "../components/registry/CompletenessCard";
 import { useAuth } from "../contexts/AuthContext";
 
 function LockedPanel({ datasetFqn }: { datasetFqn: string }) {
@@ -149,6 +158,9 @@ export function DatasetDetailPage() {
               {/* Unlocked datasets already show the category in the facts box
                   and the count in "Tables (n)"; only locked teasers, which
                   have neither, show them here. */}
+              {!query.data.locked && query.data.info && (
+                <DatasetCompleteness card={query.data} info={query.data.info} />
+              )}
               {query.data.locked && (
                 <div className="flex items-center gap-2">
                   <CatBadge value={query.data.classification} />
@@ -183,7 +195,6 @@ export function DatasetDetailPage() {
                     key={t.id}
                     dataset={query.data.dataset}
                     name={t.name}
-                    description={t.description}
                     columnCount={t.columns?.length ?? 0}
                   />
                 ))}
@@ -239,7 +250,48 @@ function DatasetFacts({ info }: { info: DatasetInfo }) {
           )}
         </dd>
       </div>
+      <DatasetFact label="Schema source" value={info.schema_source} />
     </dl>
+  );
+}
+
+/**
+ * Dataset-level completeness, shown only to admins and the dataset's owner
+ * or steward. The facts box already shows what is "Not provided", so this is
+ * a compact meter; hovering lists what is missing. The table roll-up is shown
+ * in the hover note but deliberately kept out of the percentage.
+ */
+function DatasetCompleteness({ card, info }: { card: DatasetCard; info: DatasetInfo }) {
+  const { isAuthenticated, user } = useAuth();
+  const canEdit = useMemo(() => {
+    if (!isAuthenticated || !user) return false;
+    if (user.role === "admin") return true;
+    const tokens = [user.username, user.email, displayName(user)]
+      .filter(Boolean)
+      .map((s) => s.toLowerCase());
+    return [info.owner, info.steward].some(
+      (c) => typeof c === "string" && c.trim() !== "" && tokens.includes(c.toLowerCase()),
+    );
+  }, [isAuthenticated, user, info]);
+
+  const items = useMemo(() => datasetCompletenessItems(card.description, info), [card.description, info]);
+  const tables = card.tables ?? [];
+  const fullTables = useMemo(
+    () => tables.filter((tb) => tableCompletenessItems(tb).every((i) => i.score >= 1)).length,
+    [tables],
+  );
+
+  if (!canEdit) return null;
+  return (
+    <CompletenessMeter
+      label="Dataset Metadata completeness"
+      items={items}
+      note={
+        tables.length > 0
+          ? t("tablesFullyDocumented", { done: String(fullTables), total: String(tables.length) })
+          : null
+      }
+    />
   );
 }
 
@@ -258,12 +310,10 @@ function DatasetFact({ label, value }: { label: string; value: string | null | u
 function TableCard({
   dataset,
   name,
-  description,
   columnCount,
 }: {
   dataset: string;
   name: string;
-  description?: string | null;
   columnCount: number;
 }) {
   const navigate = useNavigate();
@@ -297,15 +347,6 @@ function TableCard({
       <div className="font-semibold" style={{ color: "var(--navy-900)", fontSize: "1rem" }}>
         {humanizeRaw(name) || "Not provided"}
       </div>
-      {description ? (
-        <div className="clamp-2 mt-1 text-sm" style={{ color: "var(--text)", fontSize: "0.9375rem" }}>
-          {description}
-        </div>
-      ) : (
-        <div className="not-provided mt-1 text-sm" style={{ fontSize: "0.9375rem" }}>
-          No description
-        </div>
-      )}
       <div className="mt-3" style={{ color: "var(--text-muted)", fontSize: "0.8125rem" }}>
         {columnCount} columns
       </div>

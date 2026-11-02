@@ -49,7 +49,7 @@ logger = get_logger(__name__)
 
 DEFAULT_CATALOG = Path(__file__).resolve().parents[2] / "catalog.yaml"
 _NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_ -]{0,99}$")
-_DATASET_FIELD_KEYS = ("category", "owner", "steward", "frequency", "timeline", "api_available", "description")
+_DATASET_FIELD_KEYS = ("category", "dataset_type", "schema_source", "owner", "steward", "frequency", "timeline", "api_available", "description")
 _LOCK_TIMEOUT_SECONDS = 120
 _REPLACE_ATTEMPTS = 5
 

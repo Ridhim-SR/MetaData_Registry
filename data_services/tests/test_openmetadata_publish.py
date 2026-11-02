@@ -7,7 +7,14 @@ import requests
 from metadata.ingestion.ometa.client import APIError
 
 from src.schema_registry.curate import CLASSIFICATION_LEVELS
-from src.schema_registry.openmetadata.publish import _create_or_update, _get_by_name, _to_column, _unwrap, publish_table
+from src.schema_registry.openmetadata.publish import (
+    _create_or_update,
+    _extra_metadata_json,
+    _get_by_name,
+    _to_column,
+    _unwrap,
+    publish_table,
+)
 from src.schema_registry.registry import lookups
 from src.schema_registry.pipeline import run
 from src.storage.local import LocalObjectStorage
@@ -126,6 +133,7 @@ def test_publish_table_builds_full_entity_chain(tmp_path):
     table_request = next(r for r in created if type(r).__name__ == "CreateTableRequest")
 
     assert _unwrap(service_request.name) == "pwd"  # service defaults to department_id
+    assert _unwrap(service_request.description) is None
     assert _unwrap(database_request.name) == "vishwakarma"  # database == dataset slug
     assert _unwrap(schema_request.name) == "public"  # schema_name from tables.csv
     assert _unwrap(table_request.name) == "TBD_confirm_with_pwd"
@@ -240,6 +248,7 @@ def test_publish_table_clears_stale_category_and_description_on_republish(tmp_pa
         category="CAT-3",
         owner="Someone",
         steward="A Steward",
+        dataset_description="PWD's master works dataset.",
     )
     client = _fake_client()
     publish_table(client, storage, "pwd.vishwakarma.t1")
@@ -259,7 +268,10 @@ def test_publish_table_clears_stale_category_and_description_on_republish(tmp_pa
         "datasetSteward": "A Steward",
         "frequency": "",
         "timeline": "",
+        "datasetType": "",
+        "schemaSource": "",
     }
+    assert patch_body["/description"] == "PWD's master works dataset."
 
     # now clear both -- upsert_dataset() itself carries forward unmentioned
     # fields (see test_lookups.py), so deliberately clearing one means
@@ -273,12 +285,22 @@ def test_publish_table_clears_stale_category_and_description_on_republish(tmp_pa
             row["category"] = ""
             row["owner"] = ""
             row["steward"] = ""
+            row["dataset_description"] = ""
     storage.write_csv(lookups.DATASETS_PATH, rows)
     publish_table(client, storage, "pwd.vishwakarma.t1")
 
     patch_body = _last_patch_body(client, "/databases/")
     assert patch_body["/tags"] == []
-    assert patch_body["/extension"] == {"apiAvailable": "", "datasetOwner": "", "datasetSteward": "", "frequency": "", "timeline": ""}
+    assert patch_body["/extension"] == {
+        "apiAvailable": "",
+        "datasetOwner": "",
+        "datasetSteward": "",
+        "frequency": "",
+        "timeline": "",
+        "datasetType": "",
+        "schemaSource": "",
+    }
+    assert patch_body["/description"] == ""
 
     # the PUT carries only the non-MDSF tags; the curated MDSF
     # classifications (plus the tags submitted in the metadata file) land in
@@ -487,7 +509,7 @@ def test_apply_rules_overrides_the_model_and_covers_skipped_fields():
     assert by_name["farmer_name"]["tag"] == "PII"          # PII wins over Financial
     assert by_name["caste"]["tag"] == "Sensitive"          # skipped field still covered
     assert by_name["mobile_verified"]["tag"] == ""         # a flag, not the number
-    assert by_name["district_name"]["tag"] == ""           # no rule, left to auto-tag
+    assert by_name["district_name"]["tag"] == "Geospatial"  # filled by the shared geography rule
     assert by_name["status"]["tag"] == "Status/Workflow"   # untouched
     assert by_name["caste"]["business_description"] == ""  # no description invented
     assert any(line.startswith("farmer_name:") for line in changed)
@@ -887,6 +909,7 @@ def _existing_service(display_name):
     service = MagicMock(fullyQualifiedName="pwd")
     service.id = "service-id"
     service.displayName = display_name
+    service.description = None
     return service
 
 
@@ -917,6 +940,40 @@ def test_existing_service_with_the_right_display_name_is_left_alone(tmp_path):
     assert not [c for c in client.client.patch.call_args_list if "databaseServices" in c.kwargs["path"]]
 
 
+def test_department_description_is_added_to_existing_service(tmp_path):
+    storage = _ingested_storage(tmp_path)
+    lookups.register_department(storage, "pwd", "Public Works Department", "Department overview.")
+    client = _fake_client()
+    existing = _existing_service("Public Works Department")
+    client.get_by_name.side_effect = None
+    client.get_by_name.return_value = existing
+
+    publish_table(client, storage, "pwd.vishwakarma.tbd_confirm_with_pwd")
+
+    service_patches = [
+        call for call in client.client.patch.call_args_list
+        if "databaseServices" in call.kwargs["path"]
+    ]
+    assert len(service_patches) == 1
+    assert json.loads(service_patches[0].kwargs["data"]) == [
+        {"op": "add", "path": "/description", "value": "Department overview."}
+    ]
+
+
+def test_department_description_is_included_when_service_is_created(tmp_path):
+    storage = _ingested_storage(tmp_path)
+    lookups.register_department(storage, "pwd", "Public Works Department", "Department overview.")
+    client = _fake_client()
+
+    publish_table(client, storage, "pwd.vishwakarma.tbd_confirm_with_pwd")
+
+    service_request = next(
+        request for request in (call.args[0] for call in client.create_or_update.call_args_list)
+        if type(request).__name__ == "CreateDatabaseServiceRequest"
+    )
+    assert _unwrap(service_request.description) == "Department overview."
+
+
 def test_publish_table_stores_unpublished_column_details_as_json_property(tmp_path):
     storage = _ingested_storage(tmp_path)
     client = _fake_client()
@@ -932,6 +989,20 @@ def test_publish_table_stores_unpublished_column_details_as_json_property(tmp_pa
     assert [c["name"] for c in extra["columns"]] == ["sno", "firm_name", "total_cost"]
     sno = extra["columns"][0]
     assert sno["data_type"] == "integer" and "business_description" not in sno and "tag" not in sno
+    # the readable label is already the column's dataTypeDisplay; only the
+    # machine-readable unit still needs the JSON blob
+    assert "readable_type" not in sno
+
+
+def test_unit_reaches_extra_metadata_even_though_it_is_also_in_the_display():
+    extra = json.loads(_extra_metadata_json(
+        [{"name": "total_cost", "data_type": "numeric", "readable_type": "Decimal Number",
+          "unit": "INR", "ingestion_timestamp": "TS"}],
+        "department/pwd/ds/t/curated/schemas/TS.csv",
+    ))
+
+    assert extra["columns"][0]["unit"] == "INR"
+    assert "readable_type" not in extra["columns"][0]
 
 
 _DENIED = Exception("Principal: CatalogPrincipal{name='ingestion-bot'} operation EditDisplayName denied by role "
@@ -1007,3 +1078,24 @@ def test_a_column_without_a_hindi_name_has_no_display_name():
     )
 
     assert column.displayName is None
+
+
+def test_readable_type_becomes_the_openmetadata_data_type_display():
+    column = _to_column(
+        {"name": "sno", "data_type": "integer", "readable_type": "Whole Number"}
+    )
+
+    assert _unwrap(column.dataTypeDisplay) == "Whole Number"
+
+
+def test_unit_is_appended_to_the_data_type_display():
+    column = _to_column(
+        {
+            "name": "total_cost",
+            "data_type": "numeric",
+            "readable_type": "Decimal Number",
+            "unit": "INR",
+        }
+    )
+
+    assert _unwrap(column.dataTypeDisplay) == "Decimal Number (INR)"

@@ -16,6 +16,7 @@ export const hi = {
   viewing: "देख रहे हैं",
   viewAllTables: "सभी {count} तालिकाएँ देखें →",
   documentedCount: "{total} में से {done} आइटम दस्तावेज़ीकृत",
+  tablesFullyDocumented: "{total} में से {done} तालिकाएँ पूर्णतः दस्तावेज़ीकृत",
   deptFind: "विभाग खोजें",
   deptFindPlaceholder: "विभाग खोजें…",
   deptClearSearch: "खोज साफ़ करें",

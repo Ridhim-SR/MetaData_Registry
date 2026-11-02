@@ -25,7 +25,7 @@ _COLUMN_FIELDS = ["name", "data_type", "length", "nullable", "default"]
 # carries forward. Nothing else is written: a blank classification/
 # glossary_term or a hard-coded active=true would still overwrite answers
 # set by hand on an earlier run.
-_METADATA_FIELDS = ["name", "business_description", "tag"]
+_METADATA_FIELDS = ["name", "business_description", "tag", "unit"]
 
 
 def run_field_dictionary(
@@ -97,6 +97,7 @@ def run_field_dictionary(
                             "name": name,
                             "business_description": meta.get("business_description", ""),
                             "tag": meta.get("tag", ""),
+                            "unit": meta.get("unit", ""),
                         }
                     )
 

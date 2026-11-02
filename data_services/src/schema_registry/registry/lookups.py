@@ -89,7 +89,12 @@ def _upsert(
         return existing
 
 
-def register_department(storage: ObjectStorage, department_id: str, department_name: str) -> None:
+def register_department(
+    storage: ObjectStorage,
+    department_id: str,
+    department_name: str,
+    description: str = "",
+) -> None:
     """Explicitly add a department to the controlled registry.
 
     This is a deliberate one-time action, not something pipeline.run()
@@ -104,7 +109,15 @@ def register_department(storage: ObjectStorage, department_id: str, department_n
         DEPARTMENTS_PATH,
         "department_id",
         department_id,
-        lambda _: {"department_id": department_id, "department_name": department_name},
+        lambda existing: {
+            "department_id": department_id,
+            "department_name": department_name,
+            **(
+                {"department_description": description or existing.get("department_description", "")}
+                if description or (existing and "department_description" in existing)
+                else {}
+            ),
+        },
     )
     logger.info(f"Department {'re-registered' if existing else 'registered'}: {department_id} ({department_name})")
 
@@ -116,6 +129,16 @@ def department_name(storage: ObjectStorage, department_id: str) -> str:
         return ""
     return next((r["department_name"] for r in storage.read_csv(DEPARTMENTS_PATH)
                  if r["department_id"] == department_id), "")
+
+
+def department_description(storage: ObjectStorage, department_id: str) -> str:
+    if not storage.exists(DEPARTMENTS_PATH):
+        return ""
+    return next(
+        (r.get("department_description", "") for r in storage.read_csv(DEPARTMENTS_PATH)
+         if r["department_id"] == department_id),
+        "",
+    )
 
 
 def department_exists(storage: ObjectStorage, department_id: str) -> bool:
@@ -150,6 +173,8 @@ def upsert_dataset(
     frequency: str = "",
     timeline: str = "",
     dataset_description: str = "",
+    dataset_type: str = "",
+    schema_source: str = "",
 ) -> None:
     """Dataset-level fields (per the governance meeting): `category` (MDSF
     CAT-1/2/3/4 -- the dataset's overall classification, separate from
@@ -181,6 +206,10 @@ def upsert_dataset(
             "frequency": frequency or existing.get("frequency", ""),
             "timeline": timeline or existing.get("timeline", ""),
             "dataset_description": dataset_description or existing.get("dataset_description", ""),
+            # Set from catalog.yaml by sync (set_dataset_fields); carried
+            # forward here so a pipeline run never blanks it.
+            "dataset_type": dataset_type or existing.get("dataset_type", ""),
+            "schema_source": schema_source or existing.get("schema_source", ""),
         }
 
     # The carry-forward merge runs inside _upsert's lock -- reading the
@@ -190,7 +219,9 @@ def upsert_dataset(
     logger.info(f"Dataset {'updated' if existing else 'created'}: {dataset_id}")
 
 
-DATASET_FIELDS = ("category", "api_available", "owner", "steward", "frequency", "timeline", "dataset_description")
+DATASET_FIELDS = (
+    "category", "dataset_type", "schema_source", "api_available", "owner", "steward", "frequency", "timeline", "dataset_description",
+)
 
 
 def set_dataset_fields(storage: ObjectStorage, dataset_id: str, department_id: str, dataset_name: str, fields: dict) -> bool:
@@ -209,27 +240,48 @@ def set_dataset_fields(storage: ObjectStorage, dataset_id: str, department_id: s
     return changed
 
 
-def latest_curated_snapshot_path(
-    storage: ObjectStorage, department_id: str, dataset_slug: str, table_slug: str
-) -> str:
-    """Path of the most recently written curated schema snapshot for one
-    table. Filenames are fixed-width UTC timestamps, so lexical order ==
-    chronological order -- shared by openmetadata/publish.py (publish the
-    latest) and pipeline.py (diff a new run against the latest).
+def _latest_snapshot_path(storage: ObjectStorage, prefix: str, kind: str) -> str:
+    """Newest timestamped snapshot under `prefix`.
 
-    Only files named like pipeline._timestamp()'s output count: a stray
-    non-snapshot file dropped in the folder (a README, a ~backup, a CSV
-    with a different name) must never be mistaken for the latest snapshot."""
+    Filenames are fixed-width UTC timestamps, so lexical order ==
+    chronological order. Only files named like pipeline._timestamp()'s output
+    count: a stray non-snapshot file dropped in the folder (a README, a
+    ~backup, a CSV with a different name) must never be mistaken for the
+    latest snapshot."""
 
-    prefix = paths.curated_schemas_prefix(department_id, dataset_slug, table_slug)
     # Local storage on Windows returns backslash-separated paths, S3 returns
     # forward slashes -- normalize so callers get one shape of path either way
     # (the raw text is also what ends up in OpenMetadata's extraMetadata).
     files = [f.replace("\\", "/") for f in storage.list(prefix)
              if _SNAPSHOT_NAME.match(f.replace("\\", "/").rsplit("/", 1)[-1])]
     if not files:
-        raise FileNotFoundError(f"No curated schema under {prefix} -- run the pipeline for this table first.")
+        raise FileNotFoundError(f"No {kind} schema under {prefix} -- run the pipeline for this table first.")
     return files[-1]
+
+
+def latest_curated_snapshot_path(
+    storage: ObjectStorage, department_id: str, dataset_slug: str, table_slug: str
+) -> str:
+    """Path of the most recently written curated schema snapshot for one
+    table -- shared by openmetadata/publish.py (publish the latest) and
+    pipeline.py (diff a new run against the latest)."""
+
+    return _latest_snapshot_path(
+        storage, paths.curated_schemas_prefix(department_id, dataset_slug, table_slug), "curated"
+    )
+
+
+def latest_raw_snapshot_path(
+    storage: ObjectStorage, department_id: str, dataset_slug: str, table_slug: str
+) -> str:
+    """Path of the most recently written raw (parser output) schema snapshot
+    for one table. Used by the readable-type backfill, which re-curates from
+    the parser's own output instead of re-reading a submission file that may
+    no longer be reachable."""
+
+    return _latest_snapshot_path(
+        storage, paths.raw_schemas_prefix(department_id, dataset_slug, table_slug), "raw"
+    )
 
 
 def upsert_table(storage: ObjectStorage, table_id: str, dataset_id: str, table_name: str, schema_name: str) -> None:
@@ -272,6 +324,22 @@ def soft_delete_table(storage: ObjectStorage, table_id: str) -> dict:
         row["deleted"] = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
         storage.write_csv(TABLES_PATH, rows)
     logger.info(f"Table soft-deleted from the registry: {table_id} ({row['deleted']})")
+    return row
+
+
+def restore_table(storage: ObjectStorage, table_id: str) -> dict:
+    """Clear a table's soft-delete marker while preserving its history."""
+
+    with storage.lock(TABLES_PATH):
+        rows = storage.read_csv(TABLES_PATH) if storage.exists(TABLES_PATH) else []
+        row = next((r for r in rows if r["table_id"] == table_id), None)
+        if row is None:
+            raise ValueError(f"Unknown table_id '{table_id}' -- not found in {TABLES_PATH}")
+        if not row.get("deleted"):
+            return row
+        row["deleted"] = ""
+        storage.write_csv(TABLES_PATH, rows)
+    logger.info(f"Table restored in the registry: {table_id}")
     return row
 
 

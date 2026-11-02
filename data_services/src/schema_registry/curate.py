@@ -13,6 +13,53 @@ KNOWN_POSTGRES_TYPES = {
     "timestamp with time zone", "time", "json", "jsonb", "uuid", "bytea",
 }
 
+# Raw Postgres type -> the label a non-technical reader understands. Derived,
+# never submitted: the curated file must not be able to disagree with the type
+# the parser actually read. A closed mapping for the same reason as
+# KNOWN_POSTGRES_TYPES -- an unmapped type means curate/publish are out of
+# sync, not that a new label should be invented.
+READABLE_DATA_TYPES = {
+    "integer": "Whole Number",
+    "bigint": "Whole Number",
+    "smallint": "Whole Number",
+    "serial": "Whole Number",
+    "bigserial": "Whole Number",
+    "numeric": "Decimal Number",
+    "decimal": "Decimal Number",
+    "double precision": "Decimal Number",
+    "real": "Decimal Number",
+    "character varying": "Text",
+    "varchar": "Text",
+    "character": "Text",
+    "text": "Text",
+    "boolean": "Yes / No",
+    "date": "Date",
+    "timestamp without time zone": "Date & Time",
+    "timestamp with time zone": "Date & Time",
+    "time": "Time",
+    "json": "Structured Data",
+    "jsonb": "Structured Data",
+    "uuid": "ID",
+    "bytea": "File",
+}
+
+# A unit describes a quantity, so it only makes sense on a number. Enforced
+# because "INR" on a text column is a submission mistake, not a unit worth
+# publishing.
+NUMERIC_DATA_TYPES = {
+    "integer", "bigint", "smallint", "serial", "bigserial",
+    "numeric", "decimal", "double precision", "real",
+}
+
+# The currency/percentage spellings departments actually write, mapped to one
+# canonical code. Only these are rewritten: other units (hectare, day, count,
+# ...) are open-ended and are kept exactly as submitted.
+_UNIT_ALIASES = {
+    "₹": "INR", "rs": "INR", "rs.": "INR", "rupee": "INR", "rupees": "INR", "inr": "INR",
+    "$": "USD", "us$": "USD", "usd": "USD",
+    "%": "%", "percent": "%", "percentage": "%",
+}
+
 # MDSF Classification Levels (per field, not per dataset)
 # Ordered from least to most restrictive
 CLASSIFICATION_LEVELS = [
@@ -110,31 +157,61 @@ AUTO_CLASSIFICATION_RULES: list[tuple[str, re.Pattern]] = [
     ("Public", re.compile(r"(scheme|program|project|initiative|policy|guideline)", re.IGNORECASE)),
 ]
 
-# (tag, pattern over field name) -- first match wins, order matters
+# (tag, pattern over field name) -- first match wins, order matters. These
+# rules provide draft suggestions; curate_schema() does not auto-tag published
+# metadata without a reviewed dictionary value.
 AUTO_TAG_RULES: list[tuple[str, re.Pattern]] = [
-    ("Financial", re.compile(r"(cost|amount|budget|expense|deposit|surrender|saving|fund|price)", re.IGNORECASE)),
+    ("Financial", re.compile(
+        r"(bank_account|account_no|account_number|ifsc|branch_name|bank_name|"
+        r"cost|amount|budget|expense|expenditure|deposit|surrender|saving|fund|price|"
+        r"income|benefit|salary|wage|pension|allowance|allocation|sanction|disbursement|"
+        r"subsidy|transaction|bill|loan|credit|debit|interest|repayment|fee|"
+        r"(^|_)share($|_))",
+        re.IGNORECASE,
+    )),
+    ("Status/Workflow", re.compile(
+        r"(^|_)status(_|$)|(^|_)(is|has|was|were)_[a-z0-9_]+$|"
+        r"(_|^)(flag|validity|declaration|decl|available|functional|provided|"
+        r"developed|registered|completed|paid|received)$",
+        re.IGNORECASE,
+    )),
     ("Firm/Contractor-Identifier", re.compile(r"(firm_pannumber|firm_name|bidder_name|contractor)", re.IGNORECASE)),
-    ("Geospatial", re.compile(r"^(lat|longs?|chainage_|geofanc_)", re.IGNORECASE)),
-    ("Status/Workflow", re.compile(r"_status$", re.IGNORECASE)),
-    ("Date/Timestamp", re.compile(r"(_date|_at)$", re.IGNORECASE)),
+    ("Geospatial", re.compile(
+        r"^(lat|longs?|chainage_|geofanc_)|"
+        r"(^|_)(state|district|block|gp|gram_panchayat|village|tehsil|taluka|taluk|"
+        r"town|city|ward|latitude|longitude|pincode|pin_code|postal_code|"
+        r"area_type|location_type|mohalla|post_office|landmark|birth_place|"
+        r"place_of_birth|sign_place)(_|$)",
+        re.IGNORECASE,
+    )),
+    ("Date/Timestamp", re.compile(r"(_date|_at)$|(^|_)(year|financial_year|fy)$", re.IGNORECASE)),
+    ("Identifier", re.compile(r"(^|_)(id|uuid)$|(_id|_no|_number|_code)$", re.IGNORECASE)),
+    ("Quantity", re.compile(
+        r"(^|_)(no_of_|total_|count_|num_|cumul_)[a-z0-9_]+$|"
+        r"(_count|_quantity|_qty|_workers?|_jobcards?|_persondays|_mandays|"
+        r"_duration(_years?)?|_threshold|_instalments?|_age|_members|"
+        r"_(hh|pers|indiv)|_land|_area)$|"
+        r"(^|_)(fam_completed_100_days|completed_100_days)$|"
+        r"(^|_)(land_)?area_(hectares?|acres?|sq_?m|sq_?ft)$|"
+        r"(^|_)quantity$|(^|_)maxno(_|$)|"
+        r"(^|_)(lowest|highest)_class$",
+        re.IGNORECASE,
+    )),
+    ("Remarks", re.compile(r"(^|_)(remarks|notes?)$", re.IGNORECASE)),
 ]
 
 # The controlled vocabulary for a column's `tag`. Two kinds of value live
 # here, and only the first kind may ever be auto-assigned:
 #
-#   * everything AUTO_TAG_RULES can detect from a field name. Adding a rule
-#     rewrites tagging for every department, so a new entry there is a
-#     behaviour change, not a vocabulary change.
+#   * everything AUTO_TAG_RULES can suggest from a field name. A rule change
+#     affects AI-generated drafts for every department, but does not silently
+#     tag published metadata; those tags still require review.
 #
-#   * values that are real but not name-inferable -- a human supplied them
-#     and the vocabulary merely permits them. PII (already used by real
-#     Field Dictionaries), Sensitive (the MDSF s5.1 sensitive attributes
-#     ai_metadata's apply_rules() writes), and PWD's own field dictionary:
-#     Remarks, Identifier, Administrative-Unit and Quantity. That file was
-#     curated on 2026-10-13, before validate_tag() existed, so all four are
-#     already published under OpenMetadata's FieldTag Classification. They
-#     are allowed here so a republish passes, and deliberately kept out of
-#     AUTO_TAG_RULES so the auto-tagger never starts inventing them.
+#   * values the vocabulary permits even though no generic name rule assigns
+#     them. PII and Sensitive are applied by ai_metadata's privacy rules;
+#     Administrative-Unit is retained from PWD's reviewed dictionary.
+#     Remarks, Identifier and Quantity also occur in that dictionary and have
+#     conservative name rules above for AI draft suggestions.
 #
 # Anything outside this set is a typo or an invented value, and publishing
 # it would silently create a brand-new tag under the FieldTag Classification
@@ -172,6 +249,44 @@ def auto_classify(field_name: str) -> str:
         if pattern.search(field_name):
             return classification
     return ""
+
+
+def readable_data_type(data_type: str) -> str:
+    """The non-technical label for a Postgres type, e.g. integer -> Whole
+    Number, character varying -> Text. Raises on an unmapped type so a new
+    type is added here (and to KNOWN_POSTGRES_TYPES) instead of the curated
+    file quietly getting a blank/guessed label."""
+
+    label = READABLE_DATA_TYPES.get((data_type or "").strip().lower())
+    if label is None:
+        raise ValueError(
+            f"No readable label for data type {data_type!r} -- add it to "
+            f"READABLE_DATA_TYPES in curate.py."
+        )
+    return label
+
+
+def normalize_unit(unit: str) -> str:
+    """Collapse the spellings people use for the same unit (₹ / Rs / rupees
+    -> INR, $ -> USD, percent -> %) into one code. Anything else is returned
+    trimmed and unchanged."""
+
+    text = (unit or "").strip()
+    return _UNIT_ALIASES.get(text.lower(), text)
+
+
+def validate_unit(unit: str, data_type: str) -> str:
+    """Normalize a submitted unit and refuse it on a non-numeric column: a
+    unit on text/date is a mistake in the submission, not something to
+    silently publish."""
+
+    normalized = normalize_unit(unit)
+    if normalized and (data_type or "").strip().lower() not in NUMERIC_DATA_TYPES:
+        raise ValueError(
+            f"unit {normalized!r} is only allowed on numeric columns, but this "
+            f"field is {data_type!r}. Remove the unit or fix the column type."
+        )
+    return normalized
 
 
 def validate_classification(classification: str) -> bool:
@@ -249,7 +364,8 @@ def curate_schema(
 ) -> list[dict]:
     """Standardize raw columns (already checked by validate_schema), merging
     in business metadata (business description / tag / glossary term / active
-    / classification / Hindi name) keyed by field name where it's available. Fields without
+    / classification / Hindi name / unit) keyed by field name where it's
+    available. `readable_type` is derived from the column's data type. Fields without
     an answer yet are left blank rather than guessed -- including `tag`, which
     used to fall back to a rule-based auto-tag; that fallback is switched off
     (see the tag line below), so a tag now only ever comes from a submitted
@@ -333,13 +449,25 @@ def curate_schema(
         # over the carried-forward value, so an edited label takes effect.
         name_hindi = (column.get("name_hindi") or meta.get("name_hindi") or "").strip()
 
+        # Derived every run from the type actually parsed -- reading it back
+        # from a hand-edited curated file would let a label drift away from
+        # the column it describes.
+        readable_type = readable_data_type(column["data_type"])
+
+        # `unit` is a reviewed answer like `tag`: no unit rule guesses it from
+        # the field name. `validate_unit` normalizes INR/USD/% spellings and
+        # rejects a unit on a non-numeric column.
+        unit = validate_unit(meta.get("unit", ""), column["data_type"])
+
         curated = {
             **column,
+            "readable_type": readable_type,
             "business_description": meta.get("business_description", ""),
             "tag": tag,
             "glossary_term": glossary_term,
             "active": meta.get("active", True),
             "classification": classification,
+            "unit": unit,
         }
         if name_hindi:
             curated["name_hindi"] = name_hindi

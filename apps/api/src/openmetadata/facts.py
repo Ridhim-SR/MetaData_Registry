@@ -22,6 +22,7 @@ EXT_OWNER = "datasetOwner"
 EXT_STEWARD = "datasetSteward"
 EXT_FREQUENCY = "frequency"
 EXT_TIMELINE = "timeline"
+EXT_SCHEMA_SOURCE = "schemaSource"
 
 # Classification tag namespaces, in priority order. DataSensitivity holds
 # the CAT-1..CAT-4 levels; MDSF is the older Public/Internal/... scheme.
@@ -244,6 +245,8 @@ def resolve_dataset_info(
         "frequency": ext_text(_ext(database, EXT_FREQUENCY)) or _text(di.get("frequency")),
         "timeline": ext_text(_ext(database, EXT_TIMELINE)) or _text(di.get("timeline")),
         "api_available": ext_bool(_ext(database, EXT_API_AVAILABLE)),
+        # Dataset-only (never per table): "Department Provided" or "Public Extraction".
+        "schema_source": ext_text(_ext(database, EXT_SCHEMA_SOURCE)),
         "api_tables": sum(1 for f in flags if f is True),
         "api_known": sum(1 for f in flags if f is not None),
         "table_count": len(tables),

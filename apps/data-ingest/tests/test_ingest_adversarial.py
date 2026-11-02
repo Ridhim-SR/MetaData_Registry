@@ -156,7 +156,8 @@ def test_status_reports_an_expired_openmetadata_token(client, monkeypatch):
 
 def test_dataset_fields_round_trip_through_the_catalog(client):
     c, catalog, _ = client
-    r = post(c, headers=OK, category="CAT-2", description="Works & tenders: roads",
+    r = post(c, headers=OK, category="CAT-2", dataset_type="Citizen Centric",
+             schema_source="Department Provided", description="Works & tenders: roads",
              owner="Public Works Department", steward="PWD Data Cell",
              frequency="yearly", timeline="2023-27", api_available="N")
     assert r.status_code == 200, r.text
@@ -165,6 +166,8 @@ def test_dataset_fields_round_trip_through_the_catalog(client):
         "category": "CAT-2", "api_available": "N", "owner": "Public Works Department",
         "steward": "PWD Data Cell", "frequency": "yearly", "timeline": "2023-27",
         "dataset_description": "Works & tenders: roads",
+        "dataset_type": "Citizen Centric", "schema_source": "Department Provided",
+        "source_url": "",
     }
 
 

@@ -160,19 +160,75 @@ export function isSensitiveTag(tag: { tagFQN?: string; displayName?: string; nam
   return SENSITIVE_TAG_PATTERN.test(`${tag.tagFQN ?? ""} ${tag.displayName ?? ""} ${tag.name ?? ""}`);
 }
 
+/** One scored line of a metadata-completeness card. `score` is 0-1. */
+export interface CompletenessItem {
+  key: string;
+  label: string;
+  score: number;
+  count: string | null;
+}
+
+/** Card percentage: mean of item scores; an item is "done" only at 1. */
+export function completenessSummary(items: CompletenessItem[]) {
+  const done = items.filter((i) => i.score >= 1).length;
+  const pct = items.length
+    ? Math.round((items.reduce((sum, i) => sum + i.score, 0) / items.length) * 100)
+    : 0;
+  return { done, pct };
+}
+
+const hasText = (v: string | null | undefined) => Boolean(v && v.trim());
+
 /**
- * Metadata-completeness estimate (0-100) for a dataset card, derived only from
- * already-fetched fields: tables having a description and at least one column.
- * No backend change required.
+ * Table-level completeness: only metadata that lives on the table itself.
+ * Classification and API availability are dataset-level and scored on the
+ * dataset page. Column items give partial credit (17/19 described = 0.89).
  */
-export function completenessPct(
-  tables: Array<{ description?: string | null; columns?: unknown[] | null }>,
-): number {
-  if (!tables || tables.length === 0) return 0;
-  let points = 0;
-  for (const t of tables) {
-    if (t.description && String(t.description).trim()) points += 1;
-    if (Array.isArray(t.columns) && t.columns.length > 0) points += 1;
-  }
-  return Math.round((points / (tables.length * 2)) * 100);
+export function tableCompletenessItems(table: {
+  columns?: Array<{ description?: string | null; tags?: unknown[] | null }> | null;
+}): CompletenessItem[] {
+  const cols = table.columns ?? [];
+  const described = cols.filter((c) => hasText(c.description)).length;
+  const tagged = cols.filter((c) => (c.tags ?? []).length > 0).length;
+  const ratio = (n: number) => (cols.length ? n / cols.length : 0);
+  return [
+    { key: "columns", label: "Column descriptions", score: ratio(described), count: `${described} / ${cols.length}` },
+    { key: "tags", label: "Column tags", score: ratio(tagged), count: `${tagged} / ${cols.length}` },
+  ];
+}
+
+/** Dataset-level completeness: the dataset's own facts, not its tables. */
+export function datasetCompletenessItems(
+  description: string | null | undefined,
+  info: {
+    owner?: string | null;
+    steward?: string | null;
+    frequency?: string | null;
+    timeline?: string | null;
+    api_available?: boolean | null;
+    api_known?: number;
+    table_count?: number;
+    data_classification?: string | null;
+  },
+): CompletenessItem[] {
+  // API availability counts as recorded when set on the dataset, or when
+  // every table has an explicit Yes/No.
+  const apiKnown =
+    info.api_available != null ||
+    (Boolean(info.table_count) && info.api_known === info.table_count);
+  const item = (key: string, label: string, done: boolean): CompletenessItem => ({
+    key,
+    label,
+    score: done ? 1 : 0,
+    count: null,
+  });
+  return [
+    item("description", "Description", hasText(description)),
+    item("owner", "Owner", hasText(info.owner)),
+    item("steward", "Data steward", hasText(info.steward)),
+    item("classification", "Data classification", Boolean(normalizeClassification(info.data_classification))),
+    item("api", "API availability", apiKnown),
+    item("frequency", "Update frequency", hasText(info.frequency)),
+    item("timeline", "Timeline", hasText(info.timeline)),
+  ];
 }

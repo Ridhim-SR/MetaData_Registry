@@ -104,3 +104,11 @@ def test_dataset_classification_prefers_database_tag():
     tables = [_table("s.d.p.a", tags=[{"tagFQN": "DataSensitivity.CAT-4"}])]
     assert facts.resolve_dataset_info(None, OM_DATABASE, tables, {})["data_classification"] == "CAT-3"
     assert facts.resolve_dataset_info(None, None, tables, {})["data_classification"] == "CAT-4"
+
+
+def test_dataset_schema_source_comes_from_database_extension():
+    database = {**OM_DATABASE, "extension": {"schemaSource": " Department Provided "}}
+    assert facts.resolve_dataset_info(None, database, [], {})["schema_source"] == "Department Provided"
+    # Blank (published but not filled in) and missing both read as not provided.
+    assert facts.resolve_dataset_info(None, {"extension": {"schemaSource": ""}}, [], {})["schema_source"] is None
+    assert facts.resolve_dataset_info(None, None, [], {})["schema_source"] is None

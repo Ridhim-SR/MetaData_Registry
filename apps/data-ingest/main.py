@@ -433,6 +433,8 @@ def ingest(
     file: UploadFile = File(..., description="the department's raw file (.csv, .xlsx or Postgres DDL)"),
     department_name: str | None = Form(None, description="full name -- only the first time a department is added"),
     category: str | None = Form(None, description="CAT-1 | CAT-2 | CAT-3 | CAT-4"),
+    dataset_type: str | None = Form(None, description="Citizen Centric | Administrative"),
+    schema_source: str | None = Form(None, description="Department Provided | Public Extraction"),
     description: str | None = Form(None, description="what the dataset holds"),
     owner: str | None = Form(None),
     steward: str | None = Form(None),
@@ -473,7 +475,8 @@ def ingest(
     if not file.filename:
         raise HTTPException(422, {"problem": "the file has no name", "fix": "upload the department's file with its file name"})
 
-    fields = {"category": category, "description": description, "owner": owner, "steward": steward,
+    fields = {"category": category, "dataset_type": dataset_type, "schema_source": schema_source,
+              "description": description, "owner": owner, "steward": steward,
               "frequency": frequency, "timeline": timeline, "api_available": api_available}
     fields = {key: value.strip() for key, value in fields.items() if value and value.strip()}
     work = Path(tempfile.mkdtemp())

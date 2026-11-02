@@ -92,6 +92,12 @@ class LocalObjectStorage(ObjectStorage):
             if p.is_file()
         )
 
+    def delete_prefix(self, prefix: str) -> int:
+        paths = [self._full_path(path) for path in self.list(prefix)]
+        for path in paths:
+            path.unlink()
+        return len(paths)
+
     def lock_path(self, path: str) -> str:
         full = self._full_path(path)
         full.parent.mkdir(parents=True, exist_ok=True)
