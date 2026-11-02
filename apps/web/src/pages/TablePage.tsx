@@ -164,7 +164,7 @@ export function TablePage() {
     return normalizeClassification(table.data_classification);
   }, [table, isFull]);
 
-  // Card visibility: admin, or the signed-in table owner/steward (matched
+  // Card visibility: admin, or the signed-in table owner (matched
   // against username, email, or display name). Only these viewers get the
   // completeness card; it is not rendered at all for anyone else.
   const owners = table && !table.locked ? (table.owners ?? []) : [];
@@ -174,11 +174,9 @@ export function TablePage() {
     const tokens = [user.username, user.email, displayName(user)]
       .filter(Boolean)
       .map((s) => s.toLowerCase());
-    const steward = table && !table.locked ? table.facts?.steward : null;
     const candidates = [
       ...owners.flatMap((o) => [o.name, o.displayName, o.fullyQualifiedName]),
       table && !table.locked ? table.facts?.owner : null,
-      steward,
     ];
     return candidates.some(
       (c) => typeof c === "string" && c.trim() !== "" && tokens.includes(c.toLowerCase()),

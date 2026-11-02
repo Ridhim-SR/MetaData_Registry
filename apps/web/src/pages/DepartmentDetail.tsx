@@ -65,21 +65,26 @@ export function DepartmentDetailPage() {
       )}
       {!deptLoading && deptQuery.data && profile && (
         <div>
-          <h1 className="font-bold" style={{ color: "var(--navy-900)", fontSize: "1.75rem" }}>
-            {profile.display_name ? humanizeRaw(profile.display_name) : humanizeRaw(slug)}
-          </h1>
-          {profile.description ? (
-            <p className="mt-1 max-w-3xl text-sm" style={{ color: "var(--text)", fontSize: "0.9375rem" }}>
-              {profile.description}
-            </p>
-          ) : (
-            <p className="not-provided mt-1 text-sm">{t("noDescription")}</p>
-          )}
-          <p className="mt-2 text-sm" style={{ color: "var(--text)", fontSize: "0.9375rem" }} role="status">
-            {t(profile.dataset_count === 1 ? "datasetCountOne" : "datasetCountOther", { count: profile.dataset_count })}
-            {" · "}
-            {t(profile.table_count === 1 ? "tableCountOne" : "tableCountOther", { count: profile.table_count })}
-          </p>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,1fr)_280px] md:items-start">
+            <div>
+              <h1 className="font-bold" style={{ color: "var(--navy-900)", fontSize: "1.75rem" }}>
+                {profile.display_name ? humanizeRaw(profile.display_name) : humanizeRaw(slug)}
+              </h1>
+              {profile.description ? (
+                <p className="mt-1 max-w-3xl text-sm" style={{ color: "var(--text)", fontSize: "0.9375rem" }}>
+                  {profile.description}
+                </p>
+              ) : (
+                <p className="not-provided mt-1 text-sm">{t("noDescription")}</p>
+              )}
+              <p className="mt-2 text-sm" style={{ color: "var(--text)", fontSize: "0.9375rem" }} role="status">
+                {t(profile.dataset_count === 1 ? "datasetCountOne" : "datasetCountOther", { count: profile.dataset_count })}
+                {" · "}
+                {t(profile.table_count === 1 ? "tableCountOne" : "tableCountOther", { count: profile.table_count })}
+              </p>
+            </div>
+            <StewardCard name={profile.steward} />
+          </div>
 
           <form onSubmit={onSubmit} role="search" aria-label={t("searchWithinDept")} className="mt-6 flex w-full flex-col gap-2 sm:flex-row">
             <label htmlFor="dept-search" className="sr-only">
@@ -169,5 +174,64 @@ export function DepartmentDetailPage() {
         </div>
       )}
     </div>
+  );
+}
+
+/** Initials for the avatar: first letters of the first two words. */
+function initials(name: string): string {
+  return name
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((w) => w.charAt(0).toUpperCase())
+    .join("");
+}
+
+/**
+ * The department's data steward. One steward covers every dataset in the
+ * department, so it is shown here once rather than on each dataset.
+ */
+function StewardCard({ name }: { name: string | null | undefined }) {
+  const steward = name?.trim();
+  return (
+    <aside
+      aria-label={t("factSteward")}
+      className="p-4"
+      style={{ border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg-alt)" }}
+    >
+      <p style={{ color: "var(--text-muted)", fontSize: "0.8125rem", fontWeight: 600 }}>{t("factSteward")}</p>
+      {steward ? (
+        <>
+          <div className="mt-2 flex items-center gap-3">
+            <span
+              aria-hidden
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
+                width: 40,
+                height: 40,
+                borderRadius: "50%",
+                background: "var(--blue-50)",
+                color: "var(--blue-700)",
+                fontSize: "0.875rem",
+                fontWeight: 700,
+              }}
+            >
+              {initials(steward)}
+            </span>
+            <span style={{ color: "var(--navy-900)", fontSize: "1rem", fontWeight: 600, overflowWrap: "anywhere" }}>
+              {steward}
+            </span>
+          </div>
+          <p className="mt-2" style={{ color: "var(--text-muted)", fontSize: "0.8125rem" }}>
+            {t("stewardCovers")}
+          </p>
+        </>
+      ) : (
+        <p className="not-provided mt-2 text-sm">{t("stewardNotAssigned")}</p>
+      )}
+    </aside>
   );
 }

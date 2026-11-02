@@ -174,10 +174,12 @@ class DatasetInfo(Base):
     """Dataset-level information per OpenMetadata database (sidecar).
 
     Keyed by the dataset FQN (service.database). These are the defaults
-    every member table inherits: accountable owner, data steward, refresh
-    frequency and covered timeline. A table's own TableInfo value, when
-    set, overrides the dataset value. API availability and classification
-    are table-level only and are summarized on the dataset, never stored.
+    every member table inherits: accountable owner, refresh frequency and
+    covered timeline. A table's own TableInfo value, when set, overrides
+    the dataset value. API availability and classification are table-level
+    only and are summarized on the dataset, never stored. The data steward
+    is department-level (DepartmentInfo); the old `steward` column here is
+    no longer read.
     """
 
     __tablename__ = "dataset_info"
@@ -189,9 +191,28 @@ class DatasetInfo(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     fqn: Mapped[str] = mapped_column(String(500), nullable=False)
     owner: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None)
-    steward: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None)
     frequency: Mapped[str | None] = mapped_column(String(100), nullable=True, default=None)
     timeline: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class DepartmentInfo(Base):
+    """Department-level information per OpenMetadata service (sidecar).
+
+    Keyed by the department slug (OM service name). Holds what is constant
+    across every dataset of a department, starting with its data steward.
+    Stored here because OpenMetadata has no custom properties on services.
+    """
+
+    __tablename__ = "department_info"
+    __table_args__ = (
+        Index("idx_department_info_slug", "slug", unique=True),
+        {"schema": "users"},
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    slug: Mapped[str] = mapped_column(String(255), nullable=False)
+    steward: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 

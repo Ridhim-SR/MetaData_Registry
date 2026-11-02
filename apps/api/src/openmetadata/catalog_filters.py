@@ -30,7 +30,6 @@ class CatalogFilters:
     departments: frozenset[str] = field(default_factory=frozenset)
     frequency: frozenset[str] = field(default_factory=frozenset)
     api: frozenset[str] = field(default_factory=frozenset)
-    steward: frozenset[str] = field(default_factory=frozenset)
     schema_source: frozenset[str] = field(default_factory=frozenset)
     year_from: int | None = None
     year_to: int | None = None
@@ -39,7 +38,7 @@ class CatalogFilters:
     def active(self) -> bool:
         return bool(
             self.classification or self.tags or self.departments or self.frequency
-            or self.api or self.steward or self.schema_source or self.year_from is not None or self.year_to is not None
+            or self.api or self.schema_source or self.year_from is not None or self.year_to is not None
         )
 
 
@@ -82,7 +81,6 @@ def timeline_years(text: str | None) -> tuple[int, int] | None:
 def card_facts(card: dict) -> dict:
     """The filterable values of one card (None = not provided)."""
     info = card.get("info")
-    steward = ((info or {}).get("steward") or "").strip() or None
     schema_source = ((info or {}).get("schema_source") or "").strip() or None
     return {
         "classification": card.get("classification"),
@@ -90,7 +88,6 @@ def card_facts(card: dict) -> dict:
         "department": card.get("service"),
         "frequency": frequency_value((info or {}).get("frequency")),
         "api": api_value(info),
-        "steward": steward,
         "schema_source": schema_source,
         "years": timeline_years((info or {}).get("timeline")),
     }
@@ -105,7 +102,6 @@ def _passes(facts: dict, f: CatalogFilters, skip: str | None = None, *, tags: li
         and one("department", f.departments)
         and one("frequency", f.frequency)
         and one("api", f.api)
-        and one("steward", f.steward)
         and one("schema_source", f.schema_source)
     ):
         return False
@@ -144,7 +140,6 @@ def facets(cards: list[dict], f: CatalogFilters) -> dict:
         "department": {},
         "frequency": {},
         "api": dict.fromkeys(API_VALUES, 0),
-        "steward": {},
         "schema_source": {},
     }
     labels: dict[str, str] = {}

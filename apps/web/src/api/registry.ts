@@ -24,6 +24,8 @@ export interface Department {
   contact_phone?: string | null;
   head_name?: string | null;
   category?: string | null;
+  /** Department data steward (constant across all of its datasets). */
+  steward?: string | null;
   dataset_count: number;
   table_count: number;
 }
@@ -84,7 +86,6 @@ export interface RegistryTable {
 /** Table facts with dataset inheritance already applied by the backend. */
 export interface TableFacts {
   owner?: string | null;
-  steward?: string | null;
   department_contact?: string | null;
   updated_at?: number | null;
   frequency?: string | null;
@@ -96,7 +97,6 @@ export interface TableFacts {
   source?: string | null;
   origin?: {
     owner?: FactOrigin;
-    steward?: FactOrigin;
     frequency?: FactOrigin;
     timeline?: FactOrigin;
     api_available?: FactOrigin;
@@ -107,7 +107,6 @@ export interface TableFacts {
 /** Dataset-level defaults plus summaries over the viewer's visible tables. */
 export interface DatasetInfo {
   owner?: string | null;
-  steward?: string | null;
   frequency?: string | null;
   timeline?: string | null;
   /** Dataset-level API flag (OM apiAvailable custom property). */
@@ -165,7 +164,6 @@ export interface CatalogFacets {
   frequency: FacetOption[];
   /** "yes" / "no". */
   api: FacetOption[];
-  steward: FacetOption[];
   /** "Department Provided" / "Public Extraction"; absent from older APIs. */
   schema_source?: FacetOption[];
   /** Overall timeline span, null when no dataset has a timeline. */
@@ -179,7 +177,6 @@ export interface CatalogFilterParams {
   tag?: string[];
   frequency?: string[];
   api?: string[];
-  steward?: string[];
   schema_source?: string[];
   year_from?: number | null;
   year_to?: number | null;
@@ -274,7 +271,6 @@ function appendFilters(qs: URLSearchParams, params: CatalogFilterParams) {
     ["tag", params.tag],
     ["frequency", params.frequency],
     ["api", params.api],
-    ["steward", params.steward],
     ["schema_source", params.schema_source],
   ];
   for (const [key, value] of lists) {

@@ -81,7 +81,7 @@ def test_facets_are_disjunctive_and_list_fixed_options():
     assert by["api"] == {"yes": 1, "no": 1}
     assert by["department"] == {"agri": 0, "npd": 0, "rd": 2}
     assert by["tags"]["FieldTag.Geospatial"] == 2 and by["tags"]["MDSF.PII"] == 1
-    assert by["steward"] == {}
+    assert "steward" not in by  # department-level now, not a catalog filter
     assert out["years"] == {"min": 2014, "max": 2027}
     assert [i["label"] for i in out["department"]] == ["AGRI", "NPD", "RD"]
 

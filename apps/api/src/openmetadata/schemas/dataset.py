@@ -16,13 +16,18 @@ class DatasetInfoFields(BaseModel):
     """Dataset-level defaults every member table inherits unless it overrides them."""
 
     owner: str | None = Field(default=None, max_length=255, description="Who owns/is accountable for the dataset")
-    steward: str | None = Field(default=None, max_length=255, description="Data steward for the dataset")
     frequency: str | None = Field(default=None, max_length=100, description="Default refresh frequency of its tables")
     timeline: str | None = Field(default=None, max_length=255, description="The period/date range the dataset covers")
 
 
 class DatasetInfoUpdate(DatasetInfoFields):
     fqn: str = Field(min_length=1, description="Dataset FQN (service.database)")
+
+
+class DepartmentInfoUpdate(BaseModel):
+    """Department-level facts, constant across all of its datasets."""
+
+    steward: str | None = Field(default=None, max_length=255, description="Data steward for the department (blank clears it)")
 
 
 class DatasetCreate(BaseModel):

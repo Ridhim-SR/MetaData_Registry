@@ -97,9 +97,12 @@ VMAP = {
 # Sidecar dataset defaults (users.dataset_info) and table rows (users.table_info).
 DATASET_INFO = {
     "pwd.vishwakarma": {
-        "owner": "PWD Data Cell", "steward": "Steward S", "frequency": "Monthly", "timeline": "2020-2025",
+        "owner": "PWD Data Cell", "frequency": "Monthly", "timeline": "2020-2025",
     },
 }
+
+# Sidecar department facts (users.department_info): the data steward.
+DEPARTMENT_INFO = {"pwd": {"steward": "Steward S"}}
 TABLE_INFO = {
     "pwd.vishwakarma.public.dep_table": {
         "api_available": True, "dataset_owner": None, "frequency": None, "timeline": "2024 only",
@@ -156,6 +159,8 @@ class _FakeSession:
                 for fqn, meta in self._vmap.items()
             ]
             return _Result(rows)
+        if "department_info" in text:
+            return _Result([types.SimpleNamespace(slug=s, **v) for s, v in DEPARTMENT_INFO.items()])
         if "dataset_info" in text:
             return _Result([types.SimpleNamespace(fqn=f, **v) for f, v in DATASET_INFO.items()])
         if "table_info" in text:
@@ -259,7 +264,9 @@ def test_guest_public_dataset_everywhere_full_detail(client):
     assert "columns" not in pub[0]["tables"][0]
     # Dataset facts ride on full cards so the catalog can filter by them.
     assert pub[0]["info"]["table_count"] == 1
-    assert {"owner", "steward", "frequency", "timeline", "api_available"} <= set(pub[0]["info"])
+    assert {"owner", "frequency", "timeline", "api_available"} <= set(pub[0]["info"])
+    # The data steward is department-level, never a dataset fact.
+    assert "steward" not in pub[0]["info"]
 
     public = _get(client, "/registry/datasets/public")
     assert any(c["dataset"] == "pub.db" for c in public["items"])
@@ -359,6 +366,9 @@ def test_guest_counts_identical_across_home_card_and_page(client):
     assert stats["departments"] == directory["total"] == len(directory["items"])
     card = [d for d in directory["items"] if d["slug"] == "pwd"][0]
     assert card["dataset_count"] == page["total"] == len(page["datasets"])
+    # The steward is a department fact, on both the directory and the page.
+    assert card["steward"] == page["profile"]["steward"] == "Steward S"
+    assert all(d["steward"] is None for d in directory["items"] if d["slug"] != "pwd")
     assert stats["tables"] == sum(c["table_count"] for c in catalog["items"])
 
 
@@ -692,9 +702,9 @@ def test_admin_table_facts_inherit_dataset_defaults(client):
     facts = body["facts"]
     # OM table owner wins over the dataset owner.
     assert facts["owner"] == "Data Owner" and facts["origin"]["owner"] == "table"
-    # Steward (sidecar) and frequency (OM custom property, which wins over
-    # the sidecar's "Monthly") are inherited from the dataset.
-    assert facts["steward"] == "Steward S" and facts["origin"]["steward"] == "dataset"
+    # Frequency (OM custom property, which wins over the sidecar's
+    # "Monthly") is inherited from the dataset; the steward is not a table fact.
+    assert "steward" not in facts and "steward" not in facts["origin"]
     assert facts["frequency"] == "yearly" and facts["origin"]["frequency"] == "dataset"
     # The table's own timeline overrides the dataset timeline.
     assert facts["timeline"] == "2024 only" and facts["origin"]["timeline"] == "table"
@@ -730,7 +740,7 @@ def test_admin_dataset_info_summary(client):
         app.dependency_overrides.pop(get_optional_user, None)
     info = card["info"]
     assert info["owner"] == "PWD Data Cell"
-    assert info["steward"] == "Steward S"
+    assert "steward" not in info
     assert info["frequency"] == "yearly"  # OM custom property beats the sidecar
     assert info["table_count"] == 2
     assert info["api_tables"] == 1 and info["api_known"] == 1
@@ -747,12 +757,18 @@ def test_dataset_info_update_requires_admin(client):
     assert resp.status_code in (401, 403)
 
 
+def test_department_info_update_requires_admin(client):
+    resp = client.put("/registry/departments/pwd/info", json={"steward": "X"})
+    assert resp.status_code in (401, 403)
+
+
 def test_om_custom_properties_flow_to_dataset_and_table(client):
     card = _get(client, "/registry/datasets/by-fqn", fqn="pub.db")
     info = card["info"]
     assert info["owner"] == "Pub Owner"
     assert info["frequency"] == "monthly"
-    assert info["steward"] == "Pub Steward"
+    # The OM datasetSteward property is no longer read at dataset level.
+    assert "steward" not in info
     assert info["timeline"] == "2020-2024"
     assert info["api_available"] is True  # "Y"
     assert info["data_classification"] == "CAT-1"
@@ -761,7 +777,7 @@ def test_om_custom_properties_flow_to_dataset_and_table(client):
     facts = _get(client, "/registry/tables/t-pub")["facts"]
     # No table-level values: everything is inherited from the OM database.
     assert facts["frequency"] == "monthly" and facts["origin"]["frequency"] == "dataset"
-    assert facts["steward"] == "Pub Steward" and facts["origin"]["steward"] == "dataset"
+    assert "steward" not in facts
     assert facts["timeline"] == "2020-2024" and facts["origin"]["timeline"] == "dataset"
     assert facts["api_available"] is True and facts["origin"]["api_available"] == "dataset"
     # The table's own MDSF tag wins over the dataset's CAT tag.

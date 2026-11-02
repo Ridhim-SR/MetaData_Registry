@@ -210,7 +210,8 @@ export function DatasetDetailPage() {
 
 /**
  * Dataset-level facts (OM database custom properties and tags). Owner,
- * steward, frequency and timeline are the defaults every table inherits.
+ * frequency and timeline are the defaults every table inherits. The data
+ * steward is department-level and shown on the department page.
  * Without a dataset-level API flag or classification, they are summarized
  * over the tables this viewer can open.
  */
@@ -231,7 +232,6 @@ function DatasetFacts({ info }: { info: DatasetInfo }) {
       style={{ border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg-alt)", fontSize: "0.9375rem" }}
     >
       <DatasetFact label={t("factOwner")} value={info.owner} />
-      <DatasetFact label={t("factSteward")} value={info.steward} />
       <DatasetFact label={t("factFrequency")} value={info.frequency} />
       <DatasetFact label={t("timeline")} value={info.timeline} />
       <DatasetFact label={t("apiAvailable")} value={api} />
@@ -258,9 +258,9 @@ function DatasetFacts({ info }: { info: DatasetInfo }) {
 }
 
 /**
- * Dataset-level completeness, shown only to admins and the dataset's owner
- * or steward. The facts box already shows what is "Not provided", so this is
- * a compact meter; hovering lists what is missing. The table roll-up is shown
+ * Dataset-level completeness, shown only to admins and the dataset's owner.
+ * The facts box already shows what is "Not provided", so this is a compact
+ * meter; hovering lists what is missing. The table roll-up is shown
  * in the hover note but deliberately kept out of the percentage.
  */
 function DatasetCompleteness({ card, info }: { card: DatasetCard; info: DatasetInfo }) {
@@ -272,9 +272,8 @@ function DatasetCompleteness({ card, info }: { card: DatasetCard; info: DatasetI
     const tokens = [user.username, user.email, displayName(user)]
       .filter(Boolean)
       .map((s) => s.toLowerCase());
-    return [info.owner, info.steward].some(
-      (c) => typeof c === "string" && c.trim() !== "" && tokens.includes(c.toLowerCase()),
-    );
+    const owner = info.owner?.trim().toLowerCase();
+    return Boolean(owner) && tokens.includes(owner!);
   }, [isAuthenticated, user, info]);
 
   // Item labels are translated, so recompute on a language switch too.

@@ -194,7 +194,6 @@ export function datasetCompletenessItems(
   description: string | null | undefined,
   info: {
     owner?: string | null;
-    steward?: string | null;
     frequency?: string | null;
     timeline?: string | null;
     api_available?: boolean | null;
@@ -217,7 +216,6 @@ export function datasetCompletenessItems(
   return [
     item("description", t("colDescription"), hasText(description)),
     item("owner", t("factOwner"), hasText(info.owner)),
-    item("steward", t("factSteward"), hasText(info.steward)),
     item("classification", t("dataClassification"), Boolean(normalizeClassification(info.data_classification))),
     item("api", t("cApi"), apiKnown),
     item("frequency", t("factFrequency"), hasText(info.frequency)),
