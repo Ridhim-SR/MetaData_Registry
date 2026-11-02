@@ -329,4 +329,8 @@ export const en = {
   signInFailed: "Sign-in failed",
   backToSignIn: "Back to sign in",
   completingSignIn: "Completing sign-in…",
+
+  // ── Department data steward ──
+  stewardCovers: "Looks after every dataset in this department.",
+  stewardNotAssigned: "Not assigned yet",
 } as const;

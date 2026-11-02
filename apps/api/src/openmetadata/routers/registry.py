@@ -26,6 +26,7 @@ from database.models import (
     AccessRequest,
     DatasetInfo,
     DatasetVisibility,
+    DepartmentInfo,
     TableInfo,
     User,
     Visibility,
@@ -40,7 +41,7 @@ from src.openmetadata import catalog_filters as cf
 from src.openmetadata import facts as facts_mod
 from src.openmetadata import visibility as vis
 from src.openmetadata.client import OpenMetadataClient
-from src.openmetadata.schemas.dataset import AccessRequestCreate, DatasetInfoUpdate
+from src.openmetadata.schemas.dataset import AccessRequestCreate, DatasetInfoUpdate, DepartmentInfoUpdate
 
 router = APIRouter(prefix="/registry", tags=["registry"])
 
@@ -66,7 +67,8 @@ def _catalog_lock(key: str) -> asyncio.Lock:
 
 # ---- sidecar helpers ----
 
-# The sidecar tables (dataset_visibility, table_info, dataset_info) are
+# The sidecar tables (dataset_visibility, table_info, dataset_info,
+# department_info) are
 # cached in this worker's memory. Nearly every registry endpoint reads them
 # and the database is ~1.5-4 s away, while the tables are tiny and only
 # change on uploads/admin edits. Each uvicorn worker keeps its own copy:
@@ -156,7 +158,6 @@ async def _load_dataset_info(session: AsyncSession) -> dict[str, dict]:
     return {
         r.fqn: {
             "owner": r.owner,
-            "steward": r.steward,
             "frequency": r.frequency,
             "timeline": r.timeline,
         }
@@ -169,8 +170,16 @@ _table_info_cache = _SidecarCache(_load_table_info)
 _dataset_info_cache = _SidecarCache(_load_dataset_info)
 
 
+async def _load_department_info(session: AsyncSession) -> dict[str, dict]:
+    rows = (await session.execute(select(DepartmentInfo))).scalars().all()
+    return {r.slug: {"steward": r.steward} for r in rows}
+
+
+_department_info_cache = _SidecarCache(_load_department_info)
+
+
 def clear_sidecar_caches() -> None:
-    for cache in (_visibility_cache, _table_info_cache, _dataset_info_cache):
+    for cache in (_visibility_cache, _table_info_cache, _dataset_info_cache, _department_info_cache):
         cache.clear()
     _filterable_cache.clear()
 
@@ -210,9 +219,18 @@ def _profiles_from_services(services: list[dict]) -> list[dict]:
                 "contact_phone": None,
                 "head_name": None,
                 "category": None,
+                "steward": None,
             }
         )
     profiles.sort(key=lambda p: (p["display_name"] or "").lower())
+    return profiles
+
+
+async def _with_department_info(session: AsyncSession, profiles: list[dict]) -> list[dict]:
+    """Fill department-level facts (the data steward) from department_info."""
+    info = await _department_info_cache.get(session)
+    for p in profiles:
+        p["steward"] = ((info.get(p["slug"]) or {}).get("steward") or "").strip() or None
     return profiles
 
 
@@ -319,7 +337,7 @@ async def list_departments(
     ctx = user_context(user)
     cards, _, _, services = await _viewer_catalog(session, ctx)
     counts = _dept_counts(cards)
-    profiles = _profiles_from_services(services)
+    profiles = await _with_department_info(session, _profiles_from_services(services))
     items = []
     for p in profiles:
         c = counts.get(p["slug"], {"datasets": 0, "tables": 0})
@@ -337,7 +355,7 @@ async def department_detail(
     """One department (OM service) with this viewer's visible dataset cards."""
     ctx = user_context(user)
     cards, _, _, services = await _viewer_catalog(session, ctx)
-    profiles = _profiles_from_services(services)
+    profiles = await _with_department_info(session, _profiles_from_services(services))
     row = next((p for p in profiles if p["slug"] == slug), None)
     if row is None:
         raise HTTPException(status_code=404, detail="Department not found")
@@ -348,6 +366,32 @@ async def department_detail(
         "table_count": sum(c.get("table_count", 0) for c in mine),
     }
     return {"profile": profile, "datasets": mine, "total": len(mine)}
+
+
+async def upsert_department_info(session: AsyncSession, *, slug: str, steward: str | None) -> None:
+    """Set a department's data steward (blank clears it)."""
+    steward = (steward or "").strip() or None
+    existing = (
+        await session.execute(select(DepartmentInfo).where(DepartmentInfo.slug == slug))
+    ).scalar_one_or_none()
+    if existing:
+        existing.steward = steward
+    else:
+        session.add(DepartmentInfo(slug=slug, steward=steward))
+    await session.commit()
+    _department_info_cache.clear()
+
+
+@router.put("/departments/{slug}/info")
+async def update_department_info(
+    slug: str,
+    payload: DepartmentInfoUpdate,
+    session: AsyncSession = Depends(db_get_session),
+    _admin: User = Depends(require_admin),
+) -> dict:
+    """Admin: set the department-level facts (its data steward)."""
+    await upsert_department_info(session, slug=slug, steward=payload.steward)
+    return {"slug": slug, "steward": (payload.steward or "").strip() or None}
 
 
 # ---- datasets ----
@@ -410,7 +454,6 @@ def _catalog_filters(
     department: list[str] | None,
     frequency: list[str] | None,
     api: list[str] | None,
-    steward: list[str] | None,
     schema_source: list[str] | None,
     year_from: int | None,
     year_to: int | None,
@@ -428,7 +471,6 @@ def _catalog_filters(
         departments=frozenset(departments),
         frequency=frozenset(cf.frequency_value(v) for v in values(frequency)),
         api=frozenset(v.lower() for v in values(api)),
-        steward=values(steward),
         schema_source=values(schema_source),
         year_from=year_from,
         year_to=year_to,
@@ -462,7 +504,6 @@ async def list_datasets(
     tag: list[str] | None = Query(default=None),
     frequency: list[str] | None = Query(default=None),
     api: list[str] | None = Query(default=None),
-    steward: list[str] | None = Query(default=None),
     schema_source: list[str] | None = Query(default=None),
     year_from: int | None = Query(default=None, ge=1000, le=9999),
     year_to: int | None = Query(default=None, ge=1000, le=9999),
@@ -476,7 +517,7 @@ async def list_datasets(
 
     Filters (repeat a parameter to select several values: ORed within a
     filter, ANDed across filters): department, classification (CAT-1..4),
-    tag, frequency, api (yes/no), steward, schema_source, year_from/year_to (timeline
+    tag, frequency, api (yes/no), schema_source, year_from/year_to (timeline
     overlap). `facets` counts every option over the visible catalog, each
     ignoring its own selection. Sorted (relevance | updated | name), then
     paged via page/size; `total` is the filtered count. Logged-in callers
@@ -485,7 +526,7 @@ async def list_datasets(
     """
     ctx = user_context(user)
     filters = _catalog_filters(
-        classification, tag, department, frequency, api, steward, schema_source, year_from, year_to
+        classification, tag, department, frequency, api, schema_source, year_from, year_to
     )
     cards, vmap, _databases, profiles = await _filterable_catalog(session, ctx)
     if search:
@@ -520,7 +561,7 @@ async def list_datasets(
 async def _with_dataset_info(
     session: AsyncSession, ctx: dict | None, cards: list[dict], databases: list[dict]
 ) -> None:
-    """Attach dataset facts (owner, steward, frequency, ...) to unlocked cards.
+    """Attach dataset facts (owner, frequency, timeline, ...) to unlocked cards.
 
     Locked teasers get none. Summaries cover only the tables this viewer
     may open in full.
@@ -877,7 +918,6 @@ async def registry_search(
     tag: list[str] | None = Query(default=None),
     frequency: list[str] | None = Query(default=None),
     api: list[str] | None = Query(default=None),
-    steward: list[str] | None = Query(default=None),
     schema_source: list[str] | None = Query(default=None),
     year_from: int | None = Query(default=None, ge=1000, le=9999),
     year_to: int | None = Query(default=None, ge=1000, le=9999),
@@ -890,7 +930,7 @@ async def registry_search(
     """Grouped registry search: departments, datasets, tables, columns.
 
     Takes the same filters as GET /datasets (department, classification,
-    tag, frequency, api, steward, schema_source, year_from/year_to); tables and columns
+    tag, frequency, api, schema_source, year_from/year_to); tables and columns
     are filtered by their dataset (tables by their own tags). `facets`
     counts options over the matched datasets. Every group is sorted and
     paged with page/size; each group's `total` is its filtered count.
@@ -915,7 +955,7 @@ async def registry_search(
         wanted_scopes = set(_VALID_SCOPES)
 
     filters = _catalog_filters(
-        classification, tag, department, frequency, api, steward, schema_source, year_from, year_to
+        classification, tag, department, frequency, api, schema_source, year_from, year_to
     )
     _check_sort(sort)
     cards, vmap, databases, profiles = await _filterable_catalog(session, ctx)
@@ -1175,7 +1215,7 @@ async def upsert_dataset_info(
     values: dict,
 ) -> None:
     """Set dataset-level defaults; only the keys present in `values` change."""
-    allowed = {k: v for k, v in values.items() if k in ("owner", "steward", "frequency", "timeline")}
+    allowed = {k: v for k, v in values.items() if k in ("owner", "frequency", "timeline")}
     existing = (
         await session.execute(select(DatasetInfo).where(DatasetInfo.fqn == fqn))
     ).scalar_one_or_none()
@@ -1189,7 +1229,7 @@ async def upsert_dataset_info(
 
 
 async def dataset_info_map(session: AsyncSession, fqns: list[str] | None = None) -> dict[str, dict]:
-    """Dataset FQN -> {"owner", "steward", "frequency", "timeline"} (cached sidecar)."""
+    """Dataset FQN -> {"owner", "frequency", "timeline"} (cached sidecar)."""
     if fqns is not None and not fqns:
         return {}
     return _pick(await _dataset_info_cache.get(session), fqns)

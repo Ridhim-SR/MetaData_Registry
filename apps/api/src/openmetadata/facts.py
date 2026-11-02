@@ -19,7 +19,6 @@ from datetime import datetime, timezone
 # OM custom property names (Custom Properties panel on databases/tables).
 EXT_API_AVAILABLE = "apiAvailable"
 EXT_OWNER = "datasetOwner"
-EXT_STEWARD = "datasetSteward"
 EXT_FREQUENCY = "frequency"
 EXT_TIMELINE = "timeline"
 EXT_SCHEMA_SOURCE = "schemaSource"
@@ -164,11 +163,6 @@ def resolve_table_facts(
         ("dataset", _text(di.get("owner"))),
         ("dataset", owner_name((database or {}).get("owners"))),
     )
-    steward, steward_from = _pick(
-        ("table", ext_text(_ext(table, EXT_STEWARD))),
-        ("dataset", ext_text(_ext(database, EXT_STEWARD))),
-        ("dataset", _text(di.get("steward"))),
-    )
     frequency, frequency_from = _pick(
         ("table", ext_text(_ext(table, EXT_FREQUENCY))),
         ("table", _text(ti.get("frequency"))),
@@ -192,7 +186,6 @@ def resolve_table_facts(
     )
     return {
         "owner": owner,
-        "steward": steward,
         "department_contact": None,
         "updated_at": table.get("updatedAt"),
         "frequency": frequency,
@@ -203,7 +196,6 @@ def resolve_table_facts(
         "source": None,
         "origin": {
             "owner": owner_from,
-            "steward": steward_from,
             "frequency": frequency_from,
             "timeline": timeline_from,
             "api_available": api_from,
@@ -241,7 +233,6 @@ def resolve_dataset_info(
         "owner": ext_text(_ext(database, EXT_OWNER))
         or _text(di.get("owner"))
         or owner_name((database or {}).get("owners")),
-        "steward": ext_text(_ext(database, EXT_STEWARD)) or _text(di.get("steward")),
         "frequency": ext_text(_ext(database, EXT_FREQUENCY)) or _text(di.get("frequency")),
         "timeline": ext_text(_ext(database, EXT_TIMELINE)) or _text(di.get("timeline")),
         "api_available": ext_bool(_ext(database, EXT_API_AVAILABLE)),

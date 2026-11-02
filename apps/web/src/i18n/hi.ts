@@ -329,4 +329,8 @@ export const hi = {
   signInFailed: "साइन-इन विफल रहा",
   backToSignIn: "साइन इन पर वापस जाएँ",
   completingSignIn: "साइन-इन पूरा किया जा रहा है…",
+
+  // ── Department data steward ──
+  stewardCovers: "इस विभाग के सभी डेटासेट की देखरेख करते हैं।",
+  stewardNotAssigned: "अभी नियुक्त नहीं",
 } as const;

@@ -16,13 +16,13 @@ def test_table_values_win_over_dataset():
     resolved = facts.resolve_table_facts(
         _table(owners=[{"name": "alice"}]),
         {"frequency": "Daily", "timeline": None, "api_available": True},
-        {"owner": "Dept", "steward": "Bob", "frequency": "Monthly", "timeline": "2020-2025"},
+        {"owner": "Dept", "frequency": "Monthly", "timeline": "2020-2025"},
         {"owners": [{"displayName": "DB Owner"}]},
     )
     assert resolved["owner"] == "alice" and resolved["origin"]["owner"] == "table"
     assert resolved["frequency"] == "Daily" and resolved["origin"]["frequency"] == "table"
     assert resolved["timeline"] == "2020-2025" and resolved["origin"]["timeline"] == "dataset"
-    assert resolved["steward"] == "Bob" and resolved["origin"]["steward"] == "dataset"
+    assert "steward" not in resolved and "steward" not in resolved["origin"]
     assert resolved["api_available"] is True
 
 
