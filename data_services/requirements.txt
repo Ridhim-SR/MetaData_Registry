@@ -14,8 +14,4 @@ ruamel.yaml>=0.18
 # because of this gap before it was added.
 openpyxl>=3.1
 anthropic>=0.40
-# Optional Google Drive mirror of curated schemas + dataset details
-# (src/storage/gdrive.py). Imports are lazy, so a run without Drive
-# configured works even if these are missing.
-google-api-python-client>=2.100
-google-auth>=2.30
+# The SharePoint mirror copies into a locally OneDrive-synchronized folder.

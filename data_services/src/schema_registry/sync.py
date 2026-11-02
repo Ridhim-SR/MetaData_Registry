@@ -35,7 +35,7 @@ from dataclasses import dataclass
 
 from metadata.ingestion.ometa.ometa_api import OpenMetadata
 
-from src.schema_registry import gdrive_mirror, inputs
+from src.schema_registry import inputs
 from src.schema_registry.catalog import DatasetEntry, DepartmentEntry, load_catalog
 from src.schema_registry.parsers.field_dictionary_ingest import run_field_dictionary
 from src.schema_registry.pipeline import run
@@ -159,10 +159,6 @@ def _ingest_dataset(
 
     if not dry_run:
         lookups.set_dataset_fields(storage, f"{dept.id}.{ds_slug}", dept.id, ds.name, ds.fields)
-        # The catalog is authoritative for dataset_type/schema_source, which a
-        # pipeline run never receives -- mirror after the fields are set so the
-        # Drive txt matches catalog.yaml.
-        gdrive_mirror.mirror_dataset_from_catalog(storage, dept, ds)
     return outcomes
 
 
