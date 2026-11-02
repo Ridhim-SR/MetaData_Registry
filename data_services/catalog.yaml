@@ -45,10 +45,10 @@ departments:
         schema_source: Department Provided
         frequency: Daily
         timeline: "01-06-2019 - ongoing"
-        api_available:
+        api_available: yes
         description: "System to monitor all activities related to financial management of the sanctioned projects online. It is an end-to-end integration of all financial activities, right from sanction of the project to its completion, including all checks and balances."
         tables:
-          vishwakarma_T:
+          HQ Data:
             source: storage:inputs/pwd/vishwakarma/pwd_vishwakarma_full_raw_columns.txt
             format: postgres_ddl
             metadata: storage:inputs/pwd/vishwakarma/pwd_vishwakarma_full_raw_columns_metadata.csv
