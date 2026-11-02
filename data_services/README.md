@@ -255,6 +255,16 @@ Nothing runs it automatically yet.
 python3 -m src.schema_registry.sync                    # all departments
 python3 -m src.schema_registry.sync --department pwd   # just one
 ```
+Tables are ingested in parallel with a bounded worker pool (8 workers by
+default). Change the limit for a large or rate-limited environment with
+`--workers`, or set `SYNC_MAX_WORKERS` for automation:
+```bash
+python3 -m src.schema_registry.sync --department pwd --workers 4
+```
+Each table still has its own storage lock and audit row, and publishing stays
+ordered after ingestion so a partial worker failure cannot publish an
+incomplete snapshot. Use a lower worker count if Wasabi or the OpenMetadata
+server is rate-limited.
 It prints a summary:
 ```
 TABLE                          INGEST        PUBLISH        DETAIL

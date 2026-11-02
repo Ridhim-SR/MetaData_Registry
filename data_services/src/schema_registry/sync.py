@@ -30,6 +30,7 @@ anything failed, and prints a summary table either way.
 import argparse
 import os
 import sys
+from concurrent.futures import Executor, ThreadPoolExecutor
 from dataclasses import dataclass
 
 from metadata.ingestion.ometa.ometa_api import OpenMetadata
@@ -100,7 +101,14 @@ def _ensure_department(storage: ObjectStorage, dept: DepartmentEntry, dry_run: b
     lookups.register_department(storage, dept.id, dept.name, dept.description)
 
 
-def _ingest_dataset(storage: ObjectStorage, dept: DepartmentEntry, ds: DatasetEntry, dry_run: bool, reclassify: bool = False) -> list[Outcome]:
+def _ingest_dataset(
+    storage: ObjectStorage,
+    dept: DepartmentEntry,
+    ds: DatasetEntry,
+    dry_run: bool,
+    reclassify: bool = False,
+    executor: Executor | None = None,
+) -> list[Outcome]:
     ds_slug = lookups.slugify(ds.name)
     outcomes: list[Outcome] = []
 
@@ -120,27 +128,34 @@ def _ingest_dataset(storage: ObjectStorage, dept: DepartmentEntry, ds: DatasetEn
         except Exception as exc:  # noqa: BLE001 -- report and carry on with other tables
             outcomes.append(Outcome(label, "failed", detail=str(exc)))
 
-    for table in ds.tables:
+    def ingest_table(table) -> Outcome:
         table_id = f"{dept.id}.{ds_slug}.{lookups.slugify(table.name)}"
         try:
             reason = _table_needs_ingest(storage, dept.id, ds_slug, table, table_id)
             if reclassify:
                 reason = f"{reason}; reclassify requested" if reason else "reclassify requested"
             if reason is None:
-                outcomes.append(Outcome(table_id, "unchanged"))
-                continue
+                return Outcome(table_id, "unchanged")
             if dry_run:
-                outcomes.append(Outcome(table_id, "would ingest", detail=reason))
-                continue
+                return Outcome(table_id, "would ingest", detail=reason)
             result = run(
                 department=dept.id, dataset=ds.name, table_name=table.name, source_file=table.source,
                 storage=storage, source_format=table.format, schema_name=table.schema,
                 business_metadata_file=table.metadata, allow_column_removal=table.allow_column_removal,
                 reclassify=reclassify,
             )
-            outcomes.append(Outcome(table_id, "ingested", detail=f"{reason}; {result['column_count']} columns"))
+            return Outcome(table_id, "ingested", detail=f"{reason}; {result['column_count']} columns")
         except Exception as exc:  # noqa: BLE001
-            outcomes.append(Outcome(table_id, "failed", detail=str(exc)))
+            return Outcome(table_id, "failed", detail=str(exc))
+
+    if executor is None:
+        table_outcomes = [ingest_table(table) for table in ds.tables]
+    else:
+        # A table has its own pipeline lock and run-log row. Keeping one
+        # shared executor across datasets overlaps S3 parsing and writes
+        # without allowing two workers to mutate the same table snapshot.
+        table_outcomes = list(executor.map(ingest_table, ds.tables))
+    outcomes.extend(table_outcomes)
 
     if not dry_run:
         lookups.set_dataset_fields(storage, f"{dept.id}.{ds_slug}", dept.id, ds.name, ds.fields)
@@ -199,6 +214,7 @@ def sync(
     publish_only: bool = False,
     only_department: str | None = None,
     reclassify: bool = False,
+    max_workers: int | None = None,
 ) -> list[Outcome]:
     """Run the steps in the module docstring. `setup` is the OpenMetadata
     setup callable (custom properties); `client` None = storage only.
@@ -229,10 +245,25 @@ def sync(
 
     outcomes: dict[str, Outcome] = {}
     if not publish_only:
+        # Department registration is deliberately serialized. Table ingestion
+        # is independent and protected by per-table locks, so it can safely
+        # share a bounded pool across all datasets. Publication remains below
+        # this block and ordered to avoid concurrent OpenMetadata mutations.
         for dept in departments:
             _ensure_department(storage, dept, dry_run)
-            for ds in dept.datasets:
-                for outcome in _ingest_dataset(storage, dept, ds, dry_run, reclassify=reclassify):
+        if max_workers is None:
+            try:
+                max_workers = int(os.environ.get("SYNC_MAX_WORKERS", "8"))
+            except ValueError as exc:
+                raise ValueError("SYNC_MAX_WORKERS must be a positive integer") from exc
+        if max_workers < 1:
+            raise ValueError("max_workers must be a positive integer")
+        dataset_jobs = [(dept, ds) for dept in departments for ds in dept.datasets]
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            for dept, ds in dataset_jobs:
+                for outcome in _ingest_dataset(
+                    storage, dept, ds, dry_run, reclassify=reclassify, executor=executor
+                ):
                     outcomes[outcome.table_id] = outcome
 
     targets = _tables_to_publish(storage, departments, publish_only, only_department)
@@ -284,6 +315,12 @@ def _main(argv: list[str]) -> int:
     parser.add_argument("--publish-only", action="store_true", help="republish every table already in storage")
     parser.add_argument("--department", help="only this department (e.g. pwd)")
     parser.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        help="maximum parallel table ingestions (default: SYNC_MAX_WORKERS or 8)",
+    )
+    parser.add_argument(
         "--reclassify", action="store_true",
         help="force re-ingest of unchanged files so stored auto classification/tag values are "
              "re-derived from the current curate.py rules (requires --department)",
@@ -311,7 +348,7 @@ def _main(argv: list[str]) -> int:
     outcomes = sync(
         storage, departments, client=client, setup=setup,
         dry_run=args.dry_run, publish_only=args.publish_only, only_department=args.department,
-        reclassify=args.reclassify,
+        reclassify=args.reclassify, max_workers=args.workers,
     )
     print_summary(outcomes)
     failed = any("failed" in (o.ingest, o.publish) for o in outcomes)
