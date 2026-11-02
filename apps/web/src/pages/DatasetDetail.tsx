@@ -11,7 +11,7 @@ import {
   normalizeClassification,
   tableCompletenessItems,
 } from "../utils/format";
-import { t } from "../i18n";
+import { t, useLanguage } from "../i18n";
 import { ApiError } from "../api/client";
 import { EmptyBlock, ErrorBlock, LoadingBlock } from "../components/registry/StateBlocks";
 import { CatBadge } from "../components/registry/CatBadge";
@@ -19,6 +19,7 @@ import { CompletenessMeter } from "../components/registry/CompletenessCard";
 import { useAuth } from "../contexts/AuthContext";
 
 function LockedPanel({ datasetFqn }: { datasetFqn: string }) {
+  useLanguage();
   const { isAuthenticated } = useAuth();
   const navigate = useNavigate();
   const [state, setState] = useState<"idle" | "sending" | "sent" | "error">("idle");
@@ -43,16 +44,15 @@ function LockedPanel({ datasetFqn }: { datasetFqn: string }) {
       style={{ border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg-alt)" }}
     >
       <h2 className="font-semibold" style={{ color: "var(--navy-900)", fontSize: "1.125rem" }}>
-        Sign in to view schema
+        {t("signInViewSchema")}
       </h2>
       <p className="mx-auto mt-2 max-w-md text-sm" style={{ color: "var(--text-muted)", fontSize: "0.9375rem" }}>
-        This dataset&apos;s tables and columns are visible to authorized users. Sign in
-        with your department account, or request access from the owning department.
+        {t("lockedSchemaBody")}
       </p>
       <div className="mt-4">
         {state === "sent" ? (
           <p className="text-sm font-medium" role="status" style={{ color: "var(--public-fg)" }}>
-            Access requested. The owning department will review your request.
+            {t("accessRequested")}
           </p>
         ) : (
           <button
@@ -61,13 +61,13 @@ function LockedPanel({ datasetFqn }: { datasetFqn: string }) {
             className="btn-primary disabled:opacity-60"
             style={{ fontSize: "0.9375rem" }}
           >
-            {state === "sending" ? "Requesting…" : "Request Access"}
+            {state === "sending" ? t("requesting") : t("requestAccess")}
           </button>
         )}
       </div>
       {state === "error" && (
         <p className="mt-2 text-sm" role="alert" style={{ color: "var(--confid-fg)" }}>
-          Could not send the request. Please try again.
+          {t("requestFailed")}
         </p>
       )}
     </div>
@@ -75,6 +75,7 @@ function LockedPanel({ datasetFqn }: { datasetFqn: string }) {
 }
 
 export function DatasetDetailPage() {
+  useLanguage();
   const { datasetFqn } = useParams<{ datasetFqn: string }>();
   const fqn = datasetFqn ? decodeURIComponent(datasetFqn) : "";
 
@@ -95,18 +96,18 @@ export function DatasetDetailPage() {
         className="mb-4 inline-block text-sm font-medium"
         style={{ color: "var(--blue-700)" }}
       >
-        ← Back to catalog
+        {t("backToCatalogArrow")}
       </Link>
 
       {loading && <LoadingBlock lines={5} />}
 
       {!loading && query.error && query.error instanceof ApiError && query.error.status === 401 && (
         <EmptyBlock
-          title="Sign in to view this dataset."
-          body="This metadata is not public. Sign in with your department account to view it."
+          title={t("signInViewDataset")}
+          body={t("notPublicBody")}
           action={
             <Link to="/login" className="btn-primary" style={{ fontSize: "0.875rem" }}>
-              Sign In
+              {t("signIn")}
             </Link>
           }
         />
@@ -114,11 +115,11 @@ export function DatasetDetailPage() {
 
       {!loading && query.error && query.error instanceof ApiError && query.error.status === 404 && (
         <EmptyBlock
-          title="Dataset not found."
-          body="It may have been removed, or you may not have permission to view it."
+          title={t("datasetNotFound")}
+          body={t("mayBeRemoved")}
           action={
             <Link to="/explore" className="btn-secondary" style={{ fontSize: "0.875rem" }}>
-              Back to catalog
+              {t("backToCatalog")}
             </Link>
           }
         />
@@ -126,18 +127,18 @@ export function DatasetDetailPage() {
 
       {!loading && query.error && query.error instanceof ApiError && query.error.status === 403 && (
         <EmptyBlock
-          title="You do not have permission to view this metadata."
-          body="If you need it for your work, you can request access from the owning department."
+          title={t("noPermission")}
+          body={t("noPermissionBody")}
           action={
             <Link to="/explore" className="btn-secondary" style={{ fontSize: "0.875rem" }}>
-              Back to catalog
+              {t("backToCatalog")}
             </Link>
           }
         />
       )}
 
       {!loading && query.error && !(query.error instanceof ApiError && (query.error.status === 401 || query.error.status === 403 || query.error.status === 404)) && (
-        <ErrorBlock message="Unable to load this dataset. Please try again." onRetry={() => query.refetch()} />
+        <ErrorBlock message={t("datasetLoadError")} onRetry={() => query.refetch()} />
       )}
 
       {!loading && query.data && (
@@ -165,7 +166,7 @@ export function DatasetDetailPage() {
                 <div className="flex items-center gap-2">
                   <CatBadge value={query.data.classification} />
                   <span className="badge badge-neutral">
-                    {query.data.table_count} {query.data.table_count === 1 ? "table" : "tables"}
+                    {t(query.data.table_count === 1 ? "tableCountOne" : "tableCountOther", { count: query.data.table_count })}
                   </span>
                 </div>
               )}
@@ -176,7 +177,7 @@ export function DatasetDetailPage() {
               </p>
             ) : (
               <p className="not-provided mt-4 text-sm" style={{ fontSize: "0.9375rem" }}>
-                No description
+                {t("noDescription")}
               </p>
             )}
             {!query.data.locked && query.data.info && <DatasetFacts info={query.data.info} />}
@@ -187,7 +188,7 @@ export function DatasetDetailPage() {
           ) : (
             <div>
               <h2 className="mt-8 font-semibold" style={{ color: "var(--navy-900)", fontSize: "1.125rem" }}>
-                Tables ({query.data.tables.length})
+                {t("tablesHeading", { count: query.data.tables.length })}
               </h2>
               <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2">
                 {query.data.tables.map((t) => (
@@ -214,6 +215,7 @@ export function DatasetDetailPage() {
  * over the tables this viewer can open.
  */
 function DatasetFacts({ info }: { info: DatasetInfo }) {
+  useLanguage();
   const level = normalizeClassification(info.data_classification);
   const api =
     info.api_available != null
@@ -228,10 +230,10 @@ function DatasetFacts({ info }: { info: DatasetInfo }) {
       className="mt-4 grid grid-cols-1 gap-x-6 gap-y-2 p-4 sm:grid-cols-2"
       style={{ border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg-alt)", fontSize: "0.9375rem" }}
     >
-      <DatasetFact label="Owner" value={info.owner} />
-      <DatasetFact label="Data steward" value={info.steward} />
-      <DatasetFact label="Update frequency" value={info.frequency} />
-      <DatasetFact label="Timeline" value={info.timeline} />
+      <DatasetFact label={t("factOwner")} value={info.owner} />
+      <DatasetFact label={t("factSteward")} value={info.steward} />
+      <DatasetFact label={t("factFrequency")} value={info.frequency} />
+      <DatasetFact label={t("timeline")} value={info.timeline} />
       <DatasetFact label={t("apiAvailable")} value={api} />
       <div>
         <dt className="metadata-fact-label">{t("dataClassification")}</dt>
@@ -246,11 +248,11 @@ function DatasetFacts({ info }: { info: DatasetInfo }) {
               {t(`classification${level}`)}
             </span>
           ) : (
-            <span className="not-provided">Not provided</span>
+            <span className="not-provided">{t("notProvided")}</span>
           )}
         </dd>
       </div>
-      <DatasetFact label="Schema source" value={info.schema_source} />
+      <DatasetFact label={t("factSchemaSource")} value={info.schema_source} />
     </dl>
   );
 }
@@ -262,6 +264,7 @@ function DatasetFacts({ info }: { info: DatasetInfo }) {
  * in the hover note but deliberately kept out of the percentage.
  */
 function DatasetCompleteness({ card, info }: { card: DatasetCard; info: DatasetInfo }) {
+  const { lang } = useLanguage();
   const { isAuthenticated, user } = useAuth();
   const canEdit = useMemo(() => {
     if (!isAuthenticated || !user) return false;
@@ -274,7 +277,11 @@ function DatasetCompleteness({ card, info }: { card: DatasetCard; info: DatasetI
     );
   }, [isAuthenticated, user, info]);
 
-  const items = useMemo(() => datasetCompletenessItems(card.description, info), [card.description, info]);
+  // Item labels are translated, so recompute on a language switch too.
+  const items = useMemo(
+    () => datasetCompletenessItems(card.description, info),
+    [card.description, info, lang],
+  );
   const tables = card.tables ?? [];
   const fullTables = useMemo(
     () => tables.filter((tb) => tableCompletenessItems(tb).every((i) => i.score >= 1)).length,
@@ -284,7 +291,7 @@ function DatasetCompleteness({ card, info }: { card: DatasetCard; info: DatasetI
   if (!canEdit) return null;
   return (
     <CompletenessMeter
-      label="Dataset Metadata completeness"
+      label={t("datasetCompletenessLabel")}
       items={items}
       note={
         tables.length > 0
@@ -301,7 +308,7 @@ function DatasetFact({ label, value }: { label: string; value: string | null | u
     <div>
       <dt className="metadata-fact-label">{label}</dt>
       <dd className="mt-0.5" style={{ color: "var(--text)" }}>
-        {text ?? <span className="not-provided">Not provided</span>}
+        {text ?? <span className="not-provided">{t("notProvided")}</span>}
       </dd>
     </div>
   );
@@ -322,7 +329,7 @@ function TableCard({
     <div
       role="link"
       tabIndex={0}
-      aria-label={`Open table ${name}`}
+      aria-label={t("openTable", { name })}
       className="p-4"
       style={{
         border: "1px solid var(--border)",
@@ -345,10 +352,10 @@ function TableCard({
       }}
     >
       <div className="font-semibold" style={{ color: "var(--navy-900)", fontSize: "1rem" }}>
-        {humanizeRaw(name) || "Not provided"}
+        {humanizeRaw(name) || t("notProvided")}
       </div>
       <div className="mt-3" style={{ color: "var(--text-muted)", fontSize: "0.8125rem" }}>
-        {columnCount} columns
+        {t(columnCount === 1 ? "colCountOne" : "colCountOther", { count: columnCount })}
       </div>
     </div>
   );

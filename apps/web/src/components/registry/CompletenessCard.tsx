@@ -1,5 +1,5 @@
 import { useId, type ReactNode } from "react";
-import { t } from "../../i18n";
+import { t, useLanguage } from "../../i18n";
 import { completenessSummary, type CompletenessItem } from "../../utils/format";
 
 const scoreColor = (pct: number) =>
@@ -19,6 +19,7 @@ export function CompletenessMeter({
   items: CompletenessItem[];
   note?: ReactNode;
 }) {
+  useLanguage();
   const { done, pct } = completenessSummary(items);
   const color = scoreColor(pct);
   const tipId = useId();
@@ -83,6 +84,7 @@ export function CompletenessCard({
   items: CompletenessItem[];
   footer?: ReactNode;
 }) {
+  useLanguage();
   const { done, pct } = completenessSummary(items);
   const color = scoreColor(pct);
 

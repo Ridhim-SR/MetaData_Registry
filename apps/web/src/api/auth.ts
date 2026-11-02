@@ -16,13 +16,6 @@ export interface TokenResponse {
   token_type: string;
 }
 
-export interface RegisterRequest {
-  first_name: string;
-  last_name: string;
-  email: string;
-  password: string;
-  department?: string;
-}
 
 export type OAuthProvider = "google" | "microsoft";
 
@@ -30,9 +23,6 @@ export async function login(email: string, password: string): Promise<TokenRespo
   return apiPost<TokenResponse>("/auth/login", { email, password });
 }
 
-export async function register(body: RegisterRequest): Promise<unknown> {
-  return apiPost("/auth/register", body);
-}
 
 export async function fetchMe(): Promise<MeResponse> {
   return apiGet<MeResponse>("/auth/me");

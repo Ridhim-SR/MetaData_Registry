@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
 import { displayName } from "../../api/auth";
 import { useAuth } from "../../contexts/AuthContext";
+import { setLang, t, useLanguage } from "../../i18n";
 
 const TEXT_SIZES = [0.875, 1, 1.125];
 
@@ -24,24 +25,6 @@ function useTextSize() {
   return { idx, set };
 }
 
-function useLanguage() {
-  const [lang, setLang] = useState<"en" | "hi">("en");
-  useEffect(() => {
-    const saved = window.localStorage.getItem("sda-lang");
-    if (saved === "hi") {
-      setLang("hi");
-      document.documentElement.lang = "hi";
-    }
-  }, []);
-  const toggle = () => {
-    const next = lang === "en" ? "hi" : "en";
-    setLang(next);
-    document.documentElement.lang = next === "hi" ? "hi" : "en";
-    window.localStorage.setItem("sda-lang", next);
-  };
-  return { lang, toggle };
-}
-
 function navLinkStyle({ isActive }: { isActive: boolean }): React.CSSProperties {
   return {
     color: "#fff",
@@ -61,7 +44,8 @@ export function RegistryHeader() {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
   const { idx, set } = useTextSize();
-  const { lang, toggle } = useLanguage();
+  const { lang } = useLanguage();
+  const toggle = () => setLang(lang === "en" ? "hi" : "en");
   // isAdmin NavLink hidden for now (see nav below); restore with the links.
 
   useEffect(() => {
@@ -97,13 +81,13 @@ export function RegistryHeader() {
           style={{ fontSize: "0.8125rem" }}
         >
           <a href="#main-content" className="skip-link">
-            Skip to main content
+            {t("skipToMain")}
           </a>
-          <div className="ml-auto flex items-center gap-1" role="group" aria-label="Text size">
+          <div className="ml-auto flex items-center gap-1" role="group" aria-label={t("textSize")}>
             <button
               type="button"
               onClick={() => set(idx - 1)}
-              aria-label="Decrease text size"
+              aria-label={t("textSizeDecrease")}
               style={{
                 border: "1px solid var(--border)",
                 borderRadius: 6,
@@ -119,7 +103,7 @@ export function RegistryHeader() {
             <button
               type="button"
               onClick={() => set(1)}
-              aria-label="Reset text size"
+              aria-label={t("textSizeReset")}
               style={{
                 border: "1px solid var(--border)",
                 borderRadius: 6,
@@ -135,7 +119,7 @@ export function RegistryHeader() {
             <button
               type="button"
               onClick={() => set(idx + 1)}
-              aria-label="Increase text size"
+              aria-label={t("textSizeIncrease")}
               style={{
                 border: "1px solid var(--border)",
                 borderRadius: 6,
@@ -152,7 +136,7 @@ export function RegistryHeader() {
           <button
             type="button"
             onClick={toggle}
-            aria-label="Toggle language between English and Hindi"
+            aria-label={t("langToggleLabel")}
             style={{
               border: "1px solid var(--border)",
               borderRadius: 6,
@@ -178,12 +162,12 @@ export function RegistryHeader() {
           <Link
             to="/"
             className="flex items-center gap-3"
-            aria-label="SDA Metadata Registry home"
+            aria-label={t("siteHomeLabel")}
             style={{ textDecoration: "none" }}
           >
             <img
               src="/logo.jpg"
-              alt="State emblem of Uttar Pradesh"
+              alt={t("emblemAlt")}
               className="h-12 w-auto"
               style={{ height: 48 }}
             />
@@ -192,13 +176,13 @@ export function RegistryHeader() {
                 className="block font-bold"
                 style={{ color: "var(--navy-900)", fontSize: "1.25rem" }}
               >
-                Metadata Registry
+                {t("siteTitle")}
               </span>
               <span
                 className="block font-medium"
                 style={{ color: "var(--text-muted)", fontSize: "0.875rem" }}
               >
-                Government of Uttar Pradesh
+                {t("govUP")}
               </span>
             </span>
           </Link>
@@ -208,15 +192,15 @@ export function RegistryHeader() {
       {/* 4. Navy nav bar */}
       <div style={{ background: "var(--navy-900)" }}>
         <div className="page-container mx-auto flex w-full max-w-7xl items-center px-4 sm:px-6 lg:px-8">
-          <nav aria-label="Primary" className="hidden items-center md:flex">
+          <nav aria-label={t("navPrimary")} className="hidden items-center md:flex">
             <NavLink to="/" end style={navLinkStyle}>
-              Home
+              {t("navHome")}
             </NavLink>
             <NavLink to="/explore" end style={navLinkStyle}>
-              Catalog
+              {t("navCatalog")}
             </NavLink>
             <NavLink to="/departments" style={navLinkStyle}>
-              Departments
+              {t("navDepartments")}
             </NavLink>
             {/* Hidden for now: My Requests (/dashboard) and Admin (/users).
                 Re-enable by restoring the authenticated NavLinks below.
@@ -242,12 +226,12 @@ export function RegistryHeader() {
                   aria-expanded={userMenuOpen}
                   onClick={() => setUserMenuOpen((v) => !v)}
                 >
-                  {displayName(user) || "Account"} ▾
+                  {displayName(user) || t("account")} ▾
                 </button>
                 {userMenuOpen && (
                   <div
                     role="menu"
-                    aria-label="User menu"
+                    aria-label={t("userMenu")}
                     style={{
                       position: "absolute",
                       right: 0,
@@ -287,21 +271,21 @@ export function RegistryHeader() {
                         cursor: "pointer",
                       }}
                     >
-                      Logout
+                      {t("logout")}
                     </button>
                   </div>
                 )}
               </div>
             ) : (
               <button onClick={() => navigate("/login")} className="btn-nav-outline hidden sm:inline-flex">
-                Login
+                {t("login")}
               </button>
             )}
             <button
               className="rounded-md p-2 md:hidden"
               style={{ color: "#fff" }}
               aria-expanded={open}
-              aria-label="Toggle navigation menu"
+              aria-label={t("toggleNav")}
               onClick={() => setOpen((v) => !v)}
             >
               <svg className="h-6 w-6" fill="currentColor" viewBox="0 0 20 20" aria-hidden>
@@ -316,18 +300,18 @@ export function RegistryHeader() {
         </div>
         {open && (
           <nav
-            aria-label="Mobile"
+            aria-label={t("navMobile")}
             className="border-t px-4 py-2 md:hidden"
             style={{ borderColor: "rgba(255,255,255,0.2)" }}
           >
             {[
-              { to: "/", label: "Home" },
-              { to: "/explore", label: "Catalog" },
-              { to: "/departments", label: "Departments" },
+              { to: "/", label: t("navHome") },
+              { to: "/explore", label: t("navCatalog") },
+              { to: "/departments", label: t("navDepartments") },
               // Hidden for now: My Requests (/dashboard) and Admin (/users).
             ].map((l) => (
               <NavLink
-                key={l.label + l.to}
+                key={l.to}
                 to={l.to}
                 onClick={() => setOpen(false)}
                 className="block rounded-md px-3 py-2"
@@ -338,11 +322,11 @@ export function RegistryHeader() {
             ))}
             {isAuthenticated ? (
               <button onClick={handleLogout} className="btn-nav-outline mt-2">
-                Logout ({displayName(user)})
+                {t("logoutAs", { name: displayName(user) })}
               </button>
             ) : (
               <button onClick={() => navigate("/login")} className="btn-nav-outline mt-2">
-                Login
+                {t("login")}
               </button>
             )}
           </nav>

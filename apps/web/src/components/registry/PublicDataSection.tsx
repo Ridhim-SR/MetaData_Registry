@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { listDatasets } from "../../api/registry";
 import { useAuth } from "../../contexts/AuthContext";
+import { t, useLanguage } from "../../i18n";
 import { hasValidUpdatedAt } from "../../utils/format";
 import { DatasetCard } from "./DatasetCard";
 import { EmptyBlock, ErrorBlock, Skeleton } from "./StateBlocks";
@@ -13,6 +14,7 @@ import { EmptyBlock, ErrorBlock, Skeleton } from "./StateBlocks";
  * and the catalog agree. No large dashed boxes.
  */
 export function PublicDataSection() {
+  useLanguage();
   const { isAuthenticated } = useAuth();
   const catalog = useQuery({
     queryKey: ["registry-catalog-recent", isAuthenticated],
@@ -29,7 +31,7 @@ export function PublicDataSection() {
   const error = catalog.error;
   // Without any valid dates there is nothing "recent" to show.
   const hasAnyDates = shown.some((card) => hasValidUpdatedAt(card.updated_at));
-  const heading = hasAnyDates ? "Recently Updated Datasets" : "Latest Datasets";
+  const heading = hasAnyDates ? t("recentlyUpdated") : t("latestDatasets");
 
   return (
     <section
@@ -50,11 +52,11 @@ export function PublicDataSection() {
               className="font-semibold"
               style={{ color: "var(--blue-700)", fontSize: "1rem", whiteSpace: "nowrap" }}
             >
-              Browse all →
+              {t("browseAll")}
             </Link>
           </div>
           <p className="mt-1 text-sm" style={{ color: "var(--text-muted)", fontSize: "0.9375rem" }}>
-            Latest datasets published across departments.
+            {t("latestSubtitle")}
           </p>
         </div>
 
@@ -63,7 +65,7 @@ export function PublicDataSection() {
             className="mt-4"
             style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: "16px" }}
             role="status"
-            aria-label="Loading datasets"
+            aria-label={t("datasetsLoading")}
           >
             {[0, 1, 2].map((i) => (
               <Skeleton key={i} className="h-44" />
@@ -74,7 +76,7 @@ export function PublicDataSection() {
         {!isPending && error && (
           <div className="mt-4">
             <ErrorBlock
-              message="Dataset information is temporarily unavailable."
+              message={t("datasetsUnavailable")}
               onRetry={() => catalog.refetch()}
             />
           </div>
@@ -83,11 +85,11 @@ export function PublicDataSection() {
         {!isPending && !error && shown.length === 0 && (
           <div className="mt-2">
             <EmptyBlock
-              title="No datasets published yet."
-              body="New datasets will appear here once departments publish them."
+              title={t("noDatasets")}
+              body={t("noDatasetsHint")}
               action={
                 <Link to="/explore" className="btn-secondary" style={{ fontSize: "0.875rem" }}>
-                  Browse Catalog
+                  {t("browseCatalog")}
                 </Link>
               }
             />

@@ -4,9 +4,11 @@ import { useQuery } from "@tanstack/react-query";
 import { getRegistryTable } from "../api/registry";
 import { ApiError } from "../api/client";
 import { EmptyBlock, LoadingBlock } from "../components/registry/StateBlocks";
+import { t, useLanguage } from "../i18n";
 
 /** Legacy table links resolve to their parent dataset (database-level). */
 export function TableDetailPage() {
+  useLanguage();
   const { tableId = "" } = useParams<{ tableId: string }>();
   const navigate = useNavigate();
 
@@ -29,27 +31,27 @@ export function TableDetailPage() {
   return (
     <div className="page-container mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
       <Link to="/explore" className="mb-4 inline-block text-sm font-medium" style={{ color: "var(--blue-700)" }}>
-        ← Back to catalog
+        {t("backToCatalogArrow")}
       </Link>
       {query.isPending && <LoadingBlock lines={3} />}
       {query.error && query.error instanceof ApiError && query.error.status === 401 && (
         <EmptyBlock
-          title="This metadata requires department access."
-          body="Sign in with your department account to view it."
+          title={t("deptAccessRequired")}
+          body={t("signInToViewIt")}
           action={
             <Link to="/login" className="btn-primary" style={{ fontSize: "0.875rem" }}>
-              Sign In
+              {t("signIn")}
             </Link>
           }
         />
       )}
       {query.error && !(query.error instanceof ApiError && query.error.status === 401) && (
         <EmptyBlock
-          title="Table not found."
-          body="It may have been removed, or you may not have permission to view it."
+          title={t("tableNotFound")}
+          body={t("mayBeRemoved")}
           action={
             <Link to="/explore" className="btn-secondary" style={{ fontSize: "0.875rem" }}>
-              Back to catalog
+              {t("backToCatalog")}
             </Link>
           }
         />

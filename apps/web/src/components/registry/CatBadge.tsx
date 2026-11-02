@@ -5,6 +5,7 @@ import {
   classificationBadgeClass,
   normalizeClassification,
 } from "../../utils/format";
+import { t, useLanguage } from "../../i18n";
 
 /**
  * Dataset classification badge ("CAT-1") with an info icon whose tooltip
@@ -12,6 +13,7 @@ import {
  * current one. Renders nothing when the dataset is unclassified.
  */
 export function CatBadge({ value }: { value: string | null | undefined }) {
+  useLanguage();
   const label = catLabel(value);
   const level = normalizeClassification(value);
   if (!label || !level) return null;
@@ -27,10 +29,10 @@ export function CatBadge({ value }: { value: string | null | undefined }) {
 
 function CatInfo({ current }: { current: string }) {
   return (
-    <span tabIndex={0} aria-label="What do the data categories mean?" className="cat-info">
+    <span tabIndex={0} aria-label={t("catInfoLabel")} className="cat-info">
       <span aria-hidden="true">i</span>
       <span role="tooltip" className="cat-info-tip">
-        <span className="cat-info-title">Data categories</span>
+        <span className="cat-info-title">{t("catInfoTitle")}</span>
         {CAT_CATEGORIES.map((c) => {
           const code = `CAT-${c.level}`;
           return (

@@ -4,11 +4,13 @@ import type { DatasetCard as Card, RegistryTable } from "../../api/registry";
 import { requestAccess } from "../../api/registry";
 import { formatUpdatedAt, humanizeRaw, orNotProvided } from "../../utils/format";
 import { useAuth } from "../../contexts/AuthContext";
+import { t, useLanguage } from "../../i18n";
 import { AccessBadge } from "./AccessBadge";
 import { CatBadge } from "./CatBadge";
 
 export function DatasetCard({ card, hideEmptyFields = false }: { card: Card; hideEmptyFields?: boolean }) {
-  const dept = card.department_display ?? card.department ?? "Not provided";
+  useLanguage();
+  const dept = card.department_display ?? card.department ?? null;
   const description = (card.tables ?? []).map((t) => t.description?.trim()).find(Boolean)
     ?? card.description?.trim()
     ?? "";
@@ -33,7 +35,7 @@ export function DatasetCard({ card, hideEmptyFields = false }: { card: Card; hid
         </h3>
       </div>
       <p className="mt-1 text-sm" style={{ color: "var(--text-muted)", fontSize: "0.875rem" }}>
-        {humanizeRaw(dept === "Not provided" ? null : dept)}
+        {humanizeRaw(dept)}
       </p>
       {description ? (
         <p className="clamp-2 mt-2 text-sm" style={{ color: "var(--text)", fontSize: "0.9375rem" }}>
@@ -41,25 +43,25 @@ export function DatasetCard({ card, hideEmptyFields = false }: { card: Card; hid
         </p>
       ) : hideEmptyFields ? null : (
         <p className="not-provided mt-2 text-sm" style={{ fontSize: "0.9375rem" }}>
-          No description
+          {t("noDescription")}
         </p>
       )}
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <CatBadge value={card.classification} />
         <span className="text-sm" style={{ color: "var(--text-muted)", fontSize: "0.8125rem" }}>
-          {card.table_count} {card.table_count === 1 ? "table" : "tables"}
+          {t(card.table_count === 1 ? "tableCountOne" : "tableCountOther", { count: card.table_count })}
         </span>
       </div>
       <div className="mt-2 flex-1" />
       {hideEmptyFields ? (
         updatedLabel ? (
           <p className="mt-2 text-sm" style={{ color: "var(--text-muted)", fontSize: "0.8125rem" }}>
-            Last updated: {updatedLabel}
+            {t("lastUpdated")} {updatedLabel}
           </p>
         ) : null
       ) : (
         <p className="mt-2 text-sm" style={{ color: "var(--text-muted)", fontSize: "0.8125rem" }}>
-          Last updated:{" "}
+          {t("lastUpdated")}{" "}
           <span className="not-provided">{orNotProvided(undefined)}</span>
         </p>
       )}
@@ -68,13 +70,14 @@ export function DatasetCard({ card, hideEmptyFields = false }: { card: Card; hid
         className="btn-secondary mt-3 w-fit"
         style={{ padding: "0.4rem 1rem", fontSize: "0.875rem" }}
       >
-        View Dataset
+        {t("viewDataset")}
       </Link>
     </article>
   );
 }
 
 export function RestrictedTeaser({ table }: { table: RegistryTable }) {
+  useLanguage();
   const { isAuthenticated } = useAuth();
   const [state, setState] = useState<"idle" | "sending" | "sent" | "error">("idle");
 
@@ -88,7 +91,7 @@ export function RestrictedTeaser({ table }: { table: RegistryTable }) {
     }
   };
 
-  const dept = table.department_display ?? table.department ?? "Not provided";
+  const dept = table.department_display ?? table.department ?? t("notProvided");
 
   return (
     <article
@@ -97,7 +100,7 @@ export function RestrictedTeaser({ table }: { table: RegistryTable }) {
     >
       <div className="flex items-start justify-between gap-2">
         <h3 className="text-base font-semibold" style={{ fontSize: "1rem", color: "var(--navy-900)" }}>
-          {table.name || "Not provided"}
+          {table.name || t("notProvided")}
         </h3>
         <AccessBadge level={table.access_level ?? "restricted"} />
       </div>
@@ -105,12 +108,12 @@ export function RestrictedTeaser({ table }: { table: RegistryTable }) {
         {dept}
       </p>
       <p className="mt-2 text-sm" style={{ color: "var(--text)", fontSize: "0.9375rem" }}>
-        Access requires authorization.
+        {t("accessRequiresAuth")}
       </p>
       <div className="mt-4 flex-1" />
       {state === "sent" ? (
         <p className="text-sm font-medium" role="status" style={{ color: "var(--public-fg)" }}>
-          Access requested. The owning department will review your request.
+          {t("accessRequested")}
         </p>
       ) : isAuthenticated ? (
         <button
@@ -119,7 +122,7 @@ export function RestrictedTeaser({ table }: { table: RegistryTable }) {
           className="btn-primary w-fit"
           style={{ padding: "0.4rem 1rem", fontSize: "0.875rem" }}
         >
-          {state === "sending" ? "Requesting…" : "Request Access"}
+          {state === "sending" ? t("requesting") : t("requestAccess")}
         </button>
       ) : (
         <Link
@@ -127,12 +130,12 @@ export function RestrictedTeaser({ table }: { table: RegistryTable }) {
           className="btn-primary w-fit"
           style={{ padding: "0.4rem 1rem", fontSize: "0.875rem" }}
         >
-          Sign in to request access
+          {t("signInToRequest")}
         </Link>
       )}
       {state === "error" && (
         <p className="mt-2 text-sm" role="alert" style={{ color: "var(--confid-fg)" }}>
-          Could not send the request. Please try again.
+          {t("requestFailed")}
         </p>
       )}
     </article>

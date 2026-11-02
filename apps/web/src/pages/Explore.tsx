@@ -14,7 +14,8 @@ import {
 import { Fragment } from "react";
 import { ErrorBlock, Skeleton } from "../components/registry/StateBlocks";
 import { CatBadge } from "../components/registry/CatBadge";
-import { t } from "../i18n";
+import { t, tNodes, useLanguage } from "../i18n";
+import type { I18nKey } from "../i18n";
 import { CAT_CATEGORIES, catLabel, formatUpdatedAt, humanizeRaw, normalizeClassification, readableTag } from "../utils/format";
 import { useAuth } from "../contexts/AuthContext";
 
@@ -24,15 +25,16 @@ type Sort = "relevance" | "updated" | "name";
 /** Right preview panel ships later; this flag is the hook for it. */
 const PREVIEW_PANEL_ENABLED = false;
 
-const SORT_OPTIONS: Array<{ value: Sort; label: string }> = [
-  { value: "relevance", label: "Relevance" },
-  { value: "updated", label: "Recently updated" },
-  { value: "name", label: "Name A-Z" },
+const SORT_OPTIONS: Array<{ value: Sort; label: I18nKey }> = [
+  { value: "relevance", label: "sortRelevance" },
+  { value: "updated", label: "sortUpdated" },
+  { value: "name", label: "sortName" },
 ];
 
 const RPP_OPTIONS = [15, 30, 50];
 
 export function ExplorePage() {
+  useLanguage();
   const [params, setParams] = useSearchParams();
   const q = params.get("q") ?? "";
   const department = params.get("department") ?? "";
@@ -264,7 +266,7 @@ export function ExplorePage() {
     <div>
       <div className="flex items-center justify-between">
         <h2 className="font-semibold" style={{ color: "var(--navy-900)", fontSize: "1rem" }}>
-          Filters
+          {t("filters")}
         </h2>
         {hasFilters && (
           <button
@@ -273,7 +275,7 @@ export function ExplorePage() {
             className="underline"
             style={{ color: "var(--blue-700)", fontSize: "0.875rem", background: "none", border: "none", cursor: "pointer" }}
           >
-            Clear all
+            {t("clearAll")}
           </button>
         )}
       </div>
@@ -286,16 +288,16 @@ export function ExplorePage() {
         />
       </FilterGroup>
 
-      <FilterGroup title="Tags">
+      <FilterGroup title={t("filterTags")}>
         {tagOptions.length > 0 ? (
           <FilterChecklist
             options={tagOptions}
             selected={tagSel}
             onToggle={(value) => toggleList(tagSel, value, setTagSel)}
-            searchLabel="Search tags"
+            searchLabel={t("searchTags")}
           />
         ) : (
-          <p className="mt-2" style={{ fontSize: "0.875rem", color: "var(--text-muted)" }}>No tags in these results.</p>
+          <p className="mt-2" style={{ fontSize: "0.875rem", color: "var(--text-muted)" }}>{t("noTagsInResults")}</p>
         )}
       </FilterGroup>
 
@@ -311,20 +313,20 @@ export function ExplorePage() {
         </FilterGroup>
       ))}
 
-      <FilterGroup title="Department">
+      <FilterGroup title={t("filterDepartment")}>
       {deptOptions.length > 4 && (
         <input
           type="search"
           value={deptFilterText}
           onChange={(e) => setDeptFilterText(e.target.value)}
-          placeholder="Search departments…"
-          aria-label="Search departments"
+          placeholder={`${t("searchDepartments")}…`}
+          aria-label={t("searchDepartments")}
           className="mt-2 w-full"
           style={{ border: "1px solid var(--border)", borderRadius: 6, padding: "0.35rem 0.6rem", fontSize: "0.875rem" }}
         />
       )}
       {deptSel.length > 0 && (
-        <div className="mt-2 flex flex-wrap gap-1" aria-label="Selected departments">
+        <div className="mt-2 flex flex-wrap gap-1" aria-label={t("selectedDepartments")}>
           {deptSel.map((slug) => {
             const opt = deptOptions.find((d) => d.slug === slug);
             return (
@@ -332,7 +334,7 @@ export function ExplorePage() {
                 key={slug}
                 type="button"
                 onClick={() => toggleList(deptSel, slug, setDeptSel)}
-                aria-label={`Remove department filter ${opt?.display ?? slug}`}
+                aria-label={t("removeDeptFilter", { name: humanizeRaw(opt?.display ?? slug) })}
                 className="inline-flex items-center gap-1 rounded-full px-2 py-0.5"
                 style={{ background: "var(--blue-50)", color: "var(--navy-900)", fontSize: "0.8125rem", border: "1px solid var(--border)", cursor: "pointer" }}
               >
@@ -360,7 +362,7 @@ export function ExplorePage() {
             </li>
           ))}
         {deptOptions.length === 0 && (
-          <li style={{ fontSize: "0.875rem", color: "var(--text-muted)" }}>No departments in these results.</li>
+          <li style={{ fontSize: "0.875rem", color: "var(--text-muted)" }}>{t("noDeptsInResults")}</li>
         )}
       </ul>
       </FilterGroup>
@@ -370,16 +372,16 @@ export function ExplorePage() {
   return (
     <div className="page-container mx-auto w-full px-4 py-8 pb-12 sm:px-6 lg:px-8" style={{ maxWidth: 1360 }}>
       <h1 className="font-bold" style={{ color: "var(--navy-900)", fontSize: "1.75rem" }}>
-        Explore the Catalog
+        {t("exploreTitle")}
       </h1>
       <p className="mt-1 text-sm" style={{ color: "var(--text-muted)", fontSize: "0.9375rem" }}>
-        Discover datasets, tables, columns, and metadata across government departments.
+        {t("exploreSubtitle")}
       </p>
 
       <form onSubmit={onSubmit} role="search" className="mt-4 flex w-full flex-col gap-2 sm:flex-row">
         <div className="relative min-w-64 flex-1">
           <label htmlFor="catalog-search" className="sr-only">
-            Search datasets, tables, columns, or keywords
+            {t("exploreSearchLabel")}
           </label>
           <span
             aria-hidden="true"
@@ -406,7 +408,7 @@ export function ExplorePage() {
             onKeyDown={(e) => {
               if (e.key === "Escape" && search) setSearch("");
             }}
-            placeholder="Search datasets, tables, columns, or keywords..."
+            placeholder={t("exploreSearchPlaceholder")}
             className="w-full"
             style={{
               border: "1px solid var(--border)",
@@ -443,7 +445,7 @@ export function ExplorePage() {
           )}
         </div>
         <button type="submit" className="btn-primary" style={{ fontSize: "0.9375rem" }}>
-          Search
+          {t("search")}
         </button>
       </form>
 
@@ -454,12 +456,12 @@ export function ExplorePage() {
         style={{ fontSize: "0.9375rem" }}
         aria-haspopup="dialog"
       >
-        Filters{hasFilters ? " •" : ""}
+        {t("filters")}{hasFilters ? " •" : ""}
       </button>
 
       <div className="mt-6 flex items-start gap-6" style={{ minHeight: "50vh" }}>
         <aside
-          aria-label="Search filters"
+          aria-label={t("searchFilters")}
           className="hidden w-64 shrink-0 lg:block"
           style={{ width: 250 }}
         >
@@ -467,7 +469,7 @@ export function ExplorePage() {
         </aside>
 
         {drawerOpen && (
-          <div role="dialog" aria-modal="true" aria-label="Filters" className="lg:hidden"
+          <div role="dialog" aria-modal="true" aria-label={t("filters")} className="lg:hidden"
             style={{ position: "fixed", inset: 0, zIndex: 60 }}>
             <div
               aria-hidden
@@ -480,14 +482,14 @@ export function ExplorePage() {
               padding: "1rem", overflowY: "auto",
             }}>
               <div className="mb-3 flex items-center justify-between">
-                <span className="font-semibold" style={{ color: "var(--navy-900)", fontSize: "1rem" }}>Filters</span>
+                <span className="font-semibold" style={{ color: "var(--navy-900)", fontSize: "1rem" }}>{t("filters")}</span>
                 <button
                   type="button"
                   onClick={() => setDrawerOpen(false)}
                   className="btn-secondary"
                   style={{ padding: "0.25rem 0.75rem", fontSize: "0.875rem" }}
                 >
-                  Close
+                  {t("close")}
                 </button>
               </div>
               {panel}
@@ -501,7 +503,7 @@ export function ExplorePage() {
           style={{ opacity: refreshing ? 0.6 : 1, transition: "opacity 0.15s" }}
         >
           {!isSearch && browsing && (
-            <div className="grid grid-cols-1 gap-4" role="status" aria-label="Loading datasets">
+            <div className="grid grid-cols-1 gap-4" role="status" aria-label={t("datasetsLoading")}>
               {[0, 1, 2].map((i) => (
                 <Skeleton key={i} className="h-28" />
               ))}
@@ -510,7 +512,7 @@ export function ExplorePage() {
 
           {!isSearch && !browsing && browseQuery.error && (
             <ErrorBlock
-              message="Unable to load catalog information. Please try again."
+              message={t("statsError")}
               onRetry={() => browseQuery.refetch()}
             />
           )}
@@ -519,15 +521,15 @@ export function ExplorePage() {
             <div>
               <div className="flex flex-wrap items-center gap-3">
                 <h2 className="font-semibold" style={{ color: "var(--navy-900)", fontSize: "1.25rem" }} role="status">
-                  {browseTotal} result{browseTotal === 1 ? "" : "s"}
+                  {t(browseTotal === 1 ? "resultCountOne" : "resultCountOther", { count: browseTotal })}
                   {browseDeptCount > 0 && (
                     <span className="font-normal" style={{ color: "var(--text-muted)", fontSize: "0.9375rem" }}>
-                      {" "}· Across {browseDeptCount} department{browseDeptCount === 1 ? "" : "s"}
+                      {" "}· {t(browseDeptCount === 1 ? "acrossDeptsOne" : "acrossDeptsOther", { count: browseDeptCount })}
                     </span>
                   )}
                 </h2>
                 <div className="ml-auto flex flex-wrap items-center gap-2">
-                  <label htmlFor="browse-sort" className="sr-only">Sort datasets</label>
+                  <label htmlFor="browse-sort" className="sr-only">{t("sortDatasets")}</label>
                   <select
                     id="browse-sort"
                     value={sort}
@@ -535,7 +537,7 @@ export function ExplorePage() {
                     style={{ border: "1px solid var(--border)", borderRadius: 6, padding: "0.35rem 0.6rem", fontSize: "0.875rem", background: "var(--bg)" }}
                   >
                     {SORT_OPTIONS.map((o) => (
-                      <option key={o.value} value={o.value}>{o.label}</option>
+                      <option key={o.value} value={o.value}>{t(o.label)}</option>
                     ))}
                   </select>
                   <TimelineRange
@@ -546,7 +548,7 @@ export function ExplorePage() {
                     onFrom={setYearFrom}
                     onTo={setYearTo}
                   />
-                  <label htmlFor="browse-rpp" className="sr-only">Records per page</label>
+                  <label htmlFor="browse-rpp" className="sr-only">{t("perPageLabel")}</label>
                   <select
                     id="browse-rpp"
                     value={rpp}
@@ -554,7 +556,7 @@ export function ExplorePage() {
                     style={{ border: "1px solid var(--border)", borderRadius: 6, padding: "0.35rem 0.6rem", fontSize: "0.875rem", background: "var(--bg)" }}
                   >
                     {RPP_OPTIONS.map((n) => (
-                      <option key={n} value={n}>{n} / page</option>
+                      <option key={n} value={n}>{t("perPage", { n })}</option>
                     ))}
                   </select>
                 </div>
@@ -562,7 +564,7 @@ export function ExplorePage() {
 
               {filteredDatasets.length > 0 ? (
                 <GroupSection
-                  title="Datasets"
+                  title={t("tabDatasets")}
                   page={pageFor("datasets")}
                   pages={pageCount(browseTotal)}
                   onPage={(p) => setPages((prev) => ({ ...prev, datasets: p }))}
@@ -576,10 +578,10 @@ export function ExplorePage() {
               ) : (
                 <div className="mt-4">
                   <h3 className="font-semibold" style={{ color: "var(--navy-900)", fontSize: "1.125rem" }}>
-                    No datasets found
+                    {t("noDatasetsFound")}
                   </h3>
                   <p className="mt-1" style={{ color: "var(--text-muted)", fontSize: "0.9375rem" }}>
-                    Try a different search term or adjust your filters.
+                    {t("tryDifferent")}
                   </p>
                   {(hasFilters || q) && (
                     <button
@@ -588,7 +590,7 @@ export function ExplorePage() {
                       className="btn-secondary mt-3"
                       style={{ fontSize: "0.875rem" }}
                     >
-                      Clear filters
+                      {t("clearFilters")}
                     </button>
                   )}
                 </div>
@@ -596,18 +598,21 @@ export function ExplorePage() {
 
               {!isAuthenticated && filteredDatasets.length > 0 && (
                 <p className="mt-6" style={{ color: "var(--text-muted)", fontSize: "0.9375rem" }}>
-                  Some results may be hidden.{" "}
-                  <Link to="/login" className="font-medium" style={{ color: "var(--blue-700)" }}>
-                    Sign in
-                  </Link>{" "}
-                  to see metadata available to your department.
+                  {t("someHidden")}{" "}
+                  {tNodes("signInToSee", {
+                    link: (
+                      <Link to="/login" className="font-medium" style={{ color: "var(--blue-700)" }}>
+                        {t("signInLink")}
+                      </Link>
+                    ),
+                  })}
                 </p>
               )}
             </div>
           )}
 
           {isSearch && searching && (
-            <div className="grid grid-cols-1 gap-4" role="status" aria-label="Loading results">
+            <div className="grid grid-cols-1 gap-4" role="status" aria-label={t("loadingResults")}>
               {[0, 1, 2].map((i) => (
                 <Skeleton key={i} className="h-28" />
               ))}
@@ -616,7 +621,7 @@ export function ExplorePage() {
 
           {isSearch && !searching && searchQuery.error && (
             <ErrorBlock
-              message="Unable to load catalog information. Please try again."
+              message={t("statsError")}
               onRetry={() => searchQuery.refetch()}
             />
           )}
@@ -624,11 +629,11 @@ export function ExplorePage() {
           {isSearch && !searching && !searchQuery.error && (data?.total ?? 0) === 0 && !hasFilters && (
             <div>
               <h2 className="font-semibold" style={{ color: "var(--navy-900)", fontSize: "1.25rem" }}>
-                No results for “{trimmed}”.
+                {t("noResultsFor", { q: trimmed })}
               </h2>
               <ul className="mt-3 list-disc space-y-2 pl-5" style={{ color: "var(--text)", fontSize: "0.9375rem" }}>
                 <li>
-                  Try a broader word, e.g.{" "}
+                  {tNodes("tryBroaderHint", { term: (
                   <button
                     type="button"
                     className="font-medium underline"
@@ -643,20 +648,26 @@ export function ExplorePage() {
                   >
                     “{trimmed.split(/\s+/)[0]}”
                   </button>
-                  .
+                  ) })}
                 </li>
                 <li>
-                  <Link to="/departments" style={{ color: "var(--blue-700)" }} className="font-medium underline">
-                    Browse departments
-                  </Link>{" "}
-                  to discover datasets by owner.
+                  {tNodes("browseDeptsHint", {
+                    link: (
+                      <Link to="/departments" style={{ color: "var(--blue-700)" }} className="font-medium underline">
+                        {t("browseDepartments")}
+                      </Link>
+                    ),
+                  })}
                 </li>
                 {!isAuthenticated && (
                   <li>
-                    <Link to="/login" style={{ color: "var(--blue-700)" }} className="font-medium underline">
-                      Sign in
-                    </Link>{" "}
-                    to see metadata available to your department.
+                    {tNodes("signInToSee", {
+                      link: (
+                        <Link to="/login" style={{ color: "var(--blue-700)" }} className="font-medium underline">
+                          {t("signInLink")}
+                        </Link>
+                      ),
+                    })}
                   </li>
                 )}
               </ul>
@@ -667,15 +678,15 @@ export function ExplorePage() {
             <div>
               <div className="flex flex-wrap items-center gap-3">
                 <h2 className="font-semibold" style={{ color: "var(--navy-900)", fontSize: "1.25rem" }} role="status">
-                  {filteredTotal} result{filteredTotal === 1 ? "" : "s"} for “{trimmed}”
+                  {t(filteredTotal === 1 ? "resultsForOne" : "resultsForOther", { count: filteredTotal, q: trimmed })}
                   {searchDeptCount > 0 && (
                     <span className="font-normal" style={{ color: "var(--text-muted)", fontSize: "0.9375rem" }}>
-                      {" "}· Across {searchDeptCount} department{searchDeptCount === 1 ? "" : "s"}
+                      {" "}· {t(searchDeptCount === 1 ? "acrossDeptsOne" : "acrossDeptsOther", { count: searchDeptCount })}
                     </span>
                   )}
                 </h2>
                 <div className="ml-auto flex flex-wrap items-center gap-2">
-                  <label htmlFor="sort" className="sr-only">Sort results</label>
+                  <label htmlFor="sort" className="sr-only">{t("sortResults")}</label>
                   <select
                     id="sort"
                     value={sort}
@@ -683,7 +694,7 @@ export function ExplorePage() {
                     style={{ border: "1px solid var(--border)", borderRadius: 6, padding: "0.35rem 0.6rem", fontSize: "0.875rem", background: "var(--bg)" }}
                   >
                     {SORT_OPTIONS.map((o) => (
-                      <option key={o.value} value={o.value}>{o.label}</option>
+                      <option key={o.value} value={o.value}>{t(o.label)}</option>
                     ))}
                   </select>
                   <TimelineRange
@@ -694,7 +705,7 @@ export function ExplorePage() {
                     onFrom={setYearFrom}
                     onTo={setYearTo}
                   />
-                  <label htmlFor="rpp" className="sr-only">Records per page</label>
+                  <label htmlFor="rpp" className="sr-only">{t("perPageLabel")}</label>
                   <select
                     id="rpp"
                     value={rpp}
@@ -702,7 +713,7 @@ export function ExplorePage() {
                     style={{ border: "1px solid var(--border)", borderRadius: 6, padding: "0.35rem 0.6rem", fontSize: "0.875rem", background: "var(--bg)" }}
                   >
                     {RPP_OPTIONS.map((n) => (
-                      <option key={n} value={n}>{n} / page</option>
+                      <option key={n} value={n}>{t("perPage", { n })}</option>
                     ))}
                   </select>
                 </div>
@@ -777,7 +788,7 @@ export function ExplorePage() {
 
               {activeGroups.includes("departments") && groupTotals.departments > 0 && (
                 <GroupSection
-                  title="Departments"
+                  title={t("tabDepartments")}
                   icon={<DeptIcon />}
                   count={groupTotals.departments}
                   hideTitle={scope !== ""}
@@ -799,7 +810,7 @@ export function ExplorePage() {
                         className="py-3"
                         style={{ borderBottom: "1px solid var(--border)" }}
                       >
-                        <p style={{ color: "var(--text-muted)", fontSize: "0.875rem" }}>Department</p>
+                        <p style={{ color: "var(--text-muted)", fontSize: "0.875rem" }}>{t("filterDepartment")}</p>
                         <Link
                           to={`/departments/${encodeURIComponent(d.slug)}`}
                           style={{ color: "var(--blue-700)", fontSize: "1.0625rem", fontWeight: 600 }}
@@ -807,7 +818,7 @@ export function ExplorePage() {
                           {humanizeRaw(d.display_name)}
                         </Link>
                         <p className="mt-0.5" style={{ color: "var(--text-muted)", fontSize: "0.875rem" }}>
-                          {d.dataset_count} {d.dataset_count === 1 ? "dataset" : "datasets"}
+                          {t(d.dataset_count === 1 ? "datasetCountOne" : "datasetCountOther", { count: d.dataset_count })}
                         </p>
                       </li>
                     ))}
@@ -817,7 +828,7 @@ export function ExplorePage() {
 
               {activeGroups.includes("datasets") && groupTotals.datasets > 0 && (
                 <GroupSection
-                  title="Datasets"
+                  title={t("tabDatasets")}
                   icon={<DatabaseIcon />}
                   count={groupTotals.datasets}
                   hideTitle={scope !== ""}
@@ -842,7 +853,7 @@ export function ExplorePage() {
 
               {activeGroups.includes("tables") && groupTotals.tables > 0 && (
                 <GroupSection
-                  title="Tables"
+                  title={t("tabTables")}
                   icon={<TableIcon />}
                   count={groupTotals.tables}
                   hideTitle={scope !== ""}
@@ -874,7 +885,7 @@ export function ExplorePage() {
 
               {activeGroups.includes("columns") && groupTotals.columns > 0 && (
                 <GroupSection
-                  title="Columns"
+                  title={t("tabColumns")}
                   icon={<ColumnsIcon />}
                   count={groupTotals.columns}
                   hideTitle={scope !== ""}
@@ -910,10 +921,10 @@ export function ExplorePage() {
               {filteredTotal === 0 && (
                 <div className="mt-4">
                   <h3 className="font-semibold" style={{ color: "var(--navy-900)", fontSize: "1.125rem" }}>
-                    No datasets found
+                    {t("noDatasetsFound")}
                   </h3>
                   <p className="mt-1" style={{ color: "var(--text-muted)", fontSize: "0.9375rem" }}>
-                    Try a different search term or adjust your filters.
+                    {t("tryDifferent")}
                   </p>
                   {hasFilters && (
                     <button
@@ -922,7 +933,7 @@ export function ExplorePage() {
                       className="btn-secondary mt-3"
                       style={{ fontSize: "0.875rem" }}
                     >
-                      Clear filters
+                      {t("clearFilters")}
                     </button>
                   )}
                 </div>
@@ -930,11 +941,14 @@ export function ExplorePage() {
 
               {!isAuthenticated && (
                 <p className="mt-6" style={{ color: "var(--text-muted)", fontSize: "0.9375rem" }}>
-                  Some results may be hidden.{" "}
-                  <Link to="/login" className="font-medium" style={{ color: "var(--blue-700)" }}>
-                    Sign in
-                  </Link>{" "}
-                  to see metadata available to your department.
+                  {t("someHidden")}{" "}
+                  {tNodes("signInToSee", {
+                    link: (
+                      <Link to="/login" className="font-medium" style={{ color: "var(--blue-700)" }}>
+                        {t("signInLink")}
+                      </Link>
+                    ),
+                  })}
                 </p>
               )}
             </div>
@@ -1023,7 +1037,7 @@ function Crumbs({
   fullPath?: string;
 }) {
   return (
-    <nav aria-label="Location" title={fullPath}>
+    <nav aria-label={t("breadcrumbLocation")} title={fullPath}>
       <ol
         style={{
           display: "flex",
@@ -1121,10 +1135,10 @@ type FactField = "frequency" | "api" | "steward" | "schema_source";
 
 /** Dataset-fact filter groups in the sidebar (Timeline sits next to sort). */
 const FACT_FIELDS: Array<{ key: FactField; label: () => string }> = [
-  { key: "frequency", label: () => "Update frequency" },
+  { key: "frequency", label: () => t("factFrequency") },
   { key: "api", label: () => t("apiAvailable") },
-  { key: "steward", label: () => "Data steward" },
-  { key: "schema_source", label: () => "Schema source" },
+  { key: "steward", label: () => t("factSteward") },
+  { key: "schema_source", label: () => t("factSchemaSource") },
 ];
 
 function factLabel(field: FactField, value: string): string {
@@ -1147,17 +1161,17 @@ function TimelineRange({
     border: "1px solid var(--border)", borderRadius: 6, padding: "0.35rem 0.6rem", fontSize: "0.875rem", background: "var(--bg)",
   };
   return (
-    <div className="flex items-center gap-1" role="group" aria-label="Timeline" style={{ fontSize: "0.875rem", color: "var(--text-muted)" }}>
-      <span>Timeline</span>
-      <label htmlFor={`${idPrefix}-from`} className="sr-only">Data from year</label>
+    <div className="flex items-center gap-1" role="group" aria-label={t("timeline")} style={{ fontSize: "0.875rem", color: "var(--text-muted)" }}>
+      <span>{t("timeline")}</span>
+      <label htmlFor={`${idPrefix}-from`} className="sr-only">{t("yearFromLabel")}</label>
       <select id={`${idPrefix}-from`} value={from ?? ""} onChange={(e) => onFrom(e.target.value ? Number(e.target.value) : null)} style={style}>
-        <option value="">From</option>
+        <option value="">{t("yearFrom")}</option>
         {years.filter((y) => to === null || y <= to).map((y) => <option key={y} value={y}>{y}</option>)}
       </select>
       <span aria-hidden="true">–</span>
-      <label htmlFor={`${idPrefix}-to`} className="sr-only">Data to year</label>
+      <label htmlFor={`${idPrefix}-to`} className="sr-only">{t("yearToLabel")}</label>
       <select id={`${idPrefix}-to`} value={to ?? ""} onChange={(e) => onTo(e.target.value ? Number(e.target.value) : null)} style={style}>
-        <option value="">To</option>
+        <option value="">{t("yearTo")}</option>
         {years.filter((y) => from === null || y >= from).map((y) => <option key={y} value={y}>{y}</option>)}
       </select>
     </div>
@@ -1224,6 +1238,7 @@ function FilterChecklist({
   /** When set, a search box above the list filters options by label. */
   searchLabel?: string;
 }) {
+  useLanguage();
   const [expanded, setExpanded] = useState(false);
   const [query, setQuery] = useState("");
   const needle = normalizeFilterText(query);
@@ -1245,7 +1260,7 @@ function FilterChecklist({
       )}
       {needle && matches.length === 0 && (
         <p className="mt-2" style={{ color: "var(--text-muted)", fontSize: "0.875rem" }}>
-          No matches for &ldquo;{query.trim()}&rdquo;
+          {t("noMatchesFor", { q: query.trim() })}
         </p>
       )}
       <ul className="mt-2 max-h-48 space-y-1 overflow-y-auto">
@@ -1298,7 +1313,7 @@ function ClickableLi({
     <li
       role="link"
       tabIndex={0}
-      aria-label="Open table details"
+      aria-label={t("openTableDetails")}
       className={className}
       style={{ ...itemStyle, cursor: "pointer" }}
       onClick={() => navigate(url)}
@@ -1337,9 +1352,9 @@ function Pager({
         className="btn-secondary"
         style={{ padding: "0.2rem 0.7rem", fontSize: "0.875rem" }}
       >
-        ‹ Prev
+        {t("pagePrev")}
       </button>
-      <span>Page {safePage} of {pages}</span>
+      <span>{t("pageOf", { page: safePage, pages })}</span>
       <button
         type="button"
         disabled={safePage >= pages}
@@ -1347,7 +1362,7 @@ function Pager({
         className="btn-secondary"
         style={{ padding: "0.2rem 0.7rem", fontSize: "0.875rem" }}
       >
-        Next ›
+        {t("pageNext")}
       </button>
     </div>
   );
@@ -1415,6 +1430,7 @@ function GroupSection({
 }
 
 function DatasetRow({ card, tokens }: { card: Card; tokens: string[] }) {
+  useLanguage();
   const dept = card.department_display ?? card.department ?? "";
   const deptName = dept.trim() ? humanizeRaw(dept) : null;
   const description =
@@ -1460,7 +1476,7 @@ function DatasetRow({ card, tokens }: { card: Card; tokens: string[] }) {
       <div className="mt-2 flex flex-wrap gap-2">
         <CatBadge value={card.classification} />
         <span className="badge badge-neutral">
-          {card.table_count} {card.table_count === 1 ? "table" : "tables"}
+          {t(card.table_count === 1 ? "tableCountOne" : "tableCountOther", { count: card.table_count })}
         </span>
         {updated && <span className="badge badge-neutral">{updated}</span>}
       </div>
@@ -1503,6 +1519,7 @@ function TableResultCard({
   multiDept: boolean;
   tokens: string[];
 }) {
+  useLanguage();
   // Column count and personal-data counts are hidden until the search API
   // exposes them (TableHit has no column data); never invented here.
   // Classification renders only when the API provides data_classification.

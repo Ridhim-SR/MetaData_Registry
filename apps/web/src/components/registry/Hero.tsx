@@ -1,13 +1,23 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
+import { t, useLanguage } from "../../i18n";
+import type { I18nKey } from "../../i18n";
 
 const examples = ["crop", "agriculture", "road", "census", "irrigation", "village", "land records"];
 
 const scopes = ["All", "Datasets", "Tables", "Columns", "Departments"] as const;
 type Scope = (typeof scopes)[number];
+const scopeLabels: Record<Scope, I18nKey> = {
+  All: "tabAll",
+  Datasets: "tabDatasets",
+  Tables: "tabTables",
+  Columns: "tabColumns",
+  Departments: "tabDepartments",
+};
 
 export function Hero() {
+  useLanguage();
   const [value, setValue] = useState("");
   const [scope, setScope] = useState<Scope>("All");
   const navigate = useNavigate();
@@ -26,22 +36,22 @@ export function Hero() {
   };
 
   return (
-    <section aria-label="Discover government data" style={{ background: "var(--bg)" }}>
+    <section aria-label={t("heroAria")} style={{ background: "var(--bg)" }}>
       <div className="mx-auto w-full max-w-3xl px-4 py-8 text-center sm:px-6 sm:py-10">
         <h1
           className="font-bold tracking-tight"
           style={{ color: "var(--navy-900)", fontSize: "2rem", lineHeight: 1.25 }}
         >
-          Discover Government Data &amp; Metadata
+          {t("heroTitle")}
         </h1>
         <p
           className="mx-auto mt-3 max-w-xl"
           style={{ color: "var(--text-muted)", fontSize: "1rem" }}
         >
-          Find datasets, understand their structure, ownership and access level.
+          {t("heroSubtitle")}
         </p>
 
-        <form onSubmit={onSubmit} role="search" className="mt-8" aria-label="Catalog search">
+        <form onSubmit={onSubmit} role="search" className="mt-8" aria-label={t("searchAria")}>
           <div
             className="flex w-full flex-col gap-2 sm:flex-row"
             style={{
@@ -52,7 +62,7 @@ export function Hero() {
             }}
           >
             <label htmlFor="registry-scope" className="sr-only">
-              Search scope
+              {t("searchScope")}
             </label>
             <select
               id="registry-scope"
@@ -70,19 +80,19 @@ export function Hero() {
             >
               {scopes.map((s) => (
                 <option key={s} value={s}>
-                  {s}
+                  {t(scopeLabels[s])}
                 </option>
               ))}
             </select>
             <label htmlFor="registry-search" className="sr-only">
-              Search datasets, tables, keywords
+              {t("searchLabel")}
             </label>
             <input
               id="registry-search"
               type="search"
               value={value}
               onChange={(e) => setValue(e.target.value)}
-              placeholder="Search datasets, tables, keywords..."
+              placeholder={t("searchPlaceholder")}
               autoComplete="off"
               className="w-full"
               style={{
@@ -95,12 +105,12 @@ export function Hero() {
               }}
             />
             <button type="submit" className="btn-primary" style={{ whiteSpace: "nowrap" }}>
-              Search
+              {t("search")}
             </button>
           </div>
           <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
             <span style={{ color: "var(--text-muted)", fontSize: "0.875rem" }}>
-              Popular searches:
+              {t("popularSearches")}
             </span>
             {examples.map((ex) => (
               <button
@@ -108,7 +118,7 @@ export function Hero() {
                 type="button"
                 className="chip"
                 onClick={() => go(ex, scope)}
-                aria-label={`Search for ${ex}`}
+                aria-label={t("searchFor", { term: ex })}
               >
                 {ex}
               </button>
