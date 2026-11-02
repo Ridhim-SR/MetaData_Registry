@@ -8,9 +8,11 @@ import {
 } from "../api/auth";
 import { ApiError } from "../api/client";
 import { useAuth } from "../contexts/AuthContext";
+import { t, useLanguage } from "../i18n";
 
 /** Landing page for Google/Microsoft redirects: exchanges ?code= for our JWT. */
 export function OAuthCallbackPage() {
+  useLanguage();
   const { provider } = useParams<{ provider: string }>();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -20,24 +22,24 @@ export function OAuthCallbackPage() {
   useEffect(() => {
     const run = async () => {
       if (provider !== "google" && provider !== "microsoft") {
-        setError(`Unknown provider '${provider}'`);
+        setError(t("oauthUnknownProvider", { provider: provider ?? "" }));
         return;
       }
       const p = provider as OAuthProvider;
       const err = searchParams.get("error");
       if (err) {
-        setError(searchParams.get("error_description") ?? `Sign-in cancelled (${err})`);
+        setError(searchParams.get("error_description") ?? t("oauthCancelled", { err }));
         return;
       }
       const code = searchParams.get("code");
       const state = searchParams.get("state");
       if (!code) {
-        setError("Missing authorization code from provider");
+        setError(t("oauthMissingCode"));
         return;
       }
       const expected = expectedOAuthState(p);
       if (expected && state !== expected) {
-        setError("State mismatch — please try signing in again");
+        setError(t("oauthStateMismatch"));
         return;
       }
       try {
@@ -46,7 +48,7 @@ export function OAuthCallbackPage() {
         setAuth(data.access_token);
         navigate("/", { replace: true });
       } catch (e) {
-        setError(e instanceof ApiError ? e.detail : "Social sign-in failed");
+        setError(e instanceof ApiError ? e.detail : t("oauthFailed"));
       }
     };
     run();
@@ -57,17 +59,17 @@ export function OAuthCallbackPage() {
       <div className="w-full max-w-sm p-8 text-center" style={{ background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 6 }}>
         {error ? (
           <>
-            <h1 className="mb-2 text-lg font-semibold" style={{ color: "var(--confid-fg)" }}>Sign-in failed</h1>
+            <h1 className="mb-2 text-lg font-semibold" style={{ color: "var(--confid-fg)" }}>{t("signInFailed")}</h1>
             <p className="mb-4 text-sm" style={{ color: "var(--text-muted)" }}>{error}</p>
             <button
               onClick={() => navigate("/login")}
               className="btn-primary w-full"
             >
-              Back to sign in
+              {t("backToSignIn")}
             </button>
           </>
         ) : (
-          <p className="text-sm" style={{ color: "var(--text-muted)" }}>Completing sign-in…</p>
+          <p className="text-sm" style={{ color: "var(--text-muted)" }}>{t("completingSignIn")}</p>
         )}
       </div>
     </div>

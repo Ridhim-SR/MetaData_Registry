@@ -1,35 +1,39 @@
-const steps = [
+import { t, useLanguage } from "../../i18n";
+import type { I18nKey } from "../../i18n";
+
+const steps: Array<{ icon: string; title: I18nKey; body: I18nKey }> = [
   {
     icon: "🧭",
-    title: "Discover",
-    body: "Browse departments and the full catalog.",
+    title: "howDiscover",
+    body: "howDiscoverBody",
   },
   {
     icon: "🔍",
-    title: "Search",
-    body: "Find datasets, tables or columns by keyword.",
+    title: "howSearch",
+    body: "howSearchBody",
   },
   {
     icon: "📖",
-    title: "Understand",
-    body: "Check structure, ownership and access level.",
+    title: "howUnderstand",
+    body: "howUnderstandBody",
   },
   {
     icon: "🔑",
-    title: "Access",
-    body: "View public data or request department access.",
+    title: "howAccess",
+    body: "howAccessBody",
   },
 ];
 
 export function HowItWorks() {
+  useLanguage();
   return (
     <section
-      aria-label="How it works"
+      aria-label={t("howTitle")}
       style={{ background: "var(--bg-alt)", borderTop: "1px solid var(--border)" }}
     >
       <div className="page-container mx-auto w-full max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
         <h2 className="font-semibold" style={{ color: "var(--navy-900)", fontSize: "1.375rem" }}>
-          How It Works
+          {t("howTitle")}
         </h2>
         <ol className="mt-4 grid list-none grid-cols-1 gap-4 p-0 sm:grid-cols-2 lg:grid-cols-4">
           {steps.map((s, i) => (
@@ -43,14 +47,14 @@ export function HowItWorks() {
                   {s.icon}
                 </span>
                 <span style={{ color: "var(--text-muted)", fontSize: "0.8125rem", fontWeight: 600 }}>
-                  Step {i + 1}
+                  {t("howStep", { n: i + 1 })}
                 </span>
               </div>
               <h3 className="mt-2 font-semibold" style={{ fontSize: "1rem" }}>
-                {s.title}
+                {t(s.title)}
               </h3>
               <p className="mt-1 text-sm" style={{ color: "var(--text-muted)", fontSize: "0.9375rem" }}>
-                {s.body}
+                {t(s.body)}
               </p>
             </li>
           ))}

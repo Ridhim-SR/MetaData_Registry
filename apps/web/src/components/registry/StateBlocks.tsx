@@ -1,3 +1,5 @@
+import { t, useLanguage } from "../../i18n";
+
 export function Skeleton({ className = "" }: { className?: string }) {
   return (
     <div
@@ -9,17 +11,19 @@ export function Skeleton({ className = "" }: { className?: string }) {
 }
 
 export function LoadingBlock({ lines = 3 }: { lines?: number }) {
+  useLanguage();
   return (
-    <div role="status" aria-label="Loading" className="space-y-2">
+    <div role="status" aria-label={t("loading")} className="space-y-2">
       {Array.from({ length: lines }).map((_, i) => (
         <Skeleton key={i} className="h-4 w-full" />
       ))}
-      <span className="sr-only">Loading…</span>
+      <span className="sr-only">{t("loadingEllipsis")}</span>
     </div>
   );
 }
 
 export function ErrorBlock({ message, onRetry }: { message: string; onRetry?: () => void }) {
+  useLanguage();
   return (
     <div
       role="alert"
@@ -38,7 +42,7 @@ export function ErrorBlock({ message, onRetry }: { message: string; onRetry?: ()
           className="btn-secondary mt-2"
           style={{ padding: "0.25rem 0.75rem", fontSize: "0.875rem" }}
         >
-          Retry
+          {t("retry")}
         </button>
       )}
     </div>
@@ -74,6 +78,6 @@ export function EmptyBlock({
 }
 
 export function friendlyError(status: number | undefined, fallback: string): string {
-  if (status === 0) return "Unable to reach the server. Check your connection and try again.";
+  if (status === 0) return t("errorNetwork");
   return fallback;
 }

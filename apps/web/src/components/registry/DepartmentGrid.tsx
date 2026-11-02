@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { listDepartments } from "../../api/registry";
-import { t } from "../../i18n";
+import { t, useLanguage } from "../../i18n";
 import { humanizeRaw } from "../../utils/format";
 import { EmptyBlock, ErrorBlock, Skeleton } from "./StateBlocks";
 
@@ -12,6 +12,7 @@ function iconFor(index: number) {
 }
 
 export function DepartmentGrid({ compact = false }: { compact?: boolean }) {
+  useLanguage();
   const query = useQuery({ queryKey: ["registry-departments"], queryFn: listDepartments });
   const [searchText, setSearchText] = useState("");
   const [sort, setSort] = useState<"name" | "datasets">("name");
@@ -42,7 +43,7 @@ export function DepartmentGrid({ compact = false }: { compact?: boolean }) {
 
   return (
     <section
-      aria-label="Top departments"
+      aria-label={compact ? t("topDepartments") : t("navDepartments")}
       className="page-container mx-auto w-full max-w-7xl px-4 py-10 sm:px-6 lg:px-8"
       style={compact ? undefined : { paddingTop: "24px" }}
     >
@@ -53,21 +54,21 @@ export function DepartmentGrid({ compact = false }: { compact?: boolean }) {
             style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}
           >
             <h2 className="font-semibold" style={{ color: "var(--navy-900)", fontSize: "1.375rem" }}>
-              Top Departments
+              {t("topDepartments")}
             </h2>
             {total > 0 && (
               <Link
                 to="/departments"
                 className="font-semibold"
-                aria-label="View all departments"
+                aria-label={t("viewAllDepartments")}
                 style={{ color: "var(--blue-700)", fontSize: "1rem", whiteSpace: "nowrap" }}
               >
-                View all →
+                {t("viewAll")}
               </Link>
             )}
           </div>
           <p className="mt-1 text-sm" style={{ color: "var(--text-muted)", fontSize: "0.9375rem" }}>
-            Departments with the most published datasets.
+            {t("topDepartmentsSubtitle")}
           </p>
         </div>
       ) : (
@@ -188,7 +189,7 @@ export function DepartmentGrid({ compact = false }: { compact?: boolean }) {
           className="mt-4"
           style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: "16px" }}
           role="status"
-          aria-label="Loading departments"
+          aria-label={t("deptLoading")}
         >
           {[0, 1, 2, 3].map((i) => (
             <Skeleton key={i} className="h-24" />
@@ -197,14 +198,14 @@ export function DepartmentGrid({ compact = false }: { compact?: boolean }) {
       )}
       {!loading && query.error && (
         <div className="mt-4">
-          <ErrorBlock message="Unable to load departments. Please try again." onRetry={() => query.refetch()} />
+          <ErrorBlock message={t("deptError")} onRetry={() => query.refetch()} />
         </div>
       )}
       {!loading && query.data && query.data.items.length === 0 && (
         <div className="mt-4">
           <EmptyBlock
-            title="No departments published yet."
-            body="Departments will appear here once metadata is published."
+            title={t("deptEmpty")}
+            body={t("deptEmptyHint")}
           />
         </div>
       )}
@@ -247,7 +248,7 @@ export function DepartmentGrid({ compact = false }: { compact?: boolean }) {
                   className="text-sm"
                   style={{ marginTop: "auto", paddingTop: "0.25rem", color: "var(--text-muted)", fontSize: "0.875rem" }}
                 >
-                  {d.dataset_count} {d.dataset_count === 1 ? "dataset" : "datasets"}
+                  {datasetWord(d.dataset_count)}
                 </div>
               </Link>
             </li>
@@ -259,10 +260,10 @@ export function DepartmentGrid({ compact = false }: { compact?: boolean }) {
           <Link
             to="/departments"
             className="btn-secondary"
-            aria-label="View all departments"
+            aria-label={t("viewAllDepartments")}
             style={{ fontSize: "0.9375rem" }}
           >
-            View all →
+            {t("viewAll")}
           </Link>
         </p>
       )}

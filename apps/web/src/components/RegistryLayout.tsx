@@ -1,8 +1,10 @@
 import { Link, Outlet } from "react-router-dom";
+import { t, useLanguage } from "../i18n";
 import { RegistryHeader } from "./registry/RegistryHeader";
 import { TopLoadingBar } from "./registry/TopLoadingBar";
 
 export function RegistryLayout() {
+  useLanguage();
   const year = new Date().getFullYear();
   const linkStyle: React.CSSProperties = {
     color: "#fff",
@@ -20,18 +22,18 @@ export function RegistryLayout() {
       <main id="main-content" className="flex-1" tabIndex={-1}>
         <Outlet />
       </main>
-      <footer style={{ background: "var(--navy-900)", color: "#fff" }} aria-label="Footer">
+      <footer style={{ background: "var(--navy-900)", color: "#fff" }} aria-label={t("footerLabel")}>
         <div className="page-container mx-auto grid w-full max-w-7xl grid-cols-1 gap-6 px-4 py-8 sm:grid-cols-2 sm:px-6 md:grid-cols-4 lg:px-8">
           <div>
             <p className="font-bold" style={{ fontSize: "1rem" }}>
-              SDA Metadata Registry
+              {t("footerSiteName")}
             </p>
             <p style={{ fontSize: "0.875rem", color: "rgba(255,255,255,0.8)" }}>
-              Government of Uttar Pradesh
+              {t("govUP")}
             </p>
             <img
               src="/isb-logo.webp"
-              alt="ISB Bharti Institute of Public Policy"
+              alt={t("isbLogoAlt")}
               height={40}
               style={{
                 marginTop: "0.75rem",
@@ -46,41 +48,32 @@ export function RegistryLayout() {
               }}
             />
           </div>
-          <nav aria-label="Footer">
+          <nav aria-label={t("footerLabel")}>
             <ul className="space-y-2">
               <li>
                 <Link to="/about" style={linkStyle}>
-                  About
+                  {t("footerAbout")}
                 </Link>
               </li>
-              <li>
-                <Link to="/contact" style={linkStyle}>
-                  Contact
-                </Link>
-              </li>
-              <li>
-                <Link to="/privacy" style={linkStyle}>
-                  Accessibility Statement
-                </Link>
-              </li>
+              {/* Contact and Accessibility Statement hidden for now. */}
             </ul>
           </nav>
-          <nav aria-label="Legal">
+          <nav aria-label={t("footerLegal")}>
             <ul className="space-y-2">
               <li>
                 <Link to="/copyrights" style={linkStyle}>
-                  Terms
+                  {t("footerTerms")}
                 </Link>
               </li>
               <li>
                 <Link to="/privacy" style={linkStyle}>
-                  Privacy
+                  {t("footerPrivacy")}
                 </Link>
               </li>
             </ul>
           </nav>
           <div style={{ fontSize: "0.875rem", color: "rgba(255,255,255,0.8)" }}>
-            <p>© {year} SDA Metadata Registry. All rights reserved.</p>
+            <p>{t("footerCopyright", { year })}</p>
           </div>
         </div>
       </footer>

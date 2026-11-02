@@ -12,7 +12,7 @@ import { ApiError } from "../api/client";
 import { displayName } from "../api/auth";
 import { EmptyBlock, ErrorBlock, LoadingBlock } from "../components/registry/StateBlocks";
 import { CompletenessCard } from "../components/registry/CompletenessCard";
-import { t } from "../i18n";
+import { t, tNodes, useLanguage } from "../i18n";
 import {
   catLabel,
   classificationBadgeClass,
@@ -30,6 +30,7 @@ type Tab = "schema" | "lineage";
 const COLS_PER_PAGE = 50;
 
 function AccessStateButton({ datasetFqn, tableName }: { datasetFqn: string; tableName: string }) {
+  useLanguage();
   const { isAuthenticated } = useAuth();
   const navigate = useNavigate();
   const [state, setState] = useState<"idle" | "sending" | "sent" | "error">("idle");
@@ -53,7 +54,7 @@ function AccessStateButton({ datasetFqn, tableName }: { datasetFqn: string; tabl
   if (state === "sent") {
     return (
       <p className="text-sm font-medium" role="status" style={{ color: "var(--public-fg)" }}>
-        Request pending — the owning department will review it.
+        {t("requestPending")}
       </p>
     );
   }
@@ -65,11 +66,11 @@ function AccessStateButton({ datasetFqn, tableName }: { datasetFqn: string; tabl
         className="btn-primary disabled:opacity-60"
         style={{ fontSize: "0.9375rem" }}
       >
-        {state === "sending" ? "Requesting…" : isAuthenticated ? "Request Access" : "Sign in to request access"}
+        {state === "sending" ? t("requesting") : isAuthenticated ? t("requestAccess") : t("signInToRequest")}
       </button>
       {state === "error" && (
         <p className="mt-2 text-sm" role="alert" style={{ color: "var(--confid-fg)" }}>
-          Could not send the request. Please try again.
+          {t("requestFailed")}
         </p>
       )}
     </div>
@@ -77,6 +78,7 @@ function AccessStateButton({ datasetFqn, tableName }: { datasetFqn: string; tabl
 }
 
 export function TablePage() {
+  const { lang } = useLanguage();
   const { user, isAuthenticated } = useAuth();
   const { datasetFqn = "", tableName = "" } = useParams<{ datasetFqn: string; tableName: string }>();
   const [urlParams] = useSearchParams();
@@ -259,8 +261,8 @@ export function TablePage() {
   const hasLineage = upstream.length > 0 || downstream.length > 0;
 
   const tabs: Array<{ id: Tab; label: string; show: boolean }> = [
-    { id: "schema", label: "Schema", show: true },
-    { id: "lineage", label: "Lineage", show: hasLineage },
+    { id: "schema", label: t("tabSchema"), show: true },
+    { id: "lineage", label: t("tabLineage"), show: hasLineage },
   ];
 
   const totalCols = table?.columns?.length ?? 0;
@@ -269,17 +271,18 @@ export function TablePage() {
   // dataset-level and scored on the dataset page.
   const completenessItems = useMemo(
     () => (table && !table.locked ? tableCompletenessItems(table) : []),
-    [table],
+    // Labels are translated, so recompute on a language switch too.
+    [table, lang],
   );
 
 
 
   return (
     <div className="page-container mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-      <nav aria-label="Breadcrumb" className="mb-4 text-sm" style={{ color: "var(--text-muted)" }}>
-        <Link to="/" style={{ color: "var(--blue-700)" }}>Home</Link>
+      <nav aria-label={t("breadcrumb")} className="mb-4 text-sm" style={{ color: "var(--text-muted)" }}>
+        <Link to="/" style={{ color: "var(--blue-700)" }}>{t("navHome")}</Link>
         {" / "}
-        <Link to="/explore" style={{ color: "var(--blue-700)" }}>Catalog</Link>
+        <Link to="/explore" style={{ color: "var(--blue-700)" }}>{t("navCatalog")}</Link>
         {" / "}
         {card ? (
           <>
@@ -289,50 +292,50 @@ export function TablePage() {
             {" / "}
           </>
         ) : null}
-        <span style={{ color: "var(--text)" }}>{humanizeRaw(tname) || "Table"}</span>
+        <span style={{ color: "var(--text)" }}>{humanizeRaw(tname) || t("typeTable")}</span>
       </nav>
 
       {pageLoading && <LoadingBlock lines={6} />}
 
       {!pageLoading && datasetQuery.error instanceof ApiError && datasetQuery.error.status === 401 && (
         <EmptyBlock
-          title="Sign in to view this table."
-          body="This metadata is not public. Sign in with your department account to view it."
+          title={t("signInViewTable")}
+          body={t("notPublicBody")}
           action={
             <Link to="/login" className="btn-primary" style={{ fontSize: "0.875rem" }}>
-              Sign In
+              {t("signIn")}
             </Link>
           }
         />
       )}
 
       {!pageLoading && datasetQuery.error && !(datasetQuery.error instanceof ApiError && (datasetQuery.error.status === 401 || datasetQuery.error.status === 404)) && (
-        <ErrorBlock message="Unable to load this table. Please try again." onRetry={() => datasetQuery.refetch()} />
+        <ErrorBlock message={t("tableLoadError")} onRetry={() => datasetQuery.refetch()} />
       )}
 
       {!pageLoading && (datasetQuery.error instanceof ApiError && datasetQuery.error.status === 404) && (
         <EmptyBlock
-          title="Table not found."
-          body="It may have been removed, or you may not have permission to view it."
+          title={t("tableNotFound")}
+          body={t("mayBeRemoved")}
           action={
             <Link to="/explore" className="btn-secondary" style={{ fontSize: "0.875rem" }}>
-              Back to catalog
+              {t("backToCatalog")}
             </Link>
           }
         />
       )}
 
       {!pageLoading && tableQuery.error && !(tableQuery.error instanceof ApiError && tableQuery.error.status === 404) && (
-        <ErrorBlock message="Unable to load this table. Please try again." onRetry={() => tableQuery.refetch()} />
+        <ErrorBlock message={t("tableLoadError")} onRetry={() => tableQuery.refetch()} />
       )}
 
       {!pageLoading && (tableQuery.error instanceof ApiError && tableQuery.error.status === 404) && (
         <EmptyBlock
-          title="Table not found."
-          body="It may have been removed, or you may not have permission to view it."
+          title={t("tableNotFound")}
+          body={t("mayBeRemoved")}
           action={
             <Link to="/explore" className="btn-secondary" style={{ fontSize: "0.875rem" }}>
-              Back to catalog
+              {t("backToCatalog")}
             </Link>
           }
         />
@@ -348,7 +351,7 @@ export function TablePage() {
               </h1>
               {isFull && (
                 <span className="badge badge-neutral">
-                  {totalCols} {totalCols === 1 ? "column" : "columns"}
+                  {t(totalCols === 1 ? "colCountOne" : "colCountOther", { count: totalCols })}
                 </span>
               )}
               {isFull && classification && (
@@ -372,7 +375,7 @@ export function TablePage() {
                 );
               }
               return (
-                <div className="mt-6 flex gap-6" role="tablist" aria-label="Table sections"
+                <div className="mt-6 flex gap-6" role="tablist" aria-label={t("tableSections")}
                   style={{ borderBottom: "1px solid var(--border)" }}>
                   {visibleTabs.map((t) => (
                     <button
@@ -399,14 +402,14 @@ export function TablePage() {
             })()}
 
             {tab === "schema" && (
-              <div className="mt-4" role="tabpanel" aria-label="Schema">
+              <div className="mt-4" role="tabpanel" aria-label={t("tabSchema")}>
                 {!isFull ? (
                   <div
                     className="p-6 text-center"
                     style={{ border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg-alt)" }}
                   >
                     <h2 className="font-semibold" style={{ color: "var(--navy-900)", fontSize: "1.125rem" }}>
-                      Request access to view columns
+                      {t("requestAccessColumns")}
                     </h2>
                     <div className="mt-4 flex justify-center">
                       <AccessStateButton datasetFqn={card.dataset} tableName={tname} />
@@ -415,25 +418,25 @@ export function TablePage() {
                 ) : (
                   <div>
                     <div className="flex flex-col gap-2 sm:flex-row">
-                      <label htmlFor="find-column" className="sr-only">Find a column</label>
+                      <label htmlFor="find-column" className="sr-only">{t("findColumn")}</label>
                       <input
                         id="find-column"
                         type="search"
                         value={colQuery}
                         onChange={(e) => setColQuery(e.target.value)}
-                        placeholder="Find a column…"
+                        placeholder={`${t("findColumn")}…`}
                         className="flex-1"
                         style={{ border: "1px solid var(--border)", borderRadius: 6, padding: "0.5rem 0.75rem", fontSize: "0.9375rem" }}
                       />
-                      <label htmlFor="sort-columns" className="sr-only">Sort columns</label>
+                      <label htmlFor="sort-columns" className="sr-only">{t("sortColumns")}</label>
                       <select
                         id="sort-columns"
                         value={colSort}
                         onChange={(e) => setColSort(e.target.value as "name" | "type")}
                         style={{ border: "1px solid var(--border)", borderRadius: 6, padding: "0.5rem 0.75rem", fontSize: "0.9375rem", background: "var(--bg)" }}
                       >
-                        <option value="name">Sort by name</option>
-                        <option value="type">Sort by type</option>
+                        <option value="name">{t("sortByName")}</option>
+                        <option value="type">{t("sortByType")}</option>
                       </select>
                       <button
                         type="button"
@@ -442,30 +445,30 @@ export function TablePage() {
                         className="btn-secondary disabled:opacity-60"
                         style={{ fontSize: "0.9375rem", whiteSpace: "nowrap" }}
                       >
-                        {csvState === "sending" ? "Preparing…" : "Download data dictionary (CSV)"}
+                        {csvState === "sending" ? t("preparing") : t("downloadDictionary")}
                       </button>
                     </div>
                     {csvState === "error" && (
                       <p className="mt-2 text-sm" role="alert" style={{ color: "var(--confid-fg)" }}>
-                        Could not download the dictionary. Please try again.
+                        {t("downloadFailed")}
                       </p>
                     )}
                     <p className="mt-3 text-sm" style={{ color: "var(--text-muted)", fontSize: "0.9375rem" }}>
-                      {totalCols} {totalCols === 1 ? "column" : "columns"}
+                      {t(totalCols === 1 ? "colCountOne" : "colCountOther", { count: totalCols })}
                       {sensitiveCount > 0 &&
-                        ` · ${sensitiveCount} ${sensitiveCount === 1 ? "column contains" : "columns contain"} personal data`}
+                        ` · ${t(sensitiveCount === 1 ? "personalDataOne" : "personalDataOther", { count: sensitiveCount })}`}
                     </p>
                     <div className="mt-2 overflow-x-auto" style={{ border: "1px solid var(--border)", borderRadius: 6 }}>
                       <table className="w-full text-sm" style={{ minWidth: 640 }}>
                         <thead style={{ background: "var(--bg-alt)", color: "var(--text-muted)" }}>
                           <tr>
-                            <th scope="col" className="px-4 py-2 text-left font-medium">Column Name</th>
+                            <th scope="col" className="px-4 py-2 text-left font-medium">{t("colName")}</th>
                             {hasHindiNames && (
-                              <th scope="col" className="px-4 py-2 text-left font-medium">Name (Hindi)</th>
+                              <th scope="col" className="px-4 py-2 text-left font-medium">{t("colNameHindi")}</th>
                             )}
-                            <th scope="col" className="px-4 py-2 text-left font-medium">Data Type</th>
-                            <th scope="col" className="px-4 py-2 text-left font-medium">Description</th>
-                            <th scope="col" className="px-4 py-2 text-left font-medium">Tags</th>
+                            <th scope="col" className="px-4 py-2 text-left font-medium">{t("colDataType")}</th>
+                            <th scope="col" className="px-4 py-2 text-left font-medium">{t("colDescription")}</th>
+                            <th scope="col" className="px-4 py-2 text-left font-medium">{t("filterTags")}</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -483,20 +486,20 @@ export function TablePage() {
                                 <td className="px-4 py-2 font-medium" style={{ color: "var(--text)" }}>{col.name}</td>
                                 {hasHindiNames && (
                                   <td className="px-4 py-2" style={{ color: "var(--text)" }}>
-                                    {col.displayName || <span className="not-provided">Not provided</span>}
+                                    {col.displayName || <span className="not-provided">{t("notProvided")}</span>}
                                   </td>
                                 )}
                                 <td className="px-4 py-2">
                                   <span className="badge badge-neutral">
-                                    {col.dataTypeDisplay || col.dataType || "Not provided"}
+                                    {col.dataTypeDisplay || col.dataType || t("notProvided")}
                                   </span>
                                 </td>
                                 <td className="px-4 py-2" style={{ color: "var(--text)" }}>
-                                  {col.description || <span className="not-provided">No description</span>}
+                                  {col.description || <span className="not-provided">{t("noDescription")}</span>}
                                 </td>
                                 <td className="px-4 py-2">
                                   {(col.tags ?? []).length === 0 ? (
-                                    <span className="not-provided">Not provided</span>
+                                    <span className="not-provided">{t("notProvided")}</span>
                                   ) : (
                                     <span style={{ color: "var(--text)" }}>
                                       {(col.tags ?? []).map(readableTag).join(", ")}
@@ -509,7 +512,7 @@ export function TablePage() {
                           {visibleColumns.length === 0 && (
                             <tr>
                               <td colSpan={hasHindiNames ? 5 : 4} className="px-4 py-3" style={{ color: "var(--text-muted)" }}>
-                                No columns match.
+                                {t("noColumnsMatch")}
                               </td>
                             </tr>
                           )}
@@ -520,12 +523,12 @@ export function TablePage() {
                       <div className="mt-3 flex items-center gap-2" style={{ fontSize: "0.875rem", color: "var(--text-muted)" }}>
                         <button type="button" disabled={safeColPage <= 1} onClick={() => setColPage(safeColPage - 1)}
                           className="btn-secondary" style={{ padding: "0.2rem 0.7rem", fontSize: "0.875rem" }}>
-                          ‹ Prev
+                          {t("pagePrev")}
                         </button>
-                        <span>Page {safeColPage} of {colPages}</span>
+                        <span>{t("pageOf", { page: safeColPage, pages: colPages })}</span>
                         <button type="button" disabled={safeColPage >= colPages} onClick={() => setColPage(safeColPage + 1)}
                           className="btn-secondary" style={{ padding: "0.2rem 0.7rem", fontSize: "0.875rem" }}>
-                          Next ›
+                          {t("pageNext")}
                         </button>
                       </div>
                     )}
@@ -536,15 +539,15 @@ export function TablePage() {
 
 
             {tab === "lineage" && hasLineage && (
-              <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2" role="tabpanel" aria-label="Lineage">
+              <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2" role="tabpanel" aria-label={t("tabLineage")}>
                 <div className="p-4" style={{ border: "1px solid var(--border)", borderRadius: 6 }}>
-                  <h3 className="font-semibold" style={{ color: "var(--navy-900)", fontSize: "1rem" }}>Upstream</h3>
+                  <h3 className="font-semibold" style={{ color: "var(--navy-900)", fontSize: "1rem" }}>{t("upstream")}</h3>
                   <ul className="mt-2 space-y-1 text-sm" style={{ color: "var(--text)" }}>
                     {upstream.map((u) => <li key={u} style={{ overflowWrap: "anywhere" }}>{u}</li>)}
                   </ul>
                 </div>
                 <div className="p-4" style={{ border: "1px solid var(--border)", borderRadius: 6 }}>
-                  <h3 className="font-semibold" style={{ color: "var(--navy-900)", fontSize: "1rem" }}>Downstream</h3>
+                  <h3 className="font-semibold" style={{ color: "var(--navy-900)", fontSize: "1rem" }}>{t("downstream")}</h3>
                   <ul className="mt-2 space-y-1 text-sm" style={{ color: "var(--text)" }}>
                     {downstream.map((d) => <li key={d} style={{ overflowWrap: "anywhere" }}>{d}</li>)}
                   </ul>
@@ -554,7 +557,7 @@ export function TablePage() {
           </div>
 
           {/* RIGHT PANEL */}
-          <aside aria-label="Details" className="table-sidebar w-full shrink-0 lg:w-80" style={{ maxWidth: 320 }}>
+          <aside aria-label={t("details")} className="table-sidebar w-full shrink-0 lg:w-80" style={{ maxWidth: 320 }}>
             <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
               <div style={{ border: "0.5px solid var(--border)", borderRadius: 12, background: "var(--bg)", overflow: "hidden" }}>
                 <div style={{ background: "var(--bg-alt)", borderBottom: "1px solid var(--border)", padding: "12px 16px" }}>
@@ -663,16 +666,18 @@ export function TablePage() {
 
               {isFull && canEdit && card && (
                 <CompletenessCard
-                  title="Table metadata completeness"
-                  tooltip="Share of this table's own metadata filled in"
+                  title={t("tableCompletenessTitle")}
+                  tooltip={t("tableCompletenessTip")}
                   items={completenessItems}
                   footer={
                     <>
-                      Classification and API availability are dataset-level;{" "}
-                      <Link to={`/datasets/${encodeURIComponent(card.dataset)}`} style={{ color: "var(--blue-700)" }}>
-                        see the dataset page
-                      </Link>
-                      .
+                      {tNodes("tableCompletenessFooter", {
+                        link: (
+                          <Link to={`/datasets/${encodeURIComponent(card.dataset)}`} style={{ color: "var(--blue-700)" }}>
+                            {t("seeDatasetPage")}
+                          </Link>
+                        ),
+                      })}
                     </>
                   }
                 />
@@ -680,7 +685,7 @@ export function TablePage() {
 
               {(tableTags.length > 0 || datasetTagNames.length > 0) && (
                 <div className="p-4" style={{ border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)" }}>
-                  <h2 className="font-semibold" style={{ color: "var(--navy-900)", fontSize: "1rem" }}>Tags</h2>
+                  <h2 className="font-semibold" style={{ color: "var(--navy-900)", fontSize: "1rem" }}>{t("filterTags")}</h2>
                   <div className="mt-2 flex flex-wrap gap-2">
                     {isFull
                       ? tableTags.map((t, i) => (

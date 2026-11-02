@@ -1,5 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { getRegistryStats } from "../../api/registry";
+import { formatNumber, t, useLanguage } from "../../i18n";
+import type { I18nKey } from "../../i18n";
 import { CAT_CATEGORIES } from "../../utils/format";
 import { Skeleton } from "./StateBlocks";
 
@@ -11,9 +13,10 @@ const CAT_COLORS: Record<number, string> = {
   4: "var(--confid-fg)",
 };
 
-const DATASET_TYPES: Array<{ key: string; detail: string; color: string }> = [
-  { key: "Citizen Centric", detail: "About citizens and beneficiaries", color: "var(--blue-700)" },
-  { key: "Administrative", detail: "Schemes, budgets and works", color: "var(--navy-900)" },
+// `key` is the API value in by_dataset_type; label/detail are display strings.
+const DATASET_TYPES: Array<{ key: string; label: I18nKey; detail: I18nKey; color: string }> = [
+  { key: "Citizen Centric", label: "typeCitizenCentric", detail: "typeCitizenCentricDetail", color: "var(--blue-700)" },
+  { key: "Administrative", label: "typeAdministrative", detail: "typeAdministrativeDetail", color: "var(--navy-900)" },
 ];
 
 type Row = { key: string; label: string; detail: string | null; count: number; color: string };
@@ -26,6 +29,7 @@ type Row = { key: string; label: string; detail: string | null; count: number; c
  * only), "Not classified" and "Not specified" only when they have datasets.
  */
 export function DatasetsAtAGlance() {
+  useLanguage();
   const query = useQuery({ queryKey: ["registry-stats"], queryFn: getRegistryStats });
   const loading = query.isPending || query.isFetching;
   const byCat = query.data?.by_classification;
@@ -39,31 +43,31 @@ export function DatasetsAtAGlance() {
     color: CAT_COLORS[c.level],
   })).filter((r) => r.key !== "CAT-4" || r.count > 0);
   if ((byCat?.unclassified ?? 0) > 0) {
-    catRows.push({ key: "unclassified", label: "Not classified", detail: null, count: byCat!.unclassified, color: "var(--text-muted)" });
+    catRows.push({ key: "unclassified", label: t("notClassified"), detail: null, count: byCat!.unclassified, color: "var(--text-muted)" });
   }
 
-  const typeRows: Row[] = DATASET_TYPES.map((t) => ({
-    key: t.key,
-    label: t.key,
-    detail: t.detail,
-    count: byType?.[t.key] ?? 0,
-    color: t.color,
+  const typeRows: Row[] = DATASET_TYPES.map((d) => ({
+    key: d.key,
+    label: t(d.label),
+    detail: t(d.detail),
+    count: byType?.[d.key] ?? 0,
+    color: d.color,
   }));
   if ((byType?.unspecified ?? 0) > 0) {
-    typeRows.push({ key: "unspecified", label: "Not specified", detail: null, count: byType!.unspecified, color: "var(--text-muted)" });
+    typeRows.push({ key: "unspecified", label: t("notSpecified"), detail: null, count: byType!.unspecified, color: "var(--text-muted)" });
   }
 
   // The StatsBar already reports load errors; an empty catalog needs no chart.
   if (!loading && (query.error || !byCat || query.data?.datasets === 0)) return null;
 
   return (
-    <section aria-label="Datasets at a glance" style={{ background: "var(--bg)" }}>
+    <section aria-label={t("glanceTitle")} style={{ background: "var(--bg)" }}>
       <div className="page-container mx-auto w-full max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
         <h2 className="font-semibold" style={{ color: "var(--navy-900)", fontSize: "1.375rem" }}>
-          Datasets at a glance
+          {t("glanceTitle")}
         </h2>
         <p className="mt-1 text-sm" style={{ color: "var(--text-muted)", fontSize: "0.9375rem" }}>
-          How the published datasets are classified, and who they are about.
+          {t("glanceSubtitle")}
         </p>
 
         <div
@@ -77,9 +81,9 @@ export function DatasetsAtAGlance() {
             </>
           ) : (
             <>
-              <BarCard title="By classification" rows={catRows} />
+              <BarCard title={t("byClassification")} rows={catRows} />
               {/* Older APIs don't send by_dataset_type yet; show the chart once they do. */}
-              {byType && <BarCard title="By dataset type" rows={typeRows} />}
+              {byType && <BarCard title={t("byDatasetType")} rows={typeRows} />}
             </>
           )}
         </div>
@@ -106,8 +110,8 @@ function BarCard({ title, rows }: { title: string; rows: Row[] }) {
                 {r.detail && <span style={{ color: "var(--text-muted)" }}> · {r.detail}</span>}
               </span>
               <span className="font-semibold" style={{ color: "var(--navy-900)" }}>
-                {r.count.toLocaleString("en-IN")}
-                <span className="sr-only"> {r.count === 1 ? "dataset" : "datasets"}</span>
+                {formatNumber(r.count)}
+                <span className="sr-only"> {t(r.count === 1 ? "datasetWordOne" : "datasetWordOther")}</span>
               </span>
             </div>
             <div

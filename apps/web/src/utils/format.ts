@@ -1,3 +1,6 @@
+import { locale, t } from "../i18n";
+import type { I18nKey } from "../i18n";
+
 /** Display helper: show DB values with a capital first letter.
  * Data stays untouched (links, FQNs, API params still use raw values);
  * only rendered labels go through this.
@@ -16,7 +19,7 @@ export function capitalizeFirst(value: string | null | undefined): string {
  * Links, FQNs and API params always keep the raw value.
  */
 export function humanizeRaw(value: string | null | undefined): string {
-  if (!value) return "Not provided";
+  if (!value) return t("notProvided");
   if (!/[_-]/.test(value)) return value;
   return value
     .replace(/[_-]+/g, " ")
@@ -30,7 +33,7 @@ export function humanizeRaw(value: string | null | undefined): string {
 /** "Not provided" placeholder for missing metadata — never render blank. */
 export function orNotProvided(value: string | null | undefined): string {
   const v = (value ?? "").trim();
-  return v ? v : "Not provided";
+  return v ? v : t("notProvided");
 }
 
 /** True when an `updated_at` value is a usable epoch-ms timestamp. */
@@ -38,11 +41,11 @@ export function hasValidUpdatedAt(value: number | null | undefined): value is nu
   return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
 
-/** en-IN short date for epoch-ms timestamps; null when missing or invalid. */
+/** Short date (en-IN / hi-IN) for epoch-ms timestamps; null when missing or invalid. */
 export function formatUpdatedAt(value: number | null | undefined): string | null {
   if (!hasValidUpdatedAt(value)) return null;
   try {
-    return new Date(value).toLocaleDateString("en-IN", {
+    return new Date(value).toLocaleDateString(locale(), {
       day: "2-digit",
       month: "short",
       year: "numeric",
@@ -58,9 +61,9 @@ export function formatUpdatedAt(value: number | null | undefined): string | null
  * Proper display names pass through untouched.
  */
 export function readableTag(tag: { tagFQN?: string; displayName?: string; name?: string } | null | undefined): string {
-  if (!tag) return "Not provided";
+  if (!tag) return t("notProvided");
   const raw = tag.displayName || tag.tagFQN || tag.name || "";
-  if (!raw) return "Not provided";
+  if (!raw) return t("notProvided");
   const afterDot = raw.includes(".") ? raw.slice(raw.lastIndexOf(".") + 1) : raw;
   return afterDot || raw;
 }
@@ -95,31 +98,20 @@ export function normalizeClassification(value: string | null | undefined): DataC
  * this portal applies each category.
  */
 export const CAT_CATEGORIES: Array<{ level: number; name: string; meaning: string; access: string }> = [
-  {
-    level: 1,
-    name: "Open Access",
-    meaning: "Anonymised, aggregated or non-personal data.",
-    access: "Open to everyone; no login required.",
+  1, 2, 3, 4,
+].map((level) => ({
+  level,
+  // Getters so the text follows the current UI language (see i18n catName1..4).
+  get name() {
+    return t(`catName${level}` as I18nKey);
   },
-  {
-    level: 2,
-    name: "Registered Access",
-    meaning: "De-identified data; individual identity is not exposed.",
-    access: "Sign in with your department account to view.",
+  get meaning() {
+    return t(`catMeaning${level}` as I18nKey);
   },
-  {
-    level: 3,
-    name: "Restricted Access",
-    meaning: "Personal or sensitive data at individual or entity level.",
-    access: "Shared only on an approved access request.",
+  get access() {
+    return t(`catAccess${level}` as I18nKey);
   },
-  {
-    level: 4,
-    name: "Non-Shareable",
-    meaning: "Classified or legally restricted data.",
-    access: "Not shared; internal government use only.",
-  },
-];
+}));
 
 function catCategory(value: string | null | undefined) {
   const m = /^cat-(\d+)$/i.exec((value ?? "").trim());
@@ -192,8 +184,8 @@ export function tableCompletenessItems(table: {
   const tagged = cols.filter((c) => (c.tags ?? []).length > 0).length;
   const ratio = (n: number) => (cols.length ? n / cols.length : 0);
   return [
-    { key: "columns", label: "Column descriptions", score: ratio(described), count: `${described} / ${cols.length}` },
-    { key: "tags", label: "Column tags", score: ratio(tagged), count: `${tagged} / ${cols.length}` },
+    { key: "columns", label: t("cColumnDescriptions"), score: ratio(described), count: `${described} / ${cols.length}` },
+    { key: "tags", label: t("cColumnTags"), score: ratio(tagged), count: `${tagged} / ${cols.length}` },
   ];
 }
 
@@ -223,12 +215,12 @@ export function datasetCompletenessItems(
     count: null,
   });
   return [
-    item("description", "Description", hasText(description)),
-    item("owner", "Owner", hasText(info.owner)),
-    item("steward", "Data steward", hasText(info.steward)),
-    item("classification", "Data classification", Boolean(normalizeClassification(info.data_classification))),
-    item("api", "API availability", apiKnown),
-    item("frequency", "Update frequency", hasText(info.frequency)),
-    item("timeline", "Timeline", hasText(info.timeline)),
+    item("description", t("colDescription"), hasText(description)),
+    item("owner", t("factOwner"), hasText(info.owner)),
+    item("steward", t("factSteward"), hasText(info.steward)),
+    item("classification", t("dataClassification"), Boolean(normalizeClassification(info.data_classification))),
+    item("api", t("cApi"), apiKnown),
+    item("frequency", t("factFrequency"), hasText(info.frequency)),
+    item("timeline", t("timeline"), hasText(info.timeline)),
   ];
 }

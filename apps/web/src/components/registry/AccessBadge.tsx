@@ -1,12 +1,14 @@
 import type { AccessLevel } from "../../api/registry";
+import { t, useLanguage } from "../../i18n";
+import type { I18nKey } from "../../i18n";
 
 export type ExtendedAccessLevel = AccessLevel | "confidential";
 
-const labels: Record<ExtendedAccessLevel, string> = {
-  public: "Public",
-  department: "Department-only",
-  restricted: "Restricted",
-  confidential: "Confidential",
+const labels: Record<ExtendedAccessLevel, I18nKey> = {
+  public: "classificationPublic",
+  department: "accessDepartment",
+  restricted: "classificationRestricted",
+  confidential: "accessConfidential",
 };
 
 const badgeClass: Record<ExtendedAccessLevel, string> = {
@@ -60,6 +62,7 @@ function BadgeIcon({ level }: { level: ExtendedAccessLevel }) {
 }
 
 export function AccessBadge({ level }: { level: AccessLevel | string | undefined }) {
+  useLanguage();
   const normalized: ExtendedAccessLevel =
     level === "public" || level === "restricted" || level === "confidential"
       ? level
@@ -67,7 +70,7 @@ export function AccessBadge({ level }: { level: AccessLevel | string | undefined
   return (
     <span className={badgeClass[normalized]}>
       <BadgeIcon level={normalized} />
-      {labels[normalized]}
+      {t(labels[normalized])}
     </span>
   );
 }
