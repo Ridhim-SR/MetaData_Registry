@@ -46,6 +46,13 @@ def raw_schemas_prefix(department_id: str, dataset_slug: str, table_slug: str) -
     return f"{table_prefix(department_id, dataset_slug, table_slug)}/raw/schemas/"
 
 
+def dataset_details_path(department_id: str, dataset_slug: str) -> str:
+    """Dataset-level summary (category, owner, description, ...) written once
+    per dataset. Mirrored to Google Drive next to the curated snapshots."""
+
+    return f"department/{department_id}/{dataset_slug}/dataset_details.txt"
+
+
 def pipeline_lock_path(department_id: str, dataset_slug: str, table_slug: str) -> str:
     return f"{table_prefix(department_id, dataset_slug, table_slug)}/pipeline"
 

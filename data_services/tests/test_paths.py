@@ -28,6 +28,13 @@ def test_pipeline_lock_path():
     assert paths.pipeline_lock_path("pwd", "vishwakarma", "t1") == "department/pwd/vishwakarma/t1/pipeline"
 
 
+def test_dataset_details_path():
+    assert (
+        paths.dataset_details_path("pwd", "vishwakarma")
+        == "department/pwd/vishwakarma/dataset_details.txt"
+    )
+
+
 def test_different_tables_never_collide():
     a = paths.table_prefix("pwd", "vishwakarma", "t1")
     b = paths.table_prefix("pwd", "vishwakarma", "t2")

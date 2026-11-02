@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from src.utils.config import load_env
 from metadata.ingestion.ometa.ometa_api import OpenMetadata
 
-from src.schema_registry import inputs
+from src.schema_registry import gdrive_mirror, inputs
 from src.schema_registry.registry import lookups, paths
 from src.schema_registry.curate import CATEGORY_LEVELS, curate_schema, validate_category, validate_schema
 from src.schema_registry.openmetadata.publish import get_client, publish_table
@@ -479,8 +479,22 @@ def run(
         )
         lookups.upsert_table(storage, table_id, dataset_id, table_name, schema_name)
 
+        # Optional, best-effort copy of the curated snapshot + dataset details
+        # to Google Drive. It reads back from storage so Drive gets exactly
+        # what Wasabi holds, and it never raises: the ingest is already done.
+        gdrive_mirror.mirror_after_run(
+            storage,
+            department_id=department_id,
+            department_name=lookups.department_name(storage, department_id) or department,
+            dataset_name=dataset,
+            dataset_slug=dataset_slug,
+            table_slug=table_slug,
+            timestamp=ts,
+        )
+
         result = {
             "run_id": run_id,
+            "timestamp": ts,
             "raw_path": raw_path,
             "curated_path": curated_path,
             "diff_path": diff_file,
