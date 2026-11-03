@@ -70,10 +70,8 @@ export function DatasetsAtAGlance() {
           {t("glanceSubtitle")}
         </p>
 
-        <div
-          className="mt-4"
-          style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: "16px" }}
-        >
+        {/* Exactly two cards, so split the row in half (stacked on small screens). */}
+        <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
           {loading ? (
             <>
               <Skeleton className="h-44" />
