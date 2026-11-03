@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from src.curated_storage import CuratedStorage  # noqa: E402
+from src.curated_storage import _download_environment  # noqa: E402
 from src.routers.downloads import router, storage_dep  # noqa: E402
 
 HEADERS = {"X-API-Key": "test-key"}
@@ -135,3 +136,12 @@ def test_unknown_department_is_404(client):
 def test_path_traversal_is_rejected():
     with pytest.raises(ValueError):
         CuratedStorage._check("../_lookups/departments.csv")
+
+
+def test_main_branch_resolves_to_development(monkeypatch):
+    monkeypatch.delenv("ENVIRONMENT", raising=False)
+    monkeypatch.setattr("src.curated_storage.subprocess.run", lambda *args, **kwargs: type(
+        "Result", (), {"stdout": "main\n"}
+    )())
+
+    assert _download_environment() == "development"

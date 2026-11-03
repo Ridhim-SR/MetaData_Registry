@@ -13,26 +13,53 @@ import csv
 import io
 import os
 import re
+import subprocess
 from functools import lru_cache
+from pathlib import Path
 
 import boto3
 from botocore.exceptions import ClientError
+from dotenv import load_dotenv
 
 _SNAPSHOT_NAME = re.compile(r"^\d{8}T\d+Z\.csv$")
 
 
 class CuratedStorage:
     def __init__(self) -> None:
-        self.bucket = os.environ.get("WASABI_DOWNLOAD_BUCKET", "").strip()
+        _load_shared_environment()
+        self.environment = _download_environment()
+        self.bucket = (
+            os.environ.get("WASABI_DOWNLOAD_BUCKET")
+            or os.environ.get("WASABI_BUCKET", "")
+        ).strip()
         if not self.bucket:
-            raise RuntimeError("WASABI_DOWNLOAD_BUCKET is not set")
-        self.prefix = os.environ.get("WASABI_DOWNLOAD_PREFIX", "").strip("/")
+            raise RuntimeError("WASABI_BUCKET or WASABI_DOWNLOAD_BUCKET is not set")
+        self.prefix = (
+            os.environ.get("WASABI_DOWNLOAD_PREFIX")
+            or {"local": "local", "development": "dev", "production": "prod"}[self.environment]
+        ).strip("/")
         self.client = boto3.client(
             "s3",
-            endpoint_url=os.environ.get("WASABI_DOWNLOAD_ENDPOINT_URL") or None,
-            aws_access_key_id=os.environ.get("WASABI_DOWNLOAD_ACCESS_KEY_ID") or None,
-            aws_secret_access_key=os.environ.get("WASABI_DOWNLOAD_SECRET_ACCESS_KEY") or None,
-            region_name=os.environ.get("WASABI_DOWNLOAD_REGION") or None,
+            endpoint_url=(
+                os.environ.get("WASABI_DOWNLOAD_ENDPOINT_URL")
+                or os.environ.get("WASABI_ENDPOINT_URL")
+                or None
+            ),
+            aws_access_key_id=(
+                os.environ.get("WASABI_DOWNLOAD_ACCESS_KEY_ID")
+                or os.environ.get("WASABI_ACCESS_KEY_ID")
+                or None
+            ),
+            aws_secret_access_key=(
+                os.environ.get("WASABI_DOWNLOAD_SECRET_ACCESS_KEY")
+                or os.environ.get("WASABI_SECRET_ACCESS_KEY")
+                or None
+            ),
+            region_name=(
+                os.environ.get("WASABI_DOWNLOAD_REGION")
+                or os.environ.get("WASABI_REGION")
+                or None
+            ),
         )
 
     def _key(self, path: str) -> str:
@@ -76,6 +103,35 @@ class CuratedStorage:
 @lru_cache(maxsize=1)
 def get_storage() -> CuratedStorage:
     return CuratedStorage()
+
+
+def _download_environment() -> str:
+    """Resolve the same branch default used by data_services.
+
+    Explicit ``ENVIRONMENT`` remains authoritative. Otherwise main reads the
+    development prefix and production reads the production prefix.
+    """
+    configured = os.environ.get("ENVIRONMENT", "").strip().lower()
+    if configured in {"local", "development", "production"}:
+        return configured
+    try:
+        repo = Path(__file__).resolve().parents[3]
+        branch = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=True,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        branch = ""
+    return {"main": "development", "production": "production"}.get(branch, "local")
+
+
+def _load_shared_environment() -> None:
+    """Load the repository's shared environment file without overriding exports."""
+    repo = Path(__file__).resolve().parents[3]
+    load_dotenv(repo / "data_services" / ".env", override=False)
 
 
 def latest_snapshot(keys: list[str], prefix: str) -> str | None:
