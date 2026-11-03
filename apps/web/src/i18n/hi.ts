@@ -206,7 +206,7 @@ export const hi = {
   removeDeptFilter: "विभाग फ़िल्टर हटाएँ: {name}",
   noDeptsInResults: "इन परिणामों में कोई विभाग नहीं है।",
   factFrequency: "अद्यतन आवृत्ति",
-  factSteward: "डेटा प्रबंधक",
+  factSteward: "डेटा अधिकारी",
   factSchemaSource: "स्कीमा स्रोत",
   noMatchesFor: "“{q}” के लिए कोई मिलान नहीं",
   sortRelevance: "प्रासंगिकता",
