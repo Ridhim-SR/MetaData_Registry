@@ -69,7 +69,7 @@ export function DepartmentDetailPage() {
             {profile.display_name ? humanizeRaw(profile.display_name) : humanizeRaw(slug)}
           </h1>
           {profile.description ? (
-            <p className="mt-1 max-w-3xl text-sm" style={{ color: "var(--text)", fontSize: "0.9375rem" }}>
+            <p className="mt-1 text-sm" style={{ color: "var(--text)", fontSize: "0.9375rem" }}>
               {profile.description}
             </p>
           ) : (
