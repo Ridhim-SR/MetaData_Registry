@@ -202,17 +202,17 @@ requires_minio = pytest.mark.skipif(
 
 
 def _run_cli(tmp_path, manifest) -> "subprocess.CompletedProcess":
-    env = {**os.environ, "MANIFEST_FILE": str(manifest), "ENVIRONMENT": "local"}
+    env = {**os.environ, "MANIFEST_FILE": str(manifest), "ENVIRONMENT": "development"}
     # Main's config routes feature-branch runs to S3 (no local-filesystem
     # storage anymore), so point the CLI at the local MinIO stand-in
     # (infrastructure/minio) under a throwaway prefix: the run exercises the
     # real S3 code path but can never touch the real local/ registry state.
     env.update({
-        "LOCAL_WASABI_ENDPOINT_URL": _MINIO_ENDPOINT,
-        "LOCAL_WASABI_REGION": "us-east-1",
-        "LOCAL_WASABI_BUCKET": "sda-local",
-        "LOCAL_WASABI_ACCESS_KEY_ID": "minioadmin",
-        "LOCAL_WASABI_SECRET_ACCESS_KEY": "minioadmin",
+        "WASABI_ENDPOINT_URL": _MINIO_ENDPOINT,
+        "WASABI_REGION": "us-east-1",
+        "WASABI_BUCKET": "sda-local",
+        "WASABI_ACCESS_KEY_ID": "minioadmin",
+        "WASABI_SECRET_ACCESS_KEY": "minioadmin",
         "WASABI_PREFIX": f"tests/{uuid.uuid4().hex}",
     })
     # Storage-only run. Popping the token is NOT enough: load_env() re-reads
