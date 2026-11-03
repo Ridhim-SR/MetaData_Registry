@@ -91,7 +91,9 @@ def _entries(
         if dataset is None:
             continue
         slug = _dataset_slug(dataset)
-        name = table.get("table_name") or table["table_id"].rsplit(".", 1)[-1]
+        # Lookup table_name is a display label and may contain spaces or
+        # capitalization. Storage paths use the canonical table_id component.
+        name = table["table_id"].rsplit(".", 1)[-1]
         base = f"department/{department_id}/{slug}/{name}"
         path = latest_snapshot(keys, f"{base}/curated/schemas")
         curated = None

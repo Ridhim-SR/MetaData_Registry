@@ -37,7 +37,7 @@ class FakeStorage:
 FILES = {
     "_lookups/departments.csv": b"department_id,department_name\ndept,Department\n",
     "_lookups/datasets.csv": b"dataset_id,department_id,dataset_name\ndept.ds,dept,Display Dataset\n",
-    "_lookups/tables.csv": b"table_id,dataset_id,table_name,deleted\ndept.ds.t,dept.ds,t,\ndept.ds.old,dept.ds,old,20260101T000000000000Z\n",
+    "_lookups/tables.csv": b"table_id,dataset_id,table_name,deleted\ndept.ds.t,dept.ds,Display Table,\ndept.ds.old,dept.ds,old,20260101T000000000000Z\n",
     "department/dept/ds/t/curated/schemas/20260101T000000000000Z.csv": b"name,data_type\nx,int\n",
     "department/dept/ds/t/curated/schemas/20260102T000000000000Z.csv": b"name,data_type\ny,text\n",
     "department/dept/ds/t/raw/schemas/20260101T000000000000Z.csv": b"name,data_type\nx,int\n",
@@ -127,6 +127,13 @@ def test_department_bundle_excludes_raw_and_old_snapshots(client):
     archive = _zip(response)
     assert all("/raw/" not in name for name in archive.namelist())
     assert all("20260101" not in name for name in archive.namelist())
+
+
+def test_storage_path_uses_canonical_table_id_not_display_name(client):
+    response = client.get("/downloads/departments/dept", headers=HEADERS)
+
+    assert response.status_code == 200
+    assert "ds/t/curated/20260102T000000000000Z.csv" in _zip(response).namelist()
 
 
 def test_unknown_department_is_404(client):
