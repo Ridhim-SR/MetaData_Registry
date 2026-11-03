@@ -206,7 +206,7 @@ export const en = {
   removeDeptFilter: "Remove department filter {name}",
   noDeptsInResults: "No departments in these results.",
   factFrequency: "Update frequency",
-  factSteward: "Data steward",
+  factSteward: "Data Officer",
   factSchemaSource: "Schema source",
   noMatchesFor: "No matches for “{q}”",
   sortRelevance: "Relevance",
