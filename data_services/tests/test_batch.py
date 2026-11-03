@@ -78,7 +78,9 @@ def test_batch_registers_new_department_from_manifest(tmp_path):
 
     assert results[0]["status"] == "ok"
     departments = storage.read_csv("_lookups/departments.csv")
-    assert departments == [{"department_id": "pwd", "department_name": "Public Works Department"}]
+    assert departments == [
+        {"department_id": "pwd", "department_name": "Public Works Department", "deleted": ""}
+    ]
 
 
 def test_batch_row_for_unregistered_department_fails_gracefully(tmp_path):

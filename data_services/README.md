@@ -49,15 +49,24 @@ The backup runs on its own at the end of steps 1 and 3.
 ### Deleting and purging catalog entities
 
 The default deletion is a reversible soft-delete. It hides the selected
-OpenMetadata entities, marks registry tables as deleted, and retains storage
-and history. Use `--list` to review soft-deleted tables and `--restore` to
+OpenMetadata entities, marks the selected department, dataset, or table and
+its descendants as deleted in the lookup CSVs, and retains storage and
+history. Use `--list` to review soft-deleted tables and `--restore` to
 reactivate a scope.
 
 ```bash
 python3 -m src.schema_registry.delete --table pwd.vishwakarma.works
+python3 -m src.schema_registry.delete --dataset pwd.vishwakarma
+python3 -m src.schema_registry.delete --department pwd
 python3 -m src.schema_registry.delete --list
 python3 -m src.schema_registry.delete --table pwd.vishwakarma.works --restore
 ```
+
+The lifecycle marker is stored in a `deleted` column in
+`_lookups/tables.csv`, `_lookups/datasets.csv`, and
+`_lookups/departments.csv`. Deleting a dataset marks its tables too; deleting
+a department marks its datasets and tables too. Restoring a parent clears the
+markers for the entire scope.
 
 Permanent deletion is a separate, explicit purge. The target must already be
 soft-deleted; `--purge` permanently removes OpenMetadata, storage, and registry

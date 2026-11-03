@@ -8,7 +8,7 @@ def test_register_department_creates_row(tmp_path):
     storage = LocalObjectStorage(tmp_path)
     lookups.register_department(storage, "pwd", "PWD")
     rows = storage.read_csv(lookups.DEPARTMENTS_PATH)
-    assert rows == [{"department_id": "pwd", "department_name": "PWD"}]
+    assert rows == [{"department_id": "pwd", "department_name": "PWD", "deleted": ""}]
 
 
 def test_register_department_is_deduped(tmp_path):
@@ -29,6 +29,7 @@ def test_register_department_stores_and_preserves_description(tmp_path):
         {
             "department_id": "pwd",
             "department_name": "PWD",
+            "deleted": "",
             "department_description": "Department overview.",
         }
     ]
@@ -203,7 +204,7 @@ def test_failed_write_leaves_previous_lookup_file_intact(tmp_path, monkeypatch):
     monkeypatch.undo()
 
     assert storage.read_csv(lookups.DEPARTMENTS_PATH) == [
-        {"department_id": "pwd", "department_name": "Public Works Department"}
+        {"department_id": "pwd", "department_name": "Public Works Department", "deleted": ""}
     ]
     leftovers = [p.name for p in (tmp_path / "_lookups").iterdir() if p.name.endswith(".tmp")]
     assert leftovers == []
