@@ -8,14 +8,14 @@ import sys
 import zipfile
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from src.curated_storage import CuratedStorage  # noqa: E402
 from src.curated_storage import _download_environment  # noqa: E402
-from src.routers.downloads import router, storage_dep  # noqa: E402
+from src.routers.downloads import _department, list_departments, router, storage_dep  # noqa: E402
 
 HEADERS = {"X-API-Key": "test-key"}
 
@@ -89,6 +89,21 @@ def test_explicit_department_list_endpoint(client):
 
 def test_legacy_download_route_is_removed(client):
     assert client.get("/downloads", headers=HEADERS).status_code == 404
+
+
+def test_deleted_departments_are_hidden_from_downloads():
+    storage = FakeStorage(
+        {
+            "_lookups/departments.csv": b"department_id,department_name,deleted\ndept,Department,20260101T000000000000Z\n",
+            "_lookups/datasets.csv": b"dataset_id,department_id,dataset_name,deleted\ndept.ds,dept,Dataset,20260101T000000000000Z\n",
+            "_lookups/tables.csv": b"table_id,dataset_id,table_name,deleted\ndept.ds.t,dept.ds,Table,20260101T000000000000Z\n",
+        }
+    )
+
+    assert list_departments(storage) == {"items": [], "total": 0}
+    with pytest.raises(HTTPException) as exc_info:
+        _department(storage, "dept")
+    assert exc_info.value.status_code == 404
 
 
 def test_department_bundle_has_latest_curated_and_details(client):

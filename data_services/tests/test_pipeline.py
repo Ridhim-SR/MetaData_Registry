@@ -165,7 +165,9 @@ def test_run_registers_dataset_and_table_lookups(tmp_path):
         source_format="postgres_ddl",
     )
 
-    assert storage.read_csv("_lookups/departments.csv") == [{"department_id": "pwd", "department_name": "PWD"}]
+    assert storage.read_csv("_lookups/departments.csv") == [
+        {"department_id": "pwd", "department_name": "PWD", "deleted": ""}
+    ]
     assert storage.read_csv("_lookups/datasets.csv")[0]["dataset_id"] == "pwd.vishwakarma"
     assert storage.read_csv("_lookups/tables.csv")[0]["table_id"] == "pwd.vishwakarma.t1"
 

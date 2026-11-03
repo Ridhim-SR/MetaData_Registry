@@ -44,7 +44,11 @@ def _rows(storage: CuratedStorage, name: str) -> list[dict]:
 
 
 def _datasets(storage: CuratedStorage, department_id: str) -> list[dict]:
-    return [r for r in _rows(storage, "datasets.csv") if r.get("department_id") == department_id]
+    return [
+        r
+        for r in _rows(storage, "datasets.csv")
+        if r.get("department_id") == department_id and not r.get("deleted")
+    ]
 
 
 def _tables(storage: CuratedStorage, dataset_ids: set[str]) -> list[dict]:
@@ -57,7 +61,11 @@ def _tables(storage: CuratedStorage, dataset_ids: set[str]) -> list[dict]:
 
 def _department(storage: CuratedStorage, department_id: str) -> dict:
     department = next(
-        (r for r in _rows(storage, "departments.csv") if r.get("department_id") == department_id),
+        (
+            r
+            for r in _rows(storage, "departments.csv")
+            if r.get("department_id") == department_id and not r.get("deleted")
+        ),
         None,
     )
     if department is None:
@@ -136,8 +144,8 @@ def _zip_response(entries: list[tuple[str, bytes]], filename: str) -> StreamingR
 
 def list_departments(storage: CuratedStorage) -> dict:
     """Return lightweight department summaries for download discovery."""
-    departments = _rows(storage, "departments.csv")
-    datasets = _rows(storage, "datasets.csv")
+    departments = [r for r in _rows(storage, "departments.csv") if not r.get("deleted")]
+    datasets = [r for r in _rows(storage, "datasets.csv") if not r.get("deleted")]
     tables = [t for t in _rows(storage, "tables.csv") if not t.get("deleted")]
     department_by_dataset = {d["dataset_id"]: d["department_id"] for d in datasets}
     dataset_counts = Counter(d["department_id"] for d in datasets)

@@ -64,6 +64,35 @@ def test_soft_delete_retains_storage_and_restore_clears_marker(tmp_path):
     assert not lookups.get_table(storage, "pwd.ds.t")["deleted"]
 
 
+def test_dataset_soft_delete_marks_parent_and_children_and_restores_them(tmp_path):
+    storage = _storage(tmp_path)
+    client = MagicMock()
+
+    result = soft_delete(storage, Target("dataset", "pwd.ds"), client=client)
+
+    assert result["status"] == "soft_deleted"
+    assert lookups.get_dataset(storage, "pwd.ds")["deleted"]
+    assert lookups.get_table(storage, "pwd.ds.t")["deleted"]
+
+    restored = restore(storage, Target("dataset", "pwd.ds"))
+
+    assert restored["status"] == "restored"
+    assert not lookups.get_dataset(storage, "pwd.ds")["deleted"]
+    assert not lookups.get_table(storage, "pwd.ds.t")["deleted"]
+
+
+def test_department_soft_delete_marks_parent_and_all_children(tmp_path):
+    storage = _storage(tmp_path)
+    client = MagicMock()
+
+    result = soft_delete(storage, Target("department", "pwd"), client=client)
+
+    assert result["status"] == "soft_deleted"
+    assert lookups.get_dataset(storage, "pwd.ds")["deleted"]
+    assert lookups.get_table(storage, "pwd.ds.t")["deleted"]
+    assert lookups._find(storage, lookups.DEPARTMENTS_PATH, "department_id", "pwd")["deleted"]
+
+
 def test_s3_deletion_requires_dedicated_credentials(monkeypatch):
     monkeypatch.setenv("WASABI_BUCKET", "bucket")
     monkeypatch.setenv("WASABI_ENDPOINT_URL", "http://localhost:9000")
