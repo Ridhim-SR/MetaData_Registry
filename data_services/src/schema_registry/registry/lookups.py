@@ -112,7 +112,7 @@ def register_department(
         lambda existing: {
             "department_id": department_id,
             "department_name": department_name,
-            "deleted": "",
+            "deleted": existing.get("deleted", "") if existing else "",
             **(
                 {"department_description": description or existing.get("department_description", "")}
                 if description or (existing and "department_description" in existing)
@@ -211,7 +211,7 @@ def upsert_dataset(
             # forward here so a pipeline run never blanks it.
             "dataset_type": dataset_type or existing.get("dataset_type", ""),
             "schema_source": schema_source or existing.get("schema_source", ""),
-            "deleted": "",
+            "deleted": existing.get("deleted", "") if existing else "",
         }
 
     # The carry-forward merge runs inside _upsert's lock -- reading the
@@ -233,11 +233,12 @@ def set_dataset_fields(storage: ObjectStorage, dataset_id: str, department_id: s
     field removed there must be removed here too. Returns True if anything
     changed."""
 
+    existing = _find(storage, DATASETS_PATH, "dataset_id", dataset_id)
     new_row = {
         "dataset_id": dataset_id,
         "department_id": department_id,
         "dataset_name": dataset_name,
-        "deleted": "",
+        "deleted": existing.get("deleted", "") if existing else "",
     }
     new_row.update({field: (fields.get(field) or "") for field in DATASET_FIELDS})
     existing = _upsert(storage, DATASETS_PATH, "dataset_id", dataset_id, lambda _: new_row)

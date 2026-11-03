@@ -93,6 +93,18 @@ def test_department_soft_delete_marks_parent_and_all_children(tmp_path):
     assert lookups._find(storage, lookups.DEPARTMENTS_PATH, "department_id", "pwd")["deleted"]
 
 
+def test_normal_registration_does_not_restore_deleted_parents(tmp_path):
+    storage = _storage(tmp_path)
+    client = MagicMock()
+
+    soft_delete(storage, Target("department", "pwd"), client=client)
+    lookups.register_department(storage, "pwd", "Renamed PWD")
+    lookups.upsert_dataset(storage, "pwd.ds", "pwd", "Renamed Dataset")
+
+    assert lookups._find(storage, lookups.DEPARTMENTS_PATH, "department_id", "pwd")["deleted"]
+    assert lookups.get_dataset(storage, "pwd.ds")["deleted"]
+
+
 def test_s3_deletion_requires_dedicated_credentials(monkeypatch):
     monkeypatch.setenv("WASABI_BUCKET", "bucket")
     monkeypatch.setenv("WASABI_ENDPOINT_URL", "http://localhost:9000")
