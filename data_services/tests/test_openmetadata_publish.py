@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 import requests
+from metadata.generated.schema.entity.data.table import DataType
 from metadata.ingestion.ometa.client import APIError
 
 from src.schema_registry.curate import CLASSIFICATION_LEVELS
@@ -994,9 +995,9 @@ def test_publish_table_stores_unpublished_column_details_as_json_property(tmp_pa
     assert "readable_type" not in sno
 
 
-def test_unit_reaches_extra_metadata_even_though_it_is_also_in_the_display():
+def test_unit_reaches_extra_metadata_without_changing_the_display_type():
     extra = json.loads(_extra_metadata_json(
-        [{"name": "total_cost", "data_type": "numeric", "readable_type": "Decimal Number",
+        [{"name": "total_cost", "data_type": "numeric", "readable_type": "Numeric",
           "unit": "INR", "ingestion_timestamp": "TS"}],
         "department/pwd/ds/t/curated/schemas/TS.csv",
     ))
@@ -1082,20 +1083,22 @@ def test_a_column_without_a_hindi_name_has_no_display_name():
 
 def test_readable_type_becomes_the_openmetadata_data_type_display():
     column = _to_column(
-        {"name": "sno", "data_type": "integer", "readable_type": "Whole Number"}
+        {"name": "sno", "data_type": "integer", "readable_type": "Numeric"}
     )
 
-    assert _unwrap(column.dataTypeDisplay) == "Whole Number"
+    assert _unwrap(column.dataTypeDisplay) == "Numeric"
+    assert _unwrap(column.dataType) == DataType.INT
 
 
-def test_unit_is_appended_to_the_data_type_display():
+def test_unit_does_not_change_the_numeric_data_type_display():
     column = _to_column(
         {
             "name": "total_cost",
             "data_type": "numeric",
-            "readable_type": "Decimal Number",
+            "readable_type": "Numeric",
             "unit": "INR",
         }
     )
 
-    assert _unwrap(column.dataTypeDisplay) == "Decimal Number (INR)"
+    assert _unwrap(column.dataTypeDisplay) == "Numeric"
+    assert _unwrap(column.dataType) == DataType.NUMERIC

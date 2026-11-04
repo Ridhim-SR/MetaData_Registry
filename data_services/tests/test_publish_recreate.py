@@ -26,7 +26,7 @@ def storage(tmp_path):
                 "name": "total_cost", "data_type": "numeric", "length": "", "scale": "2",
                 "nullable": "False", "default": "", "business_description": "Total cost",
                 "tag": "Financial", "glossary_term": "", "active": "True",
-                "classification": "Public", "readable_type": "Decimal Number", "unit": "INR",
+                "classification": "Public", "readable_type": "Numeric", "unit": "INR",
             }
         ],
     )
@@ -64,8 +64,8 @@ def _backups(storage):
 
 
 def test_stale_display_is_backed_up_deleted_and_recreated(storage, monkeypatch):
-    stale = _FakeTable("numeric", description="Kept by hand")
-    fixed = _FakeTable("decimal number (inr)", description="Kept by hand")
+    stale = _FakeTable("decimal number (inr)", description="Kept by hand")
+    fixed = _FakeTable("numeric", description="Kept by hand")
     published = []
     _tables = [stale, fixed, fixed]
 
@@ -95,7 +95,7 @@ def test_stale_display_is_backed_up_deleted_and_recreated(storage, monkeypatch):
 
 
 def test_matching_display_publishes_without_deleting(storage, monkeypatch):
-    current = _FakeTable("decimal number (inr)")
+    current = _FakeTable("numeric")
     published = []
 
     def _fake_publish(client, storage_arg, table_id, **kwargs):
@@ -115,7 +115,7 @@ def test_matching_display_publishes_without_deleting(storage, monkeypatch):
 
 
 def test_dry_run_reports_stale_display_without_changing_anything(storage, monkeypatch):
-    stale = _FakeTable("numeric")
+    stale = _FakeTable("decimal number (inr)")
     published = []
 
     monkeypatch.setattr(

@@ -196,10 +196,15 @@ def test_a_column_without_a_hindi_name_does_not_gain_the_key():
 
 
 @pytest.mark.parametrize("data_type,label", [
-    ("integer", "Whole Number"),
-    ("BIGINT", "Whole Number"),
-    ("numeric", "Decimal Number"),
-    ("double precision", "Decimal Number"),
+    ("integer", "Numeric"),
+    ("bigint", "Numeric"),
+    ("smallint", "Numeric"),
+    ("serial", "Numeric"),
+    ("bigserial", "Numeric"),
+    ("numeric", "Numeric"),
+    ("decimal", "Numeric"),
+    ("double precision", "Numeric"),
+    ("real", "Numeric"),
     ("character varying", "Text"),
     ("text", "Text"),
     ("boolean", "Yes / No"),
@@ -219,7 +224,7 @@ def test_readable_type_cannot_be_overridden_by_business_metadata():
     """The label must describe the type the parser actually read, so a
     metadata file cannot make an integer column claim to be Text."""
     curated = curate_schema([_col("sno", "integer")], {"sno": {"readable_type": "Text"}})
-    assert curated[0]["readable_type"] == "Whole Number"
+    assert curated[0]["readable_type"] == "Numeric"
 
 
 # --- unit: reviewed answer, numeric columns only ------------------------------

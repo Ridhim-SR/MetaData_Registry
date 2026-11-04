@@ -15,19 +15,20 @@ KNOWN_POSTGRES_TYPES = {
 
 # Raw Postgres type -> the label a non-technical reader understands. Derived,
 # never submitted: the curated file must not be able to disagree with the type
-# the parser actually read. A closed mapping for the same reason as
-# KNOWN_POSTGRES_TYPES -- an unmapped type means curate/publish are out of
-# sync, not that a new label should be invented.
+# the parser actually read. Numeric SQL types keep their precision in
+# `data_type`; their shared display label is simply "Numeric". A closed
+# mapping for the same reason as KNOWN_POSTGRES_TYPES -- an unmapped type
+# means curate/publish are out of sync, not that a new label should be invented.
 READABLE_DATA_TYPES = {
-    "integer": "Whole Number",
-    "bigint": "Whole Number",
-    "smallint": "Whole Number",
-    "serial": "Whole Number",
-    "bigserial": "Whole Number",
-    "numeric": "Decimal Number",
-    "decimal": "Decimal Number",
-    "double precision": "Decimal Number",
-    "real": "Decimal Number",
+    "integer": "Numeric",
+    "bigint": "Numeric",
+    "smallint": "Numeric",
+    "serial": "Numeric",
+    "bigserial": "Numeric",
+    "numeric": "Numeric",
+    "decimal": "Numeric",
+    "double precision": "Numeric",
+    "real": "Numeric",
     "character varying": "Text",
     "varchar": "Text",
     "character": "Text",
@@ -264,10 +265,10 @@ def auto_classify(field_name: str) -> str:
 
 
 def readable_data_type(data_type: str) -> str:
-    """The non-technical label for a Postgres type, e.g. integer -> Whole
-    Number, character varying -> Text. Raises on an unmapped type so a new
-    type is added here (and to KNOWN_POSTGRES_TYPES) instead of the curated
-    file quietly getting a blank/guessed label."""
+    """The non-technical label for a Postgres type, e.g. integer/numeric ->
+    Numeric and character varying -> Text. Raises on an unmapped type so a
+    new type is added here (and to KNOWN_POSTGRES_TYPES) instead of the
+    curated file quietly getting a blank/guessed label."""
 
     label = READABLE_DATA_TYPES.get((data_type or "").strip().lower())
     if label is None:

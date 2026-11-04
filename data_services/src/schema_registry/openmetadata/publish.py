@@ -269,13 +269,9 @@ def _columns_for_put(columns: list[Column]) -> list[Column]:
 
 
 def _display_label(row: dict) -> str:
-    """The readable label OpenMetadata should show for one curated column."""
+    """The single human-facing type label OpenMetadata should show."""
 
-    readable_type = (row.get("readable_type") or "").strip()
-    if not readable_type:
-        return ""
-    unit = (row.get("unit") or "").strip()
-    return f"{readable_type} ({unit})" if unit else readable_type
+    return (row.get("readable_type") or "").strip()
 
 
 def _to_column(row: dict) -> Column:
@@ -301,10 +297,9 @@ def _to_column(row: dict) -> Column:
     name_hindi = (row.get("name_hindi") or "").strip()
     if name_hindi:
         kwargs["displayName"] = name_hindi
-    # A plain-language type ("Whole Number", "Text") is what the catalog UI
-    # shows instead of the raw Postgres type; appending the unit makes
-    # "Decimal Number (INR)" readable in the same cell. `unit` still reaches
-    # extraMetadata for machine use.
+    # A plain-language type ("Numeric", "Text") is what the catalog UI
+    # shows instead of the raw Postgres type. Units remain in extraMetadata
+    # for machine use and do not alter the type returned to API consumers.
     display = _display_label(row)
     if display:
         kwargs["dataTypeDisplay"] = display

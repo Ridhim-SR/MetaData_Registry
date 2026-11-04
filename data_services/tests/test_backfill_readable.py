@@ -78,15 +78,48 @@ def test_backfill_adds_readable_type_while_keeping_data_type_and_answers(storage
     assert [(o.table_id, o.status) for o in outcomes] == [("pwd.vishwakarma.t1", "backfilled")]
     by_name = {row["name"]: row for row in _latest(storage)}
     assert by_name["sno"]["data_type"] == "integer"
-    assert by_name["sno"]["readable_type"] == "Whole Number"
+    assert by_name["sno"]["readable_type"] == "Numeric"
     assert by_name["sno"]["business_description"] == "Serial number"
     assert by_name["sno"]["classification"] == "Public"
     assert by_name["sno"]["unit"] == ""
     assert by_name["total_cost"]["data_type"] == "numeric"
-    assert by_name["total_cost"]["readable_type"] == "Decimal Number"
+    assert by_name["total_cost"]["readable_type"] == "Numeric"
     assert by_name["total_cost"]["unit"] == "INR"
     assert by_name["total_cost"]["tag"] == "Financial"
     assert by_name["total_cost"]["glossary_term"] == "Cost"
+
+
+def test_backfill_replaces_old_numeric_labels_but_preserves_sql_types(storage):
+    _seed(
+        storage,
+        curated=[
+            {
+                "name": "sno", "data_type": "integer", "length": "", "scale": "",
+                "nullable": "False", "default": "", "business_description": "Serial number",
+                "tag": "", "classification": "Public", "glossary_term": "",
+                "active": "True", "readable_type": "Whole Number",
+            },
+            {
+                "name": "total_cost", "data_type": "numeric", "length": "", "scale": "2",
+                "nullable": "False", "default": "", "business_description": "Total cost",
+                "tag": "Financial", "classification": "Financial", "glossary_term": "Cost",
+                "active": "True", "readable_type": "Decimal Number", "unit": "INR",
+            },
+        ],
+    )
+
+    outcomes = backfill(storage)
+
+    assert [(outcome.status, outcome.publish) for outcome in outcomes] == [
+        ("backfilled", "-")
+    ]
+    by_name = {row["name"]: row for row in _latest(storage)}
+    assert by_name["sno"]["readable_type"] == "Numeric"
+    assert by_name["sno"]["data_type"] == "integer"
+    assert by_name["total_cost"]["readable_type"] == "Numeric"
+    assert by_name["total_cost"]["data_type"] == "numeric"
+    assert by_name["total_cost"]["scale"] == "2"
+    assert by_name["total_cost"]["unit"] == "INR"
 
 
 def test_backfill_preserves_blank_and_reviewed_classifications(storage):
