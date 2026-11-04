@@ -390,7 +390,7 @@ def test_unit_column_reaches_the_curated_column_normalized(tmp_path):
 
     column = results["t1"]["columns"][0]
     assert column["unit"] == "INR"
-    assert column["readable_type"] == "Decimal Number"
+    assert column["readable_type"] == "Numeric"
 
 
 def test_unit_on_a_text_column_fails_that_table_only(tmp_path):
