@@ -192,7 +192,7 @@ Do it the same way every time. Examples use PWD; replace the file, department, d
 | Department is already in `catalog.yaml`, one file = one table (also for an **updated** file) | A |
 | Department is **not** in `catalog.yaml` yet | B |
 | You also have a file with column descriptions/tags | C |
-| One file describes **several tables** (field dictionary) | D |
+| One file contains a field dictionary, with or without table names | D |
 
 **A: existing department**
 ```bash
@@ -214,11 +214,13 @@ python3 -m src.schema_registry.add samples/pwd_vishwakarma_full_raw_columns.txt 
     --metadata samples/pwd_vishwakarma_metadata.csv
 ```
 
-**D: one file, many tables.** `--field-dictionary` instead of `--table`:
+**D: one file contains field definitions.** `--field-dictionary` instead of `--table`:
 ```bash
 python3 -m src.schema_registry.add samples/kanya_sumangla_field_dictionary.csv \
     --department samaj_kalyan --dataset cmsvy --field-dictionary
 ```
+For the Irrigation format, which has no `Table Name` values, the dataset id is
+used as the table id.
 
 Other options: `--format csv|postgres_ddl` (normally guessed from the file name: `.csv` → csv, anything else → postgres_ddl), and `--schema <name>` if the table isn't in the `public` schema.
 
