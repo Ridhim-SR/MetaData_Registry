@@ -31,6 +31,7 @@ from src.schema_registry.add import guess_format
 from src.schema_registry.curate import (
     KNOWN_TAGS as CURATED_KNOWN_TAGS,
     auto_tag,
+    normalize_field_name,
     validate_tag,
 )
 from src.schema_registry.pipeline import parse_source
@@ -170,9 +171,10 @@ def apply_rules(columns: list[dict], drafted: list[dict]) -> tuple[list[dict], l
     for c in columns:
         d = by_name.setdefault(c["name"], {"name": c["name"], "business_description": "", "tag": ""})
         name = c["name"]
-        if DIRECT_ID.search(name) and not NOT_PII.search(name):
+        normalized_name = normalize_field_name(name)
+        if DIRECT_ID.search(normalized_name) and not NOT_PII.search(normalized_name):
             new = "PII"
-        elif SENSITIVE.search(name):
+        elif SENSITIVE.search(normalized_name):
             new = "Sensitive"
         else:
             new = d.get("tag") or auto_tag(name) or ""

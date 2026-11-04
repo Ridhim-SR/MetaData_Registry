@@ -953,3 +953,16 @@ departments:
             source: storage:inputs/non_proprietary_data/night_time_light_ntl_over_india/NTL_schema_metadata.csv
             format: csv
             metadata: storage:inputs/non_proprietary_data/night_time_light_ntl_over_india/NTL_metadata.csv
+  irrigation_dept:
+    name: Irrigation Department
+    datasets:
+      restoration_and_renovation_works:
+        category: CAT-3
+        owner: Irrigation Department
+        steward:
+        dataset_type: Administrative
+        schema_source: Department Provided
+        description: >-
+          Field definitions for restoration and renovation works, including
+          reporting periods, targets, progress, and workflow status.
+        field_dictionary: storage:inputs/irrigation_dept/restoration_and_renovation_works/Monitoring_Management_System_Details(S17).csv

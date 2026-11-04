@@ -109,6 +109,28 @@ def test_apply_rules_generalizes_across_department_schema_patterns():
     assert ai_metadata.category_floor(drafted, "CAT-1") == "CAT-3"
 
 
+def test_apply_rules_normalizes_irrigation_camel_case_names():
+    columns = [
+        {"name": "gadhamuktiId"},
+        {"name": "khand"},
+        {"name": "entryDate"},
+        {"name": "cropName"},
+        {"name": "naviniProgressPer"},
+        {"name": "remark"},
+    ]
+
+    drafted, _ = ai_metadata.apply_rules(columns, [])
+
+    assert {column["name"]: column["tag"] for column in drafted} == {
+        "gadhamuktiId": "Identifier",
+        "khand": "Administrative-Unit",
+        "entryDate": "Date/Timestamp",
+        "cropName": "",
+        "naviniProgressPer": "Quantity",
+        "remark": "Remarks",
+    }
+
+
 def test_apply_rules_preserves_explicit_approved_tags_but_rejects_unknown_tags():
     columns = [{"name": "free_text"}]
     drafted, _ = ai_metadata.apply_rules(columns, [{"name": "free_text", "tag": "Quantity"}])
