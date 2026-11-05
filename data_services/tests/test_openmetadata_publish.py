@@ -90,7 +90,7 @@ def _fake_client():
         # a real id, so the follow-up JSON-Patch paths read like
         # /tables/pwd.vishwakarma.t1 instead of a MagicMock repr
         entity.id = fqn
-        # the real server echoes a table's columns back -- _replace_column_tags()
+        # the real server echoes a table's columns back -- _replace_column_fields()
         # maps names to indexes against this list
         entity.columns = getattr(request, "columns", None)
         return entity
@@ -388,6 +388,40 @@ def test_publish_table_patches_an_empty_tag_list_to_clear_a_stale_label(tmp_path
     assert [[tag["tagFQN"] for tag in op["value"]] for op in ops[1:]] == [
         ["FieldTag.Firm/Contractor-Identifier", "MDSF.PII"],
         ["FieldTag.Financial", "MDSF.Financial"],
+    ]
+
+
+def test_publish_table_patches_a_changed_column_description(tmp_path):
+    """OpenMetadata 2.0.2's table PUT ignores a changed `description` on an
+    existing column (verified live: the old text stayed after a re-publish),
+    so publish_table() has to send it as an explicit JSON-Patch as well. A
+    blank description is *not* patched: in a curated snapshot that means
+    "not answered" (the previous text is carried forward), not "clear it"."""
+
+    storage = _ingested_storage(tmp_path)
+    curated_path = storage.list("department/pwd/vishwakarma/tbd_confirm_with_pwd/curated/schemas/")[-1]
+    rows = storage.read_csv(curated_path)
+    rows[1]["business_description"] = "Registered firm name."
+    storage.write_csv(curated_path, rows)
+
+    client = _fake_client()
+    publish_table(client, storage, "pwd.vishwakarma.tbd_confirm_with_pwd")
+
+    table_patches = [
+        call for call in client.client.patch.call_args_list
+        if call.kwargs["path"].startswith("/tables/") and "/columns/" in call.kwargs["data"]
+    ]
+    ops = json.loads(table_patches[-1].kwargs["data"])
+
+    assert {"op": "add", "path": "/columns/1/description", "value": "Registered firm name."} in ops
+    assert [op["path"] for op in ops if op["path"].endswith("/description")] == [
+        "/columns/1/description"
+    ]
+    # the tags for every column are still set exactly, in the same patch
+    assert [op["path"] for op in ops if op["path"].endswith("/tags")] == [
+        "/columns/0/tags",
+        "/columns/1/tags",
+        "/columns/2/tags",
     ]
 
 

@@ -14,7 +14,11 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-_COLUMN_FIELDS = ["name", "data_type", "length", "nullable", "default"]
+# `name_hindi` is a column attribute (OpenMetadata's Column.displayName), so
+# it travels in the split columns CSV rather than business metadata. It is
+# optional: a parser that doesn't answer it writes the column blank, and the
+# CSV parser then leaves the previous label alone.
+_COLUMN_FIELDS = ["name", "data_type", "length", "nullable", "default", "name_hindi"]
 # `tag` is included so a Field Dictionary that answers it (an optional `tag`
 # column) actually reaches curate_schema() -- the parser used to compute it
 # and then drop it here, so a department's answer silently never landed.
@@ -88,6 +92,7 @@ def run_field_dictionary(
                             "length": c["length"] if c["length"] is not None else "",
                             "nullable": str(c["nullable"]),
                             "default": c["default"] if c["default"] is not None else "",
+                            "name_hindi": c.get("name_hindi", ""),
                         }
                     )
 

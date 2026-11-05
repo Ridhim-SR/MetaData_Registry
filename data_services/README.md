@@ -222,6 +222,43 @@ python3 -m src.schema_registry.add samples/kanya_sumangla_field_dictionary.csv \
 For the Irrigation format, which has no `Table Name` values, the dataset id is
 used as the table id.
 
+#### Irrigation source update handoff — 2026-11-05
+
+**Implemented locally (not yet uploaded to development)**
+- The department supplied a new source with both `Name (Hindi)` and an English
+  `Description` for all 18 fields. It is uploaded under the existing key
+  `inputs/irrigation_dept/restoration_and_renovation_works/Monitoring_Management_System_Details(S17).csv`,
+  so `catalog.yaml` is unchanged.
+- `irrigation_parser.py` reads `Name (Hindi)` (or `Hindi Name`) into
+  `name_hindi`; `Description` remains the business description. The header is
+  optional, so older exports without it still parse and keep their
+  descriptions.
+- `field_dictionary_ingest.py` carries `name_hindi` through the split columns
+  CSV; `curate.py` merges it and `publish.py` maps it to OpenMetadata
+  `Column.displayName`.
+- `publish.py` now also PATCHes each column's `description` explicitly.
+  OpenMetadata 2.0.2's table PUT ignores a changed description on an existing
+  column, so without this a corrected source description never reached the
+  catalogue (verified live against local OpenMetadata 2.0.2).
+- Tests cover the parser, a legacy file without `Name (Hindi)`, English
+  descriptions, Hindi display names in the curated snapshot, and the
+  description patch.
+
+**Local verification (2026-11-05)**
+- Uploaded the new source to local MinIO (`sda-local`), ran
+  `sync --department irrigation_dept`, and verified all 18 columns:
+  Hindi `displayName` on all 18, English descriptions on all 18, 17 FieldTags
+  (`cropName` untagged), 4 MDSF levels (`gadhamuktiId`/`khand`/`status` =
+  Internal, `cropName` = Public), 14 columns left unclassified, and dataset
+  `DataSensitivity.CAT-3` with `datasetOwner=Irrigation Department`,
+  `datasetType=Administrative`.
+
+**Still to do after review**
+1. Re-run the targeted tests. The full suite passes except two MinIO batch CLI
+   tests that force `ENVIRONMENT=development` and so only run on `main`.
+2. Once approved: upload the same source on `main`, dry-run a scoped sync, then
+   sync `irrigation_dept` to development.
+
 Other options: `--format csv|postgres_ddl` (normally guessed from the file name: `.csv` → csv, anything else → postgres_ddl), and `--schema <name>` if the table isn't in the `public` schema.
 
 `add` uploads the file to Wasabi (`dev/inputs/<dept>/<dataset>/<file>`) and updates `catalog.yaml`. It prints what it did:

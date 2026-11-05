@@ -42,7 +42,7 @@ def _fake_om_client():
         )
         entity.fullyQualifiedName = f"{parent}.{name}" if parent else str(name)
         entity.name = name
-        # the real server echoes a table's columns back -- _replace_column_tags()
+        # the real server echoes a table's columns back -- _replace_column_fields()
         # maps names to indexes against this list
         entity.columns = getattr(request, "columns", None)
         return entity

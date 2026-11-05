@@ -11,6 +11,9 @@ description and tag, so it gets its own small parser.
 What is kept as-is:
   * ``Name`` -> the column name, exactly as written (this export is
     camelCase and is deliberately not snake_cased);
+  * ``Name (Hindi)`` -> ``name_hindi``, the column's display label. It is an
+    attribute of the column, not a business description; when the header is
+    absent the column keeps whatever label it already had;
   * ``Description`` -> ``business_description`` verbatim. A description
     supplied by the department is never rewritten; a blank one stays blank
     so it can be filled by ``ai_metadata.py`` later;
@@ -167,16 +170,18 @@ def parse_irrigation_field_dictionary(
             table_name,
             {"columns": [], "business_metadata": {}},
         )
-        table["columns"].append(
-            {
-                "name": field_name,
-                "data_type": spec.data_type,
-                "length": spec.length,
-                "scale": spec.scale,
-                "nullable": _nullable(_cell(row, "Mandatory"), field_name),
-                "default": _cell(row, "Default Value") or None,
-            }
-        )
+        column = {
+            "name": field_name,
+            "data_type": spec.data_type,
+            "length": spec.length,
+            "scale": spec.scale,
+            "nullable": _nullable(_cell(row, "Mandatory"), field_name),
+            "default": _cell(row, "Default Value") or None,
+        }
+        name_hindi = _cell(row, "Name (Hindi)", "Hindi Name")
+        if name_hindi:
+            column["name_hindi"] = name_hindi
+        table["columns"].append(column)
         table["business_metadata"][field_name] = metadata
 
     if not tables:

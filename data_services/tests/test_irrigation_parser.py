@@ -29,15 +29,42 @@ _FIELDS = [
     ("status", "Status", "select (dropdown)", "No", "", "Submitted", ""),
 ]
 
+# The Hindi display labels the department supplies in `Name (Hindi)`. They are
+# deliberately a separate attribute from `Description` (business text).
+_HINDI = {
+    "gadhamuktiId": "ID",
+    "khand": "खंड",
+    "entryDate": "प्रविष्टि की दिनांक",
+    "cropName": "फसली नाम",
+    "cropYear": "फसली वर्ष",
+    "financialYear": "वित्तीय वर्ष",
+    "month": "माह का नाम",
+    "year": "वर्ष",
+    "gadhamuktiTarget": "गड्ढामुक्त",
+    "naviniTarget": "नवीनीकरण",
+    "totalTarget": "कुल लक्ष्य",
+    "gadhamuktiProgress": "गड्ढामुक्त",
+    "naviniProgress": "नवीनीकरण",
+    "totalProgress": "कुल प्रगति",
+    "gadhaProgressPer": "प्रगाति गड्ढामुक्ति कार्यो का प्रतिशत",
+    "naviniProgressPer": "प्रगाति नवीनीकरण एवं रेस्टोरेशन कार्यो का प्रतिशत",
+    "remark": "अभ्युक्ति",
+    "status": "Status",
+}
 
-def _dictionary_text(personal_data: str = "", explicit_tag: str = "") -> str:
-    output = io.StringIO()
-    writer = csv.DictWriter(
-        output,
-        fieldnames=[
-            "Dataset Name",
-            "Table Name",
-            "Name",
+
+def _dictionary_text(
+    personal_data: str = "",
+    explicit_tag: str = "",
+    include_hindi: bool = True,
+    descriptions: dict[str, str] | None = None,
+) -> str:
+    descriptions = descriptions or {}
+    fieldnames = ["Dataset Name", "Table Name", "Name"]
+    if include_hindi:
+        fieldnames.append("Name (Hindi)")
+    fieldnames.extend(
+        [
             "Description",
             "Data Format",
             "Maximum Size",
@@ -50,29 +77,32 @@ def _dictionary_text(personal_data: str = "", explicit_tag: str = "") -> str:
             "Example/ Illustration",
             "Tags",
             "Remarks / Comments",
-        ],
+        ]
     )
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=fieldnames)
     writer.writeheader()
     for name, description, data_format, mandatory, validations, values, remarks in _FIELDS:
-        writer.writerow(
-            {
-                "Dataset Name": "Restoration and Renovation Works Dataset",
-                "Table Name": "",
-                "Name": name,
-                "Description": description,
-                "Data Format": data_format,
-                "Maximum Size": "",
-                "Mandatory": mandatory,
-                "Validations": validations,
-                "Values": values,
-                "Default Value": "",
-                "Contains Personal Data": personal_data if name == "gadhamuktiId" else "",
-                "Access Level Classification": "",
-                "Example/ Illustration": "Never copy this example into metadata.",
-                "Tags": explicit_tag if name == "gadhamuktiId" else "",
-                "Remarks / Comments": remarks,
-            }
-        )
+        row = {
+            "Dataset Name": "Restoration and Renovation Works Dataset",
+            "Table Name": "",
+            "Name": name,
+            "Description": descriptions.get(name, description),
+            "Data Format": data_format,
+            "Maximum Size": "",
+            "Mandatory": mandatory,
+            "Validations": validations,
+            "Values": values,
+            "Default Value": "",
+            "Contains Personal Data": personal_data if name == "gadhamuktiId" else "",
+            "Access Level Classification": "",
+            "Example/ Illustration": "Never copy this example into metadata.",
+            "Tags": explicit_tag if name == "gadhamuktiId" else "",
+            "Remarks / Comments": remarks,
+        }
+        if include_hindi:
+            row["Name (Hindi)"] = _HINDI[name]
+        writer.writerow(row)
     return output.getvalue()
 
 
@@ -104,6 +134,15 @@ def test_keeps_camel_case_names_descriptions_and_format_mapping():
     # Mandatory -> nullable.
     assert columns["gadhamuktiId"]["nullable"] is True
     assert columns["khand"]["nullable"] is False
+
+    # `Name (Hindi)` is the column's display label, kept separately from the
+    # English/Hindi business description.
+    assert columns["gadhamuktiId"]["name_hindi"] == "ID"
+    assert columns["khand"]["name_hindi"] == "खंड"
+    assert columns["gadhaProgressPer"]["name_hindi"] == "प्रगाति गड्ढामुक्ति कार्यो का प्रतिशत"
+    assert columns["naviniProgressPer"]["name_hindi"] == (
+        "प्रगाति नवीनीकरण एवं रेस्टोरेशन कार्यो का प्रतिशत"
+    )
 
     # Formats: text/select stay character varying, number becomes numeric,
     # and a numeric step becomes the scale. gadhamuktiTarget is text in the
@@ -154,6 +193,43 @@ def test_generates_reviewable_tag_suggestions_without_touching_descriptions():
     }
     # Descriptions remain exactly what the department supplied.
     assert metadata["gadhamuktiTarget"]["business_description"] == "गड्ढामुक्त"
+
+
+def test_english_descriptions_replace_the_hindi_label_descriptions():
+    descriptions = {
+        "gadhamuktiId": "Unique system-generated identifier of the record.",
+        "khand": (
+            "Canal division (खंड) under which the restoration and renovation "
+            "work is reported."
+        ),
+    }
+    table = parse_irrigation_field_dictionary(
+        _dictionary_text(descriptions=descriptions)
+    )["restoration_and_renovation_works"]
+    metadata = table["business_metadata"]
+    columns = {column["name"]: column for column in table["columns"]}
+
+    # The English description replaces the old Hindi-label description...
+    assert metadata["gadhamuktiId"]["business_description"] == descriptions["gadhamuktiId"]
+    assert metadata["khand"]["business_description"] == descriptions["khand"]
+    # ...while the Hindi label is still carried as the display name.
+    assert columns["gadhamuktiId"]["name_hindi"] == "ID"
+    assert columns["khand"]["name_hindi"] == "खंड"
+    assert columns["entryDate"]["name_hindi"] == "प्रविष्टि की दिनांक"
+
+
+def test_legacy_export_without_a_hindi_column_still_parses():
+    table = parse_irrigation_field_dictionary(
+        _dictionary_text(include_hindi=False)
+    )["restoration_and_renovation_works"]
+    columns = {column["name"]: column for column in table["columns"]}
+
+    # No `Name (Hindi)` header: the columns simply have no display label, and
+    # the legacy Hindi `Description` values are kept as business text.
+    assert "name_hindi" not in columns["khand"]
+    assert "name_hindi" not in columns["entryDate"]
+    assert table["business_metadata"]["khand"]["business_description"] == "खंड"
+    assert table["business_metadata"]["entryDate"]["business_description"] == "प्रविष्टि की दिनांक"
 
 
 def test_personal_data_answer_is_classified_as_pii():
@@ -218,6 +294,14 @@ def test_add_and_local_sync_ingest_the_catalogued_table(tmp_path):
     assert next(column for column in columns if column["name"] == "khand")["tag"] == (
         "Administrative-Unit"
     )
+    # The Hindi display label survives curation into the snapshot, ready for
+    # OpenMetadata's Column.displayName.
+    assert next(column for column in columns if column["name"] == "khand")[
+        "name_hindi"
+    ] == "खंड"
+    assert next(column for column in columns if column["name"] == "entryDate")[
+        "name_hindi"
+    ] == "प्रविष्टि की दिनांक"
     assert next(column for column in columns if column["name"] == "gadhamuktiId")[
         "business_description"
     ] == "ID"
