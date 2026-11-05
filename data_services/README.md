@@ -224,7 +224,7 @@ used as the table id.
 
 #### Irrigation source update handoff — 2026-11-05
 
-**Implemented locally (not yet uploaded to development)**
+**Implemented and deployed to development**
 - The department supplied a new source with both `Name (Hindi)` and an English
   `Description` for all 18 fields. It is uploaded under the existing key
   `inputs/irrigation_dept/restoration_and_renovation_works/Monitoring_Management_System_Details(S17).csv`,
@@ -253,11 +253,20 @@ used as the table id.
   `DataSensitivity.CAT-3` with `datasetOwner=Irrigation Department`,
   `datasetType=Administrative`.
 
-**Still to do after review**
-1. Re-run the targeted tests. The full suite passes except two MinIO batch CLI
-   tests that force `ENVIRONMENT=development` and so only run on `main`.
-2. Once approved: upload the same source on `main`, dry-run a scoped sync, then
-   sync `irrigation_dept` to development.
+**Development deployment (2026-11-05)**
+- Uploaded the same source to the dev Wasabi bucket under the existing key
+  (`5744 bytes`, sha256 starting `43ad89d773e7`), then ran
+  `sync --department irrigation_dept` on `main` after a clean dry run
+  (`2 table(s), 0 failed`).
+- Dev OpenMetadata verification matches local: 18 columns, a display name on
+  every column (`ID` and `Status` stay English, the other 16 are Hindi),
+  English descriptions on 18/18, 17 FieldTags (`cropName` untagged), 4 MDSF
+  levels, 14 unclassified columns, and dataset `DataSensitivity.CAT-3` with
+  `datasetOwner=Irrigation Department`, `datasetType=Administrative`.
+- OpenMetadata warns that no user or team matches `Irrigation Department`, so
+  the built-in Owners field stays unset (the `datasetOwner` custom property is
+  still recorded). Create that user/team in OpenMetadata, or change the owner
+  in `_lookups/datasets.csv`, if the built-in owner is needed.
 
 Other options: `--format csv|postgres_ddl` (normally guessed from the file name: `.csv` → csv, anything else → postgres_ddl), and `--schema <name>` if the table isn't in the `public` schema.
 
