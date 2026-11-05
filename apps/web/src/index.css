@@ -443,3 +443,78 @@ input[type="search"]::-webkit-search-decoration {
     align-self: start;
   }
 }
+
+/* Home hero: dashes drift along the department-to-registry lines. */
+.flow-line {
+  stroke-dasharray: 6 8;
+  animation: flow-dash 2.4s linear infinite;
+}
+@keyframes flow-dash {
+  to {
+    stroke-dashoffset: -28;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .flow-line {
+    animation: none;
+  }
+}
+html {
+  scroll-behavior: smooth;
+}
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+/* Checklist inside the Home hero's registry card (an SVG foreignObject). */
+.home-card-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 7px;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--text);
+}
+.home-card-list li {
+  display: flex;
+  gap: 8px;
+}
+.home-card-list span {
+  color: var(--public-fg);
+  font-weight: 700;
+}
+/* Stat labels on Discover: quiet until hovered. */
+.stat-link {
+  text-decoration: none;
+}
+.stat-link:hover {
+  color: var(--blue-700) !important;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+/* Department cards: lift on hover, arrow slides in. */
+.dept-card {
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.dept-card:hover,
+.dept-card:focus-visible {
+  border-color: var(--blue-700) !important;
+  box-shadow: 0 4px 14px rgba(11, 46, 89, 0.1);
+}
+.dept-card-arrow {
+  opacity: 0.35;
+  transition: opacity 0.15s, transform 0.15s;
+}
+.dept-card:hover .dept-card-arrow,
+.dept-card:focus-visible .dept-card-arrow {
+  opacity: 1;
+  transform: translateX(3px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .dept-card-arrow {
+    transition: none;
+  }
+}

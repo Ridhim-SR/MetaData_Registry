@@ -11,6 +11,7 @@ export function RegistryLayout() {
     fontSize: "0.875rem",
     textDecoration: "none",
   };
+  const headingStyle: React.CSSProperties = { fontWeight: 700, fontSize: "1rem", lineHeight: 1.5, color: "#fff" };
 
   return (
     <div
@@ -23,12 +24,11 @@ export function RegistryLayout() {
         <Outlet />
       </main>
       <footer style={{ background: "var(--navy-900)", color: "#fff" }} aria-label={t("footerLabel")}>
-        <div className="page-container mx-auto grid w-full max-w-7xl grid-cols-1 gap-6 px-4 py-8 sm:grid-cols-2 sm:px-6 md:grid-cols-4 lg:px-8">
+        {/* Every column starts with a heading of the same size, so their first lines align. */}
+        <div className="page-container mx-auto grid w-full max-w-7xl grid-cols-1 gap-8 px-4 pt-10 pb-8 sm:grid-cols-2 sm:px-6 md:grid-cols-[2fr_1fr_1fr] lg:px-8">
           <div>
-            <p className="font-bold" style={{ fontSize: "1rem" }}>
-              {t("footerSiteName")}
-            </p>
-            <p style={{ fontSize: "0.875rem", color: "rgba(255,255,255,0.8)" }}>
+            <p style={headingStyle}>{t("footerSiteName")}</p>
+            <p className="mt-1" style={{ fontSize: "0.875rem", color: "rgba(255,255,255,0.8)" }}>
               {t("govUP")}
             </p>
             <img
@@ -36,7 +36,7 @@ export function RegistryLayout() {
               alt={t("isbLogoAlt")}
               height={40}
               style={{
-                marginTop: "0.75rem",
+                marginTop: "1rem",
                 height: 40,
                 width: "auto",
                 background: "#fff",
@@ -48,18 +48,29 @@ export function RegistryLayout() {
               }}
             />
           </div>
-          <nav aria-label={t("footerLabel")}>
-            <ul className="space-y-2">
+          <nav aria-labelledby="footer-info">
+            <p id="footer-info" style={headingStyle}>
+              {t("footerInfo")}
+            </p>
+            <ul className="mt-3 space-y-2">
               <li>
                 <Link to="/about" style={linkStyle}>
                   {t("footerAbout")}
                 </Link>
               </li>
+              <li>
+                <Link to="/disclaimer" style={linkStyle}>
+                  {t("footerDisclaimer")}
+                </Link>
+              </li>
               {/* Contact and Accessibility Statement hidden for now. */}
             </ul>
           </nav>
-          <nav aria-label={t("footerLegal")}>
-            <ul className="space-y-2">
+          <nav aria-labelledby="footer-legal">
+            <p id="footer-legal" style={headingStyle}>
+              {t("footerLegal")}
+            </p>
+            <ul className="mt-3 space-y-2">
               <li>
                 <Link to="/copyrights" style={linkStyle}>
                   {t("footerTerms")}
@@ -72,9 +83,14 @@ export function RegistryLayout() {
               </li>
             </ul>
           </nav>
-          <div style={{ fontSize: "0.875rem", color: "rgba(255,255,255,0.8)" }}>
-            <p>{t("footerCopyright", { year })}</p>
-          </div>
+        </div>
+        <div style={{ borderTop: "1px solid rgba(255,255,255,0.15)" }}>
+          <p
+            className="page-container mx-auto w-full max-w-7xl px-4 py-4 sm:px-6 lg:px-8"
+            style={{ fontSize: "0.8125rem", color: "rgba(255,255,255,0.75)" }}
+          >
+            {t("footerCopyright", { year })}
+          </p>
         </div>
       </footer>
     </div>

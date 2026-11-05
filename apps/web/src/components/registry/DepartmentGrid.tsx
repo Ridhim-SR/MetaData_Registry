@@ -2,13 +2,29 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { listDepartments } from "../../api/registry";
+import type { Department } from "../../api/registry";
 import { t, useLanguage } from "../../i18n";
 import { humanizeRaw } from "../../utils/format";
+import { Icon } from "./Icons";
+import type { IconName } from "./Icons";
 import { EmptyBlock, ErrorBlock, Skeleton } from "./StateBlocks";
 
-const icons = ["🌾", "🏥", "🏗", "💧", "🏭", "📚", "🏘", "🗺"];
-function iconFor(index: number) {
-  return icons[index % icons.length];
+// Icon by what the department does, matched on its slug and name (English or
+// Hindi words); anything unmatched gets a generic government building.
+// More specific patterns come first (horticulture before agriculture).
+const DEPT_ICONS: Array<[RegExp, IconName]> = [
+  [/horticult|udyan|उद्यान/, "sprout"],
+  [/agri|krishi|कृषि/, "wheat"],
+  [/rural|gramya|panchayat|ग्राम/, "house"],
+  [/women|child|icds|mahila|bal vikas|महिला|बाल/, "baby"],
+  [/irrigat|water|jal|सिंचाई|जल/, "droplets"],
+  [/pwd|public[\s_]*works|road|लोक निर्माण/, "hardHat"],
+  [/health|medical|hospital|स्वास्थ्य|चिकित्सा/, "heartPulse"],
+  [/educat|school|shiksha|शिक्षा/, "graduationCap"],
+];
+function iconFor(d: Department): IconName {
+  const text = `${d.slug} ${d.display_name} ${d.short_name ?? ""}`.toLowerCase();
+  return DEPT_ICONS.find(([re]) => re.test(text))?.[1] ?? "landmark";
 }
 
 export function DepartmentGrid({ compact = false }: { compact?: boolean }) {
@@ -222,34 +238,30 @@ export function DepartmentGrid({ compact = false }: { compact?: boolean }) {
           className="mt-4"
           style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: "16px" }}
         >
-          {shown.map((d, i) => (
+          {shown.map((d) => (
             <li key={d.slug}>
               <Link
                 to={`/departments/${encodeURIComponent(d.slug)}`}
-                className="p-4"
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  height: "100%",
-                  minHeight: "130px",
-                  border: "1px solid var(--border)",
-                  borderRadius: 6,
-                  background: "var(--bg)",
-                  textDecoration: "none",
-                }}
+                className="dept-card flex h-full items-center gap-4 p-4"
+                style={{ minHeight: 96, border: "1px solid var(--border)", borderRadius: 10, background: "var(--bg)", textDecoration: "none" }}
               >
-                <div aria-hidden style={{ color: "var(--saffron-text)", fontSize: "32px", lineHeight: 1 }}>
-                  {iconFor(i)}
-                </div>
-                <div className="mt-2 font-semibold" style={{ color: "var(--navy-900)", fontSize: "1rem" }}>
-                  {humanizeRaw(d.display_name)}
-                </div>
-                <div
-                  className="text-sm"
-                  style={{ marginTop: "auto", paddingTop: "0.25rem", color: "var(--text-muted)", fontSize: "0.875rem" }}
+                <span
+                  className="flex shrink-0 items-center justify-center"
+                  style={{ width: 52, height: 52, borderRadius: 10, background: "var(--navy-900)", color: "#fff" }}
                 >
-                  {datasetWord(d.dataset_count)}
-                </div>
+                  <Icon name={iconFor(d)} size={26} />
+                </span>
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span className="font-semibold" style={{ color: "var(--navy-900)", fontSize: "1rem", lineHeight: 1.3 }}>
+                    {humanizeRaw(d.display_name)}
+                  </span>
+                  <span className="mt-1" style={{ color: "var(--text-muted)", fontSize: "0.875rem" }}>
+                    {datasetWord(d.dataset_count)}
+                  </span>
+                </span>
+                <span className="dept-card-arrow shrink-0" style={{ color: "var(--blue-700)" }}>
+                  <Icon name="arrowRight" size={18} />
+                </span>
               </Link>
             </li>
           ))}

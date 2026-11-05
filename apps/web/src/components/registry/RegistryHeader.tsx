@@ -196,6 +196,9 @@ export function RegistryHeader() {
             <NavLink to="/" end style={navLinkStyle}>
               {t("navHome")}
             </NavLink>
+            <NavLink to="/discover" style={navLinkStyle}>
+              {t("navDiscover")}
+            </NavLink>
             <NavLink to="/explore" end style={navLinkStyle}>
               {t("navCatalog")}
             </NavLink>
@@ -306,6 +309,7 @@ export function RegistryHeader() {
           >
             {[
               { to: "/", label: t("navHome") },
+              { to: "/discover", label: t("navDiscover") },
               { to: "/explore", label: t("navCatalog") },
               { to: "/departments", label: t("navDepartments") },
               // Hidden for now: My Requests (/dashboard) and Admin (/users).
