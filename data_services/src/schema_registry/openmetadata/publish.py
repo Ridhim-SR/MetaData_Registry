@@ -251,7 +251,7 @@ def _columns_for_put(columns: list[Column]) -> list[Column]:
     (MDSF.PII + MDSF.Public) with HTTP 400. That made a reclassify
     deadlock: the PUT that carries the new level could never land because
     the old one was still stored. Send only the non-MDSF tags (FieldTag /
-    glossary terms merge harmlessly) and let _replace_column_tags()'s
+    glossary terms merge harmlessly) and let _replace_column_fields()'s
     JSON-Patch -- an `add` on the exact `columns/N/tags` member, which
     replaces it -- set the exact list afterwards; that *does* swap the old
     MDSF label for the new one (verified against local OpenMetadata 2.0.2)."""
@@ -269,13 +269,9 @@ def _columns_for_put(columns: list[Column]) -> list[Column]:
 
 
 def _display_label(row: dict) -> str:
-    """The readable label OpenMetadata should show for one curated column."""
+    """The single human-facing type label OpenMetadata should show."""
 
-    readable_type = (row.get("readable_type") or "").strip()
-    if not readable_type:
-        return ""
-    unit = (row.get("unit") or "").strip()
-    return f"{readable_type} ({unit})" if unit else readable_type
+    return (row.get("readable_type") or "").strip()
 
 
 def _to_column(row: dict) -> Column:
@@ -292,7 +288,7 @@ def _to_column(row: dict) -> Column:
         "dataType": data_type,
         "description": row.get("business_description") or None,
         # The PUT still merges these with whatever tags the column already
-        # has -- _replace_column_tags() is what actually makes them exact.
+        # has -- _replace_column_fields() is what actually makes them exact.
         "tags": _column_tags(row),
     }
     # The Hindi name is a display label for the column, so it goes to
@@ -301,10 +297,9 @@ def _to_column(row: dict) -> Column:
     name_hindi = (row.get("name_hindi") or "").strip()
     if name_hindi:
         kwargs["displayName"] = name_hindi
-    # A plain-language type ("Whole Number", "Text") is what the catalog UI
-    # shows instead of the raw Postgres type; appending the unit makes
-    # "Decimal Number (INR)" readable in the same cell. `unit` still reaches
-    # extraMetadata for machine use.
+    # A plain-language type ("Numeric", "Text") is what the catalog UI
+    # shows instead of the raw Postgres type. Units remain in extraMetadata
+    # for machine use and do not alter the type returned to API consumers.
     display = _display_label(row)
     if display:
         kwargs["dataTypeDisplay"] = display
@@ -714,20 +709,34 @@ def _ensure_mdsf_levels(client: OpenMetadata) -> None:
 
 _CATEGORY_RE = re.compile(r"^CAT-(\d+)$", re.IGNORECASE)
 
-def _replace_column_tags(client: OpenMetadata, table, columns: list[Column]) -> None:
-    """create_or_update()'s PUT merges column tags with the ones already
-    there, so a column moved from CAT-3 to CAT-1 would carry both labels.
-    Set each column's tags to exactly this run's list, matching columns by
-    name against the entity the server returned (its order, not ours)."""
+def _replace_column_fields(client: OpenMetadata, table, columns: list[Column]) -> None:
+    """Set each column's tags and description to exactly this run's values.
+
+    Two OpenMetadata 2.0.2 update quirks make the explicit patch necessary:
+
+    * `create_or_update()`'s PUT merges column tags with the ones already
+      there, so a column moved from CAT-3 to CAT-1 would carry both labels.
+    * The PUT ignores a changed `description` on an existing column (verified
+      live: a re-publish left the old text in place), so a department's
+      corrected description would never reach the catalogue.
+
+    Match columns by name against the entity the server returned (its order,
+    not ours). Tags are always sent, so clearing them really clears them; a
+    description is only sent when the curated snapshot has one, because a
+    blank cell means "not answered" (the snapshot's carry-forward already
+    keeps the previous text)."""
 
     server_names = [str(_unwrap(c.name)) for c in (getattr(table, "columns", None) or [])]
     fields = {}
     for column in columns:
         name = str(_unwrap(column.name))
         if name not in server_names:
-            raise ValueError(f"Column '{name}' missing from {_fqn(table)} after publish -- can't set its tags.")
+            raise ValueError(f"Column '{name}' missing from {_fqn(table)} after publish -- can't set its fields.")
         index = server_names.index(name)
         fields[f"columns/{index}/tags"] = [t.model_dump(mode="json", exclude_none=True) for t in column.tags or []]
+        description = _unwrap(getattr(column, "description", None)) or ""
+        if description:
+            fields[f"columns/{index}/description"] = description
     if fields:
         _replace_entity_fields(client, "/tables", _unwrap(table.id), fields, op="add")
 
@@ -879,7 +888,7 @@ def publish_table(
     _replace_entity_fields(client, "/tables", _unwrap(table.id),
                            {"extension": {EXTRA_METADATA_PROPERTY: _extra_metadata_json(curated_columns, curated_path)}},
                            op="add")
-    _replace_column_tags(client, table, columns)
+    _replace_column_fields(client, table, columns)
 
     logger.info(f"Published {table_id} -> {_fqn(table)} ({len(curated_columns)} column(s)) from {curated_path}")
 

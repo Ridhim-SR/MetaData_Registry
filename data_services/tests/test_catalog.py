@@ -102,6 +102,7 @@ def test_shipped_catalog_is_valid():
         "horticulture_department",
         "women_and_child_development_department",
         "non_proprietary_data",
+        "irrigation_dept",
     ]
 
     # Kanya Sumangala is Women & Child Development, not Agriculture: two
@@ -114,3 +115,10 @@ def test_shipped_catalog_is_valid():
     assert all(ds.fields["dataset_type"] == "Citizen Centric" for ds in wcd.datasets)
     assert all(ds.field_dictionary and ds.field_dictionary.startswith("storage:inputs/")
                for ds in wcd.datasets)
+
+    irrigation = next(d for d in departments if d.id == "irrigation_dept")
+    assert irrigation.name == "Irrigation Department"
+    (works,) = irrigation.datasets
+    assert works.name == "restoration_and_renovation_works"
+    assert works.fields["category"] == "CAT-3"
+    assert works.fields["dataset_type"] == "Administrative"

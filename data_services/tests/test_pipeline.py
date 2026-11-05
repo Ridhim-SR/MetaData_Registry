@@ -42,7 +42,7 @@ def _fake_om_client():
         )
         entity.fullyQualifiedName = f"{parent}.{name}" if parent else str(name)
         entity.name = name
-        # the real server echoes a table's columns back -- _replace_column_tags()
+        # the real server echoes a table's columns back -- _replace_column_fields()
         # maps names to indexes against this list
         entity.columns = getattr(request, "columns", None)
         return entity
@@ -165,7 +165,9 @@ def test_run_registers_dataset_and_table_lookups(tmp_path):
         source_format="postgres_ddl",
     )
 
-    assert storage.read_csv("_lookups/departments.csv") == [{"department_id": "pwd", "department_name": "PWD"}]
+    assert storage.read_csv("_lookups/departments.csv") == [
+        {"department_id": "pwd", "department_name": "PWD", "deleted": ""}
+    ]
     assert storage.read_csv("_lookups/datasets.csv")[0]["dataset_id"] == "pwd.vishwakarma"
     assert storage.read_csv("_lookups/tables.csv")[0]["table_id"] == "pwd.vishwakarma.t1"
 

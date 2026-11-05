@@ -6,6 +6,7 @@ from metadata.ingestion.ometa.ometa_api import OpenMetadata
 
 from src.schema_registry import inputs
 from src.schema_registry.parsers.field_dictionary_parser import parse_field_dictionary_text
+from src.schema_registry.parsers.irrigation_parser import parse_irrigation_field_dictionary
 from src.schema_registry.pipeline import _timestamp, run
 from src.schema_registry.registry import lookups, paths
 from src.storage.base import ObjectStorage
@@ -13,19 +14,19 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-_COLUMN_FIELDS = ["name", "data_type", "length", "nullable", "default"]
+# `name_hindi` is a column attribute (OpenMetadata's Column.displayName), so
+# it travels in the split columns CSV rather than business metadata. It is
+# optional: a parser that doesn't answer it writes the column blank, and the
+# CSV parser then leaves the previous label alone.
+_COLUMN_FIELDS = ["name", "data_type", "length", "nullable", "default", "name_hindi"]
 # `tag` is included so a Field Dictionary that answers it (an optional `tag`
 # column) actually reaches curate_schema() -- the parser used to compute it
 # and then drop it here, so a department's answer silently never landed.
-# `Personal Data (Y/N)` is deliberately not a source of tags (see the parser);
-# PII still reaches `classification` via curate's MDSF rules. A blank
-# is safe: pipeline's _business_metadata_from_rows drops blank cells, so a
-# dictionary that doesn't answer `tag` leaves an existing hand-set value
-# alone instead of clearing it, which is what _merge_business_metadata()
-# carries forward. Nothing else is written: a blank classification/
-# glossary_term or a hard-coded active=true would still overwrite answers
-# set by hand on an earlier run.
-_METADATA_FIELDS = ["name", "business_description", "tag", "unit"]
+# `Personal Data (Y/N)` is deliberately not a source of tags (see the parser).
+# Parsers can provide reviewed tags and classifications. Blank answers are
+# filtered out by _business_metadata_from_rows(), so they do not erase
+# existing values. `glossary_term` and `active` are not source fields.
+_METADATA_FIELDS = ["name", "business_description", "tag", "unit", "classification"]
 
 
 def run_field_dictionary(
@@ -38,8 +39,7 @@ def run_field_dictionary(
     allow_column_removal: bool = False,
     reclassify: bool = False,
 ) -> dict[str, dict]:
-    """Ingest a multi-table Field Dictionary CSV (see field_dictionary_parser.py
-    for the expected shape) by splitting it into one temporary per-table
+    """Ingest a Field Dictionary CSV by splitting it into one temporary per-table
     columns file + business-metadata file per "Dataset Name" group, then
     calling pipeline.run() once per table -- exactly as if the department
     had submitted one CSV per table. Every existing guarantee (diff-based
@@ -62,7 +62,15 @@ def run_field_dictionary(
     # The original multi-table file is archived once at dataset level; each
     # table's run() then archives the per-table split it actually parsed.
     source_bytes, source_name = inputs.read_input(storage, source_file)
-    tables = parse_field_dictionary_text(inputs.decode(source_bytes), label=source_file)
+    text = inputs.decode(source_bytes)
+    if department == "irrigation_dept":
+        tables = parse_irrigation_field_dictionary(
+            text,
+            label=source_file,
+            default_table_name=dataset,
+        )
+    else:
+        tables = parse_field_dictionary_text(text, label=source_file)
     archive_path = paths.dataset_source_path(
         lookups.slugify(department), lookups.slugify(dataset), _timestamp(), source_name
     )
@@ -84,6 +92,7 @@ def run_field_dictionary(
                             "length": c["length"] if c["length"] is not None else "",
                             "nullable": str(c["nullable"]),
                             "default": c["default"] if c["default"] is not None else "",
+                            "name_hindi": c.get("name_hindi", ""),
                         }
                     )
 
@@ -98,6 +107,7 @@ def run_field_dictionary(
                             "business_description": meta.get("business_description", ""),
                             "tag": meta.get("tag", ""),
                             "unit": meta.get("unit", ""),
+                            "classification": meta.get("classification", ""),
                         }
                     )
 

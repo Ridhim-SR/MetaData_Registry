@@ -118,7 +118,7 @@ def test_publish_failure_is_reported_per_table_and_the_loop_continues(tmp_path):
                 entity.fullyQualifiedName = f"{parent}.{name}" if parent else str(name)
                 entity.name = name
                 entity.id = "11111111-1111-1111-1111-111111111111"
-                # _replace_column_tags() matches the sent columns against the
+                # _replace_column_fields() matches the sent columns against the
                 # ones the "server" echoes back, so it needs a real list here
                 entity.columns = getattr(request, "columns", None)
                 return entity
@@ -390,7 +390,7 @@ def test_unit_column_reaches_the_curated_column_normalized(tmp_path):
 
     column = results["t1"]["columns"][0]
     assert column["unit"] == "INR"
-    assert column["readable_type"] == "Decimal Number"
+    assert column["readable_type"] == "Numeric"
 
 
 def test_unit_on_a_text_column_fails_that_table_only(tmp_path):

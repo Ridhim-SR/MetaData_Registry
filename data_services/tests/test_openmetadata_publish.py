@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 import requests
+from metadata.generated.schema.entity.data.table import DataType
 from metadata.ingestion.ometa.client import APIError
 
 from src.schema_registry.curate import CLASSIFICATION_LEVELS
@@ -89,7 +90,7 @@ def _fake_client():
         # a real id, so the follow-up JSON-Patch paths read like
         # /tables/pwd.vishwakarma.t1 instead of a MagicMock repr
         entity.id = fqn
-        # the real server echoes a table's columns back -- _replace_column_tags()
+        # the real server echoes a table's columns back -- _replace_column_fields()
         # maps names to indexes against this list
         entity.columns = getattr(request, "columns", None)
         return entity
@@ -387,6 +388,40 @@ def test_publish_table_patches_an_empty_tag_list_to_clear_a_stale_label(tmp_path
     assert [[tag["tagFQN"] for tag in op["value"]] for op in ops[1:]] == [
         ["FieldTag.Firm/Contractor-Identifier", "MDSF.PII"],
         ["FieldTag.Financial", "MDSF.Financial"],
+    ]
+
+
+def test_publish_table_patches_a_changed_column_description(tmp_path):
+    """OpenMetadata 2.0.2's table PUT ignores a changed `description` on an
+    existing column (verified live: the old text stayed after a re-publish),
+    so publish_table() has to send it as an explicit JSON-Patch as well. A
+    blank description is *not* patched: in a curated snapshot that means
+    "not answered" (the previous text is carried forward), not "clear it"."""
+
+    storage = _ingested_storage(tmp_path)
+    curated_path = storage.list("department/pwd/vishwakarma/tbd_confirm_with_pwd/curated/schemas/")[-1]
+    rows = storage.read_csv(curated_path)
+    rows[1]["business_description"] = "Registered firm name."
+    storage.write_csv(curated_path, rows)
+
+    client = _fake_client()
+    publish_table(client, storage, "pwd.vishwakarma.tbd_confirm_with_pwd")
+
+    table_patches = [
+        call for call in client.client.patch.call_args_list
+        if call.kwargs["path"].startswith("/tables/") and "/columns/" in call.kwargs["data"]
+    ]
+    ops = json.loads(table_patches[-1].kwargs["data"])
+
+    assert {"op": "add", "path": "/columns/1/description", "value": "Registered firm name."} in ops
+    assert [op["path"] for op in ops if op["path"].endswith("/description")] == [
+        "/columns/1/description"
+    ]
+    # the tags for every column are still set exactly, in the same patch
+    assert [op["path"] for op in ops if op["path"].endswith("/tags")] == [
+        "/columns/0/tags",
+        "/columns/1/tags",
+        "/columns/2/tags",
     ]
 
 
@@ -994,9 +1029,9 @@ def test_publish_table_stores_unpublished_column_details_as_json_property(tmp_pa
     assert "readable_type" not in sno
 
 
-def test_unit_reaches_extra_metadata_even_though_it_is_also_in_the_display():
+def test_unit_reaches_extra_metadata_without_changing_the_display_type():
     extra = json.loads(_extra_metadata_json(
-        [{"name": "total_cost", "data_type": "numeric", "readable_type": "Decimal Number",
+        [{"name": "total_cost", "data_type": "numeric", "readable_type": "Numeric",
           "unit": "INR", "ingestion_timestamp": "TS"}],
         "department/pwd/ds/t/curated/schemas/TS.csv",
     ))
@@ -1082,20 +1117,22 @@ def test_a_column_without_a_hindi_name_has_no_display_name():
 
 def test_readable_type_becomes_the_openmetadata_data_type_display():
     column = _to_column(
-        {"name": "sno", "data_type": "integer", "readable_type": "Whole Number"}
+        {"name": "sno", "data_type": "integer", "readable_type": "Numeric"}
     )
 
-    assert _unwrap(column.dataTypeDisplay) == "Whole Number"
+    assert _unwrap(column.dataTypeDisplay) == "Numeric"
+    assert _unwrap(column.dataType) == DataType.INT
 
 
-def test_unit_is_appended_to_the_data_type_display():
+def test_unit_does_not_change_the_numeric_data_type_display():
     column = _to_column(
         {
             "name": "total_cost",
             "data_type": "numeric",
-            "readable_type": "Decimal Number",
+            "readable_type": "Numeric",
             "unit": "INR",
         }
     )
 
-    assert _unwrap(column.dataTypeDisplay) == "Decimal Number (INR)"
+    assert _unwrap(column.dataTypeDisplay) == "Numeric"
+    assert _unwrap(column.dataType) == DataType.NUMERIC

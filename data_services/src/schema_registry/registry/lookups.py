@@ -112,6 +112,7 @@ def register_department(
         lambda existing: {
             "department_id": department_id,
             "department_name": department_name,
+            "deleted": existing.get("deleted", "") if existing else "",
             **(
                 {"department_description": description or existing.get("department_description", "")}
                 if description or (existing and "department_description" in existing)
@@ -210,6 +211,7 @@ def upsert_dataset(
             # forward here so a pipeline run never blanks it.
             "dataset_type": dataset_type or existing.get("dataset_type", ""),
             "schema_source": schema_source or existing.get("schema_source", ""),
+            "deleted": existing.get("deleted", "") if existing else "",
         }
 
     # The carry-forward merge runs inside _upsert's lock -- reading the
@@ -231,7 +233,13 @@ def set_dataset_fields(storage: ObjectStorage, dataset_id: str, department_id: s
     field removed there must be removed here too. Returns True if anything
     changed."""
 
-    new_row = {"dataset_id": dataset_id, "department_id": department_id, "dataset_name": dataset_name}
+    existing = _find(storage, DATASETS_PATH, "dataset_id", dataset_id)
+    new_row = {
+        "dataset_id": dataset_id,
+        "department_id": department_id,
+        "dataset_name": dataset_name,
+        "deleted": existing.get("deleted", "") if existing else "",
+    }
     new_row.update({field: (fields.get(field) or "") for field in DATASET_FIELDS})
     existing = _upsert(storage, DATASETS_PATH, "dataset_id", dataset_id, lambda _: new_row)
     changed = existing is None or any((existing.get(k) or "") != v for k, v in new_row.items())
@@ -327,6 +335,37 @@ def soft_delete_table(storage: ObjectStorage, table_id: str) -> dict:
     return row
 
 
+def _mark_deleted(storage: ObjectStorage, path: str, key: str, value: str) -> dict:
+    with storage.lock(path):
+        rows = storage.read_csv(path) if storage.exists(path) else []
+        row = next((r for r in rows if r[key] == value), None)
+        if row is None:
+            raise ValueError(f"Unknown {key} '{value}' -- not found in {path}")
+        if not row.get("deleted"):
+            row["deleted"] = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+            storage.write_csv(path, rows)
+    return row
+
+
+def soft_delete_dataset(storage: ObjectStorage, dataset_id: str) -> dict:
+    """Mark a dataset deleted while retaining its metadata and history."""
+    row = _mark_deleted(storage, DATASETS_PATH, "dataset_id", dataset_id)
+    for table in storage.read_csv(TABLES_PATH) if storage.exists(TABLES_PATH) else []:
+        if table.get("dataset_id") == dataset_id:
+            soft_delete_table(storage, table["table_id"])
+    return row
+
+
+def soft_delete_department(storage: ObjectStorage, department_id: str) -> dict:
+    """Mark a department and all child datasets/tables deleted."""
+    row = _mark_deleted(storage, DEPARTMENTS_PATH, "department_id", department_id)
+    datasets = storage.read_csv(DATASETS_PATH) if storage.exists(DATASETS_PATH) else []
+    for dataset in datasets:
+        if dataset.get("department_id") == department_id:
+            soft_delete_dataset(storage, dataset["dataset_id"])
+    return row
+
+
 def restore_table(storage: ObjectStorage, table_id: str) -> dict:
     """Clear a table's soft-delete marker while preserving its history."""
 
@@ -340,6 +379,37 @@ def restore_table(storage: ObjectStorage, table_id: str) -> dict:
         row["deleted"] = ""
         storage.write_csv(TABLES_PATH, rows)
     logger.info(f"Table restored in the registry: {table_id}")
+    return row
+
+
+def _restore_marker(storage: ObjectStorage, path: str, key: str, value: str) -> dict:
+    with storage.lock(path):
+        rows = storage.read_csv(path) if storage.exists(path) else []
+        row = next((r for r in rows if r[key] == value), None)
+        if row is None:
+            raise ValueError(f"Unknown {key} '{value}' -- not found in {path}")
+        if row.get("deleted"):
+            row["deleted"] = ""
+            storage.write_csv(path, rows)
+    return row
+
+
+def restore_dataset(storage: ObjectStorage, dataset_id: str) -> dict:
+    """Restore a dataset and its child tables."""
+    row = _restore_marker(storage, DATASETS_PATH, "dataset_id", dataset_id)
+    for table in storage.read_csv(TABLES_PATH) if storage.exists(TABLES_PATH) else []:
+        if table.get("dataset_id") == dataset_id:
+            restore_table(storage, table["table_id"])
+    return row
+
+
+def restore_department(storage: ObjectStorage, department_id: str) -> dict:
+    """Restore a department and all child datasets/tables."""
+    row = _restore_marker(storage, DEPARTMENTS_PATH, "department_id", department_id)
+    datasets = storage.read_csv(DATASETS_PATH) if storage.exists(DATASETS_PATH) else []
+    for dataset in datasets:
+        if dataset.get("department_id") == department_id:
+            restore_dataset(storage, dataset["dataset_id"])
     return row
 
 

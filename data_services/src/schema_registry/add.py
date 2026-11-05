@@ -161,6 +161,22 @@ def add(
         # never replaces the good one already in inputs/.
         text = inputs.decode(Path(file).read_bytes())
         validate_schema(f"{department}.{dataset}.{table}", parse_source(department, table, file_format or guess_format(file), text))
+    elif department == "irrigation_dept":
+        # This export has no Table Name column values, so validate every
+        # group against the reviewed table id (the dataset id here).
+        from src.schema_registry.parsers.irrigation_parser import parse_irrigation_field_dictionary
+
+        text = inputs.decode(Path(file).read_bytes())
+        parsed = parse_irrigation_field_dictionary(
+            text,
+            label=file,
+            default_table_name=dataset,
+        )
+        for parsed_name, details in parsed.items():
+            validate_schema(
+                f"{department}.{dataset}.{lookups.slugify(parsed_name)}",
+                details["columns"],
+            )
 
     source_key = input_key(department, dataset, Path(file).name)
     metadata_key = input_key(department, dataset, Path(metadata_file).name) if metadata_file else None
@@ -197,7 +213,11 @@ def _main(argv: list[str]) -> int:
     parser.add_argument("--dataset", required=True)
     target = parser.add_mutually_exclusive_group(required=True)
     target.add_argument("--table", help="table this file describes")
-    target.add_argument("--field-dictionary", action="store_true", help="the file describes several tables of the dataset")
+    target.add_argument(
+        "--field-dictionary",
+        action="store_true",
+        help="the file contains field definitions for one or more dataset tables",
+    )
     parser.add_argument("--format", choices=["postgres_ddl", "csv"], help="default: .csv -> csv, otherwise postgres_ddl")
     parser.add_argument("--schema", help="database schema name (default public)")
     parser.add_argument("--metadata", help="a business-metadata CSV for the table (descriptions, tags, ...)")

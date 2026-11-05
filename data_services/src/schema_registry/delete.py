@@ -178,8 +178,12 @@ def soft_delete(storage: ObjectStorage, target: Target, client=None, dry_run: bo
         raise ValueError("OpenMetadata admin client is required for a soft delete")
     if not dry_run and client is not None:
         om_deleted = _delete_openmetadata_with_mode(client, storage, target, hard_delete=False)
-        for row in rows:
-            lookups.soft_delete_table(storage, row["table_id"])
+        if target.kind == "table":
+            lookups.soft_delete_table(storage, target.value)
+        elif target.kind == "dataset":
+            lookups.soft_delete_dataset(storage, target.value)
+        else:
+            lookups.soft_delete_department(storage, target.value)
     else:
         om_deleted = 0
     return {
@@ -202,8 +206,12 @@ def restore(storage: ObjectStorage, target: Target, client=None, dry_run: bool =
     if not rows:
         raise ValueError(f"No soft-deleted tables matched {target.kind} '{target.value}'")
     if not dry_run:
-        for row in rows:
-            lookups.restore_table(storage, row["table_id"])
+        if target.kind == "table":
+            lookups.restore_table(storage, target.value)
+        elif target.kind == "dataset":
+            lookups.restore_dataset(storage, target.value)
+        else:
+            lookups.restore_department(storage, target.value)
         if client is not None:
             from src.schema_registry.openmetadata.publish import publish_table
             for row in rows:

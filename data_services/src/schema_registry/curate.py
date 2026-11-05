@@ -15,19 +15,20 @@ KNOWN_POSTGRES_TYPES = {
 
 # Raw Postgres type -> the label a non-technical reader understands. Derived,
 # never submitted: the curated file must not be able to disagree with the type
-# the parser actually read. A closed mapping for the same reason as
-# KNOWN_POSTGRES_TYPES -- an unmapped type means curate/publish are out of
-# sync, not that a new label should be invented.
+# the parser actually read. Numeric SQL types keep their precision in
+# `data_type`; their shared display label is simply "Numeric". A closed
+# mapping for the same reason as KNOWN_POSTGRES_TYPES -- an unmapped type
+# means curate/publish are out of sync, not that a new label should be invented.
 READABLE_DATA_TYPES = {
-    "integer": "Whole Number",
-    "bigint": "Whole Number",
-    "smallint": "Whole Number",
-    "serial": "Whole Number",
-    "bigserial": "Whole Number",
-    "numeric": "Decimal Number",
-    "decimal": "Decimal Number",
-    "double precision": "Decimal Number",
-    "real": "Decimal Number",
+    "integer": "Numeric",
+    "bigint": "Numeric",
+    "smallint": "Numeric",
+    "serial": "Numeric",
+    "bigserial": "Numeric",
+    "numeric": "Numeric",
+    "decimal": "Numeric",
+    "double precision": "Numeric",
+    "real": "Numeric",
     "character varying": "Text",
     "varchar": "Text",
     "character": "Text",
@@ -82,6 +83,12 @@ def _tok(*words: str) -> str:
     return r"(?<![a-z0-9])(?:" + "|".join(words) + r")(?![a-z0-9])"
 
 
+def normalize_field_name(field_name: str) -> str:
+    """Make camelCase names comparable with the shared snake_case rules."""
+
+    return re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", field_name).lower()
+
+
 # Auto-classification rules (field_name pattern -> classification level)
 # Based on MDSF: classify per field by risk of disclosure/re-identification/misuse
 AUTO_CLASSIFICATION_RULES: list[tuple[str, re.Pattern]] = [
@@ -98,6 +105,8 @@ AUTO_CLASSIFICATION_RULES: list[tuple[str, re.Pattern]] = [
         r"mandal|town|city|ward|sector|ulb|cluster|hobli|country)(_[a-z]+)*_name$",
         re.IGNORECASE,
     )),
+    # A crop label is not a person's name.
+    ("Public", re.compile(r"(^|_)crop_name$", re.IGNORECASE)),
     # Non-person "name of ..." columns. MUST stay above the PII name rules:
     # "name of the work" is a title, not a person.
     ("Internal", re.compile(_tok(r"name_of_(?:work|scheme|project|department|office|division|road|bridge)"), re.IGNORECASE)),
@@ -148,7 +157,7 @@ AUTO_CLASSIFICATION_RULES: list[tuple[str, re.Pattern]] = [
     # Internal - Operational identifiers
     ("Internal", re.compile(r"(id$|_id|code$|_code|reference|ref_no|sr_no|serial)", re.IGNORECASE)),
     ("Internal", re.compile(r"(created|modified|updated|deleted|version|status)", re.IGNORECASE)),
-    ("Internal", re.compile(r"(department|division|branch|office|zone|region|district|block)|" + _tok("units?"), re.IGNORECASE)),
+    ("Internal", re.compile(r"(department|division|branch|office|zone|region|district|block|khand)|" + _tok("units?"), re.IGNORECASE)),
 
     # Public - Non-sensitive reference data. Whole tokens: "capacity" is not
     # a city and "statement" is not a state -- a wrongly Public field is the
@@ -176,6 +185,7 @@ AUTO_TAG_RULES: list[tuple[str, re.Pattern]] = [
         re.IGNORECASE,
     )),
     ("Firm/Contractor-Identifier", re.compile(r"(firm_pannumber|firm_name|bidder_name|contractor)", re.IGNORECASE)),
+    ("Administrative-Unit", re.compile(r"(^|_)khand(_|$)", re.IGNORECASE)),
     ("Geospatial", re.compile(
         r"^(lat|longs?|chainage_|geofanc_)|"
         r"(^|_)(state|district|block|gp|gram_panchayat|village|tehsil|taluka|taluk|"
@@ -184,7 +194,7 @@ AUTO_TAG_RULES: list[tuple[str, re.Pattern]] = [
         r"place_of_birth|sign_place)(_|$)",
         re.IGNORECASE,
     )),
-    ("Date/Timestamp", re.compile(r"(_date|_at)$|(^|_)(year|financial_year|fy)$", re.IGNORECASE)),
+    ("Date/Timestamp", re.compile(r"(_date|_at)$|(^|_)(year|financial_year|fy|month)$", re.IGNORECASE)),
     ("Identifier", re.compile(r"(^|_)(id|uuid)$|(_id|_no|_number|_code)$", re.IGNORECASE)),
     ("Quantity", re.compile(
         r"(^|_)(no_of_|total_|count_|num_|cumul_)[a-z0-9_]+$|"
@@ -192,12 +202,13 @@ AUTO_TAG_RULES: list[tuple[str, re.Pattern]] = [
         r"_duration(_years?)?|_threshold|_instalments?|_age|_members|"
         r"_(hh|pers|indiv)|_land|_area)$|"
         r"(^|_)(fam_completed_100_days|completed_100_days)$|"
+        r"_(target|progress|per|percentage|percent)$|"
         r"(^|_)(land_)?area_(hectares?|acres?|sq_?m|sq_?ft)$|"
         r"(^|_)quantity$|(^|_)maxno(_|$)|"
         r"(^|_)(lowest|highest)_class$",
         re.IGNORECASE,
     )),
-    ("Remarks", re.compile(r"(^|_)(remarks|notes?)$", re.IGNORECASE)),
+    ("Remarks", re.compile(r"(^|_)(remarks?|notes?)$", re.IGNORECASE)),
 ]
 
 # The controlled vocabulary for a column's `tag`. Two kinds of value live
@@ -231,6 +242,7 @@ CATEGORY_LEVELS = ["CAT-1", "CAT-2", "CAT-3", "CAT-4"]
 
 
 def auto_tag(field_name: str) -> str | None:
+    field_name = normalize_field_name(field_name)
     for tag, pattern in AUTO_TAG_RULES:
         if pattern.search(field_name):
             return tag
@@ -245,6 +257,7 @@ def auto_classify(field_name: str) -> str:
     recognises gets "" (not classified yet): a default level would claim
     someone judged the field low-risk, and nobody did.
     """
+    field_name = normalize_field_name(field_name)
     for classification, pattern in AUTO_CLASSIFICATION_RULES:
         if pattern.search(field_name):
             return classification
@@ -252,10 +265,10 @@ def auto_classify(field_name: str) -> str:
 
 
 def readable_data_type(data_type: str) -> str:
-    """The non-technical label for a Postgres type, e.g. integer -> Whole
-    Number, character varying -> Text. Raises on an unmapped type so a new
-    type is added here (and to KNOWN_POSTGRES_TYPES) instead of the curated
-    file quietly getting a blank/guessed label."""
+    """The non-technical label for a Postgres type, e.g. integer/numeric ->
+    Numeric and character varying -> Text. Raises on an unmapped type so a
+    new type is added here (and to KNOWN_POSTGRES_TYPES) instead of the
+    curated file quietly getting a blank/guessed label."""
 
     label = READABLE_DATA_TYPES.get((data_type or "").strip().lower())
     if label is None:
