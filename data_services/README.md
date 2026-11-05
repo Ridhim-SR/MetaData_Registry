@@ -268,6 +268,12 @@ used as the table id.
   **Group** team `Irrigation Department` (parent `Organization`) and republished
   the table without re-ingesting. The dataset's built-in **Owners** now lists
   that team, and the republish ran without the warning.
+- The new team is configured exactly like the existing department teams
+  (`Agriculture Department`, `Public Works Department (PWD)`,
+  `Rural Development Department`): Group type under `Organization`, joinable,
+  and no explicit members, owners, policies, default roles or domains. Dev
+  OpenMetadata has no users in any department team, so no membership was added
+  and the ownership rules currently see the team, not a list of people.
 
 Other options: `--format csv|postgres_ddl` (normally guessed from the file name: `.csv` → csv, anything else → postgres_ddl), and `--schema <name>` if the table isn't in the `public` schema.
 
