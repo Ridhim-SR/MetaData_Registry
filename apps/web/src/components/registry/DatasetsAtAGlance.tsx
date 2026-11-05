@@ -3,7 +3,8 @@ import { getRegistryStats } from "../../api/registry";
 import { formatNumber, t, useLanguage } from "../../i18n";
 import type { I18nKey } from "../../i18n";
 import { CAT_CATEGORIES } from "../../utils/format";
-import { Skeleton } from "./StateBlocks";
+import { HeadlineStats } from "./HeadlineStats";
+import { ErrorBlock, Skeleton } from "./StateBlocks";
 
 // Bar colours follow the CAT badge colours (badge-public .. badge-confidential).
 const CAT_COLORS: Record<number, string> = {
@@ -22,9 +23,9 @@ const DATASET_TYPES: Array<{ key: string; label: I18nKey; detail: I18nKey; color
 type Row = { key: string; label: string; detail: string | null; count: number; color: string };
 
 /**
- * "Datasets at a glance" — dataset counts by classification and by dataset
- * type, from the same /registry/stats response (and query cache) as the
- * StatsBar above, so each chart always adds up to its Datasets total.
+ * "Datasets at a glance" — the headline counts, then dataset counts by
+ * classification and by dataset type, all from one /registry/stats
+ * response, so each chart always adds up to the Datasets total.
  * CAT-1..CAT-3 and both dataset types are always shown; CAT-4 (admins
  * only), "Not classified" and "Not specified" only when they have datasets.
  */
@@ -57,8 +58,8 @@ export function DatasetsAtAGlance() {
     typeRows.push({ key: "unspecified", label: t("notSpecified"), detail: null, count: byType!.unspecified, color: "var(--text-muted)" });
   }
 
-  // The StatsBar already reports load errors; an empty catalog needs no chart.
-  if (!loading && (query.error || !byCat || query.data?.datasets === 0)) return null;
+  // An empty catalog still shows its counts, but needs no charts.
+  const showCharts = !loading && !query.error && !!byCat && (query.data?.datasets ?? 0) > 0;
 
   return (
     <section aria-label={t("glanceTitle")} style={{ background: "var(--bg)" }}>
@@ -70,21 +71,31 @@ export function DatasetsAtAGlance() {
           {t("glanceSubtitle")}
         </p>
 
-        {/* Exactly two cards, so split the row in half (stacked on small screens). */}
-        <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div className="mt-4" role={loading ? "status" : undefined} aria-label={loading ? t("statsLoading") : undefined}>
           {loading ? (
-            <>
-              <Skeleton className="h-44" />
-              <Skeleton className="h-44" />
-            </>
+            <Skeleton className="h-24" />
+          ) : query.error ? (
+            <ErrorBlock message={t("statsError")} onRetry={() => query.refetch()} />
           ) : (
-            <>
+            query.data && <HeadlineStats stats={query.data} />
+          )}
+        </div>
+
+        {/* Exactly two cards, so split the row in half (stacked on small screens). */}
+        {loading ? (
+          <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+            <Skeleton className="h-44" />
+            <Skeleton className="h-44" />
+          </div>
+        ) : (
+          showCharts && (
+            <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
               <BarCard title={t("byClassification")} rows={catRows} />
               {/* Older APIs don't send by_dataset_type yet; show the chart once they do. */}
               {byType && <BarCard title={t("byDatasetType")} rows={typeRows} />}
-            </>
-          )}
-        </div>
+            </div>
+          )
+        )}
       </div>
     </section>
   );

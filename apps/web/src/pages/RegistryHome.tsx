@@ -1,21 +1,16 @@
-import { Hero } from "../components/registry/Hero";
-import { StatsBar } from "../components/registry/StatsBar";
-import { DatasetsAtAGlance } from "../components/registry/DatasetsAtAGlance";
-import { DepartmentGrid } from "../components/registry/DepartmentGrid";
-import { PublicDataSection } from "../components/registry/PublicDataSection";
+import {
+  HomeAbout,
+  HomeHero,
+} from "../components/registry/HomeSections";
 import { HowItWorks } from "../components/registry/HowItWorks";
-import { AccessCTA } from "../components/registry/AccessCTA";
 
+// Landing page. Search, stats and dataset listings live on the Discover page.
 export function RegistryHomePage() {
   return (
     <div>
-      <Hero />
-      <StatsBar />
-      <DatasetsAtAGlance />
-      <DepartmentGrid compact />
-      <PublicDataSection />
+      <HomeHero />
+      <HomeAbout />
       <HowItWorks />
-      <AccessCTA />
     </div>
   );
 }

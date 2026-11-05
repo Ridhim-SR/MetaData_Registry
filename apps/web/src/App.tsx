@@ -7,6 +7,8 @@ import { DashboardPage } from "./pages/Dashboard";
 import { DatasetDetailPage } from "./pages/DatasetDetail";
 import { DepartmentDetailPage } from "./pages/DepartmentDetail";
 import { DepartmentsPage } from "./pages/Departments";
+import { DiscoverPage } from "./pages/Discover";
+import { DisclaimerPage } from "./pages/Disclaimer";
 import { IngestionPage } from "./pages/Ingestion";
 import { LoginPage } from "./pages/Login";
 import { OAuthCallbackPage } from "./pages/OAuthCallback";
@@ -26,6 +28,7 @@ export default function App() {
         <Route path="/auth/callback/:provider" element={<OAuthCallbackPage />} />
         <Route element={<RegistryLayout />}>
           <Route index element={<RegistryHomePage />} />
+          <Route path="discover" element={<DiscoverPage />} />
           <Route path="explore" element={<ExplorePage />} />
           <Route path="explore/:tableId" element={<TableDetailPage />} />
           <Route path="datasets/:datasetFqn" element={<DatasetDetailPage />} />
@@ -33,6 +36,7 @@ export default function App() {
           <Route path="departments" element={<DepartmentsPage />} />
           <Route path="departments/:slug" element={<DepartmentDetailPage />} />
           <Route path="about" element={<AboutPage />} />
+          <Route path="disclaimer" element={<DisclaimerPage />} />
           <Route path="privacy" element={<PrivacyPolicyPage />} />
           <Route path="copyrights" element={<CopyrightsPolicyPage />} />
         </Route>

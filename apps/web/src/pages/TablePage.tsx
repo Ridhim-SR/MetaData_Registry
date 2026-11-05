@@ -282,6 +282,14 @@ export function TablePage() {
         {" / "}
         <Link to="/explore" style={{ color: "var(--blue-700)" }}>{t("navCatalog")}</Link>
         {" / "}
+        {card?.department ? (
+          <>
+            <Link to={`/departments/${encodeURIComponent(card.department)}`} style={{ color: "var(--blue-700)" }}>
+              {humanizeRaw(card.department_display ?? card.department)}
+            </Link>
+            {" / "}
+          </>
+        ) : null}
         {card ? (
           <>
             <Link to={`/datasets/${encodeURIComponent(card.dataset)}`} style={{ color: "var(--blue-700)" }}>
