@@ -3,7 +3,12 @@ pytest>=8.0
 filelock>=3.13
 tenacity>=9.0
 boto3>=1.34
-moto[s3]>=5.0
+# Pinned deliberately: 5.2.5 flaked CI run 41977994557 (2026-11-05) in the
+# moto-backed S3 concurrency test with "ValueError: I/O operation on closed
+# file". 5.2.3 passed. Policy: check PyPI every Monday and move only on
+# alternate patches (5.2.5, 5.2.7, ...), re-running tests/test_s3_storage.py
+# first. See progress.md section 18.
+moto[s3]==5.2.3
 python-dotenv>=1.0
 pyyaml>=6.0
 ruamel.yaml>=0.18
