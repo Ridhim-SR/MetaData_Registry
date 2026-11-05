@@ -263,10 +263,11 @@ used as the table id.
   English descriptions on 18/18, 17 FieldTags (`cropName` untagged), 4 MDSF
   levels, 14 unclassified columns, and dataset `DataSensitivity.CAT-3` with
   `datasetOwner=Irrigation Department`, `datasetType=Administrative`.
-- OpenMetadata warns that no user or team matches `Irrigation Department`, so
-  the built-in Owners field stays unset (the `datasetOwner` custom property is
-  still recorded). Create that user/team in OpenMetadata, or change the owner
-  in `_lookups/datasets.csv`, if the built-in owner is needed.
+- OpenMetadata warned that no user or team matched `Irrigation Department`, so
+  the built-in Owners field stayed unset. Added the missing department as a
+  **Group** team `Irrigation Department` (parent `Organization`) and republished
+  the table without re-ingesting. The dataset's built-in **Owners** now lists
+  that team, and the republish ran without the warning.
 
 Other options: `--format csv|postgres_ddl` (normally guessed from the file name: `.csv` → csv, anything else → postgres_ddl), and `--schema <name>` if the table isn't in the `public` schema.
 
@@ -539,7 +540,11 @@ Database's built-in **Owners** field, so ownership-based access rules and
 "my assets" filters apply; an unresolvable one is a warning, not a failure.
 A matching team must be of type **Group**: OpenMetadata rejects
 Department/Division/BusinessUnit teams as owners, so those are skipped with a
-warning instead of failing the publish.
+warning instead of failing the publish. To fix an unmatched department owner,
+create a **Group** team whose name (or email) is exactly the `owner` value in
+`_lookups/datasets.csv` — for example `Irrigation Department` — under the
+`Organization` team, then republish (or run `sync` again). Ownership-based
+access rules and "my assets" filters only see the built-in Owners field.
 
 **Re-running is safe** — the service and schema are reused; the database
 and table are always create-or-update, so a later-confirmed `category`/
