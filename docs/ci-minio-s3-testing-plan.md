@@ -1,6 +1,6 @@
 # CI plan: exercise S3 behavior with MinIO
 
-**Status:** Complete — steps 1–5 implemented 2026-11-06. Verified locally against MinIO; not yet pushed or run in GitHub Actions.
+**Status:** Complete — steps 1–5 implemented, pushed to `main`, and green in CI on 2026-11-06. The local MinIO image is pinned to the same release as CI.
 **Planning date:** 2026-11-05
 **Implementation target:** 2026-11-06
 **Scope:** `data_services` CI tests and their documentation
@@ -179,6 +179,10 @@ Local verification: **669 passed, 0 skipped** with `SDA_MINIO_INTEGRATION=1`;
 **9 passed, 2 explained skips** without it; a 50-round stress run passed and
 left 0 integration objects behind. On Windows, `localhost` added ~21 s per new
 S3 connection, so the examples and CI use `127.0.0.1`.
+
+CI: runs `42164156314` (`a08ee00`) and `42166951053` (`7d1cba7`) both green.
+`data_services` reports **659 passed, 10 skipped**; all 10 are the pre-existing
+gitignored real-data skips — there are no MinIO skips.
 
 ## Out of scope
 
