@@ -33,13 +33,15 @@ Local data never leaves this machine:
 
 ## What it runs
 
-| Service  | Image                   | Purpose                              |
-| -------- | ----------------------- | ------------------------------------ |
-| `minio`  | `bitnamilegacy/minio`   | S3 server + web console              |
+| Service  | Image                                        | Purpose                 |
+| -------- | -------------------------------------------- | ----------------------- |
+| `minio`  | `bitnamilegacy/minio:2025.7.23-debian-12-r5` | S3 server + web console |
 
 The image is `bitnamilegacy/minio`: Docker Hub's `minio/minio` was removed
 when MinIO went closed-source (2025); the bitnami legacy org keeps the last
-open build available.
+open build available. It is pinned by tag **and digest** to the exact image
+the `data_services` CI job runs, so local and CI results stay comparable.
+Do not change it to `latest`.
 
 ## Start / stop
 

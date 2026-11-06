@@ -170,6 +170,9 @@ behavior.
   cleanup, optional bounded `SDA_MINIO_STRESS_ROUNDS`.
 - `tests/test_batch.py`: derives the allowed `ENVIRONMENT` from the branch and
   points every environment prefix at the test MinIO.
+- `infrastructure/minio/docker-compose.yml` and its README: the local image is
+  pinned to the same tag + digest as CI. Recreating the container preserved the
+  named `minio-data` volume and every object; the full suite passed afterwards.
 - `data_services/README.md`: Moto vs MinIO, local opt-in, stress command.
 
 Local verification: **669 passed, 0 skipped** with `SDA_MINIO_INTEGRATION=1`;
@@ -200,6 +203,6 @@ S3 connection, so the examples and CI use `127.0.0.1`.
   from a single pass or respond to a flaky test by weakening its assertions.
 - **Resource readiness:** container start does not imply S3 readiness; use a
   health/readiness loop with a finite timeout and actionable failure output.
-- **Existing local compose image:** whether to pin/update it is a separate
-  local-infrastructure decision. Do not broaden the CI task unless using the
-  same image is necessary and its impact has been reviewed.
+- **Existing local compose image:** resolved 2026-11-06 — the developer
+  compose pins the same tag and digest as CI. Recreating the container kept
+  the `minio-data` volume and all objects.
