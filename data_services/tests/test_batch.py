@@ -4,12 +4,14 @@ import subprocess
 import sys
 import uuid
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 
 from src.schema_registry.registry import lookups
 from src.schema_registry.batch import run_batch
 from src.storage.local import LocalObjectStorage
+from src.utils.config import environment_for_branch
 
 
 def test_batch_runs_multiple_departments(tmp_path):
@@ -184,12 +186,41 @@ def test_manifest_row_can_set_the_dataset_level_fields(tmp_path):
     assert row["dataset_description"] == "PWD's master works dataset."
 
 
-_MINIO_ENDPOINT = "http://localhost:9000"
+_MINIO_ENDPOINT = os.environ.get("SDA_MINIO_ENDPOINT", "http://127.0.0.1:9000")
+_MINIO_STORAGE = {
+    "BUCKET": os.environ.get("SDA_MINIO_BUCKET", "sda-local"),
+    "ENDPOINT_URL": _MINIO_ENDPOINT,
+    "REGION": os.environ.get("SDA_MINIO_REGION", "us-east-1"),
+    "ACCESS_KEY_ID": os.environ.get("SDA_MINIO_ACCESS_KEY_ID", "minioadmin"),
+    "SECRET_ACCESS_KEY": os.environ.get("SDA_MINIO_SECRET_ACCESS_KEY", "minioadmin"),
+}
+
+
+def _branch_environment() -> str:
+    """The ENVIRONMENT the CLI will accept on this checkout.
+
+    main -> development; a feature branch, or CI's detached pull-request
+    checkout -> local. load_env() refuses any ENVIRONMENT that isn't the
+    branch's own, so the test must ask rather than hardcode development.
+    """
+
+    try:
+        branch = subprocess.run(
+            ["git", "-C", str(Path(__file__).resolve().parents[1]),
+             "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        branch = ""
+    return environment_for_branch(None if branch in ("", "HEAD") else branch)
 
 
 def _minio_up() -> bool:
+    url = urlsplit(_MINIO_ENDPOINT)
+    host = url.hostname or "localhost"
+    port = url.port or (443 if url.scheme == "https" else 9000)
     try:
-        with socket.create_connection(("localhost", 9000), timeout=2):
+        with socket.create_connection((host, port), timeout=2):
             return True
     except OSError:
         return False
@@ -202,19 +233,21 @@ requires_minio = pytest.mark.skipif(
 
 
 def _run_cli(tmp_path, manifest) -> "subprocess.CompletedProcess":
-    env = {**os.environ, "MANIFEST_FILE": str(manifest), "ENVIRONMENT": "development"}
-    # Main's config routes feature-branch runs to S3 (no local-filesystem
-    # storage anymore), so point the CLI at the local MinIO stand-in
-    # (infrastructure/minio) under a throwaway prefix: the run exercises the
-    # real S3 code path but can never touch the real local/ registry state.
-    env.update({
-        "WASABI_ENDPOINT_URL": _MINIO_ENDPOINT,
-        "WASABI_REGION": "us-east-1",
-        "WASABI_BUCKET": "sda-local",
-        "WASABI_ACCESS_KEY_ID": "minioadmin",
-        "WASABI_SECRET_ACCESS_KEY": "minioadmin",
-        "WASABI_PREFIX": f"tests/{uuid.uuid4().hex}",
-    })
+    env = {
+        **os.environ,
+        "MANIFEST_FILE": str(manifest),
+        "ENVIRONMENT": _branch_environment(),
+    }
+    # Point every account at the local MinIO stand-in under a throwaway
+    # prefix: the run exercises the real S3 code path but can never touch the
+    # real local/ or dev/ registry state. All three prefixes are set so an
+    # inherited .env cannot redirect the test at a company bucket; local
+    # reads LOCAL_WASABI_*, development reads DEV_WASABI_*, production
+    # reads PROD_WASABI_*. WASABI_PREFIX itself is shared.
+    for prefix in ("", "LOCAL_", "DEV_", "PROD_"):
+        for name, value in _MINIO_STORAGE.items():
+            env[f"{prefix}WASABI_{name}"] = value
+    env["WASABI_PREFIX"] = f"tests/{uuid.uuid4().hex}"
     # Storage-only run. Popping the token is NOT enough: load_env() re-reads
     # it from .env, so the CLI would build a real client and this test would
     # publish `pwd.vishwakarma.t1` into whatever local OpenMetadata is up

@@ -584,6 +584,66 @@ OPENMETADATA_JWT_TOKEN=<token> python3 -m src.schema_registry.openmetadata.setup
 python3 -m pytest tests/
 ```
 Covers parsers, curation/tagging, lookup dedup, concurrency, and the full pipeline/batch/publish flow end to end.
+
+### Moto vs real MinIO
+
+- `tests/test_s3_storage.py` uses Moto's in-memory S3. It is fast and runs
+  everywhere; it covers the storage API, the lock, and the full pipeline.
+- `tests/test_s3_minio_integration.py` is **opt-in** and talks to a real
+  S3-compatible server. It proves what Moto cannot: `If-None-Match` /
+  `If-Match` are enforced, so the cross-machine lock really is exclusive, and
+  concurrent read-modify-write updates of one lookup CSV lose no rows. It is
+  skipped with an explanatory `-rs` reason unless the settings below are
+  supplied.
+- The two CLI tests at the end of `tests/test_batch.py` also need a reachable
+  MinIO. They skip (again with a reason under `-rs`) when it is not running.
+
+Start the local MinIO stack and create its buckets once:
+
+```bash
+docker compose -f infrastructure/minio/docker-compose.yml up -d
+python3 infrastructure/minio/init_buckets.py
+```
+
+Run the integration tests against it (the same disposable local credentials
+the stack uses):
+
+```bash
+export SDA_MINIO_INTEGRATION=1
+export SDA_MINIO_ENDPOINT=http://127.0.0.1:9000
+export SDA_MINIO_BUCKET=sda-local
+export SDA_MINIO_REGION=us-east-1
+export SDA_MINIO_ACCESS_KEY_ID=minioadmin
+export SDA_MINIO_SECRET_ACCESS_KEY=minioadmin
+
+python3 -m pytest tests/test_s3_minio_integration.py -q -rs
+
+# optional bounded stress run: repeat the concurrent-lookup case 50 times
+SDA_MINIO_STRESS_ROUNDS=50 python3 -m pytest tests/test_s3_minio_integration.py -q -rs
+```
+
+Use `127.0.0.1` rather than `localhost` on Windows: Docker Desktop's IPv6
+path can add roughly 20 seconds to each new S3 connection.
+
+Test objects live under a unique `tests/minio-integration/<label>-<uuid>/`
+prefix and are deleted in a `finally` block. CI starts a pinned MinIO service
+container for the `data_services` job and sets the same `SDA_MINIO_*` values on
+the test step; it uses no Wasabi or OpenMetadata credentials.
+
+The S3 storage tests use `moto[s3]==5.2.3`. This pin avoids a CI flake seen
+with Moto 5.2.5 in the concurrent-registration test
+(`ValueError: I/O operation on closed file`). Check Moto's latest stable release
+every Monday, but consider only alternate patches from the current pin (the
+first candidate after 5.2.3 is 5.2.7; 5.2.5 is known bad). Before changing the
+pin, run the focused S3 tests and then the full suite:
+
+```bash
+python3 -m pytest tests/test_s3_storage.py -q
+python3 -m pytest -q
+```
+
+Record each Monday check and any pin change in the repository's progress log.
+
 ---
 
 ## When something fails

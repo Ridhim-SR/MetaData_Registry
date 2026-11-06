@@ -13,8 +13,11 @@ name: CI
 # (dev/ or prod/) or the shared OpenMetadata at 10.0.96.105 even by accident.
 # That is the same branch guard used locally, doing its job here for free.
 #
-# The 2 skipped data_services tests need MinIO on localhost:9000. They are
-# accepted as skips for now; adding a MinIO service is a deliberate follow-up.
+# The 2 MinIO-dependent data_services tests run against an ephemeral MinIO
+# service container in the data-services job (test-only credentials, no
+# company secrets). Tests write under a throwaway prefix and the container is
+# discarded when the job ends. Locally the same tests still skip when MinIO is
+# not running, so developers without Docker are unaffected.
 
 on:
   push:
@@ -34,6 +37,18 @@ jobs:
     defaults:
       run:
         working-directory: data_services
+    services:
+      minio:
+        # Pinned release AND digest, never :latest -- CI must be reproducible.
+        # Docker Hub's minio/minio image was removed when MinIO went
+        # closed-source; bitnamilegacy keeps the last open build (the same
+        # image family infrastructure/minio uses locally).
+        image: bitnamilegacy/minio:2025.7.23-debian-12-r5@sha256:6dabb4a2088c9a79908de3bc05f4586c23ad2182c8908e7e3acbf61c1467fb20
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+        ports:
+          - 9000:9000
     steps:
       - uses: actions/checkout@v5
 
@@ -48,12 +63,88 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      # A service container is "running" before the S3 API answers, so poll
+      # the health endpoint instead of racing pytest. On failure, print the
+      # container logs so the reason is visible in the job output.
+      - name: Wait for MinIO
+        run: |
+          for attempt in {1..30}; do
+            if curl -fsS http://127.0.0.1:9000/minio/health/live > /dev/null; then
+              echo "MinIO is ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "MinIO did not become ready; container logs:"
+          docker logs "${{ job.services.minio.id }}"
+          exit 1
+
+      # init_buckets.py creates <bucket> and <bucket>-backup. The batch tests
+      # only use sda-local; the backup bucket costs nothing on an ephemeral
+      # server. Arguments are explicit because CI has no data_services/.env.
+      - name: Create test buckets
+        run: |
+          python ../infrastructure/minio/init_buckets.py \
+            --endpoint http://127.0.0.1:9000 \
+            --region us-east-1 \
+            --bucket sda-local \
+            --access-key minioadmin \
+            --secret-key minioadmin
+
+      # Preflight: show the test target (never the credentials) and prove the
+      # bucket is reachable, so a bad endpoint/bucket fails here with a clear
+      # message instead of inside the tests. The integration tests receive the
+      # same values through SDA_MINIO_* on the "Run tests" step.
+      - name: Preflight MinIO test configuration
+        env:
+          SDA_MINIO_ENDPOINT: http://127.0.0.1:9000
+          SDA_MINIO_BUCKET: sda-local
+          SDA_MINIO_REGION: us-east-1
+          SDA_MINIO_ACCESS_KEY_ID: minioadmin
+          SDA_MINIO_SECRET_ACCESS_KEY: minioadmin
+        run: |
+          python - <<'PY'
+          import os
+          import sys
+
+          import boto3
+
+          endpoint = os.environ["SDA_MINIO_ENDPOINT"]
+          bucket = os.environ["SDA_MINIO_BUCKET"]
+          client = boto3.client(
+              "s3",
+              endpoint_url=endpoint,
+              aws_access_key_id=os.environ["SDA_MINIO_ACCESS_KEY_ID"],
+              aws_secret_access_key=os.environ["SDA_MINIO_SECRET_ACCESS_KEY"],
+              region_name=os.environ["SDA_MINIO_REGION"],
+          )
+          buckets = {b["Name"] for b in client.list_buckets().get("Buckets", [])}
+          print(f"MinIO endpoint: {endpoint}")
+          print(f"Test bucket:    {bucket} ({'present' if bucket in buckets else 'MISSING'})")
+          if bucket not in buckets:
+              sys.exit(1)
+          client.list_objects_v2(Bucket=bucket, MaxKeys=1)
+          print("Bucket access confirmed")
+          PY
+
       # -rs prints the reason for each skipped test. Without it a dependency
       # gap is invisible: the first CI run reported "462 passed, 11 skipped"
       # against 502 locally, because openpyxl was missing from
       # requirements.txt and 36 workbook tests skipped without saying why.
       # Skipping is fine; skipping silently is not.
+      #
+      # SDA_MINIO_* enables the real-MinIO integration tests. No Wasabi or
+      # OpenMetadata credentials are present: the batch tests blank the OM
+      # token and the integration tests construct S3ObjectStorage directly
+      # against this ephemeral service.
       - name: Run tests
+        env:
+          SDA_MINIO_INTEGRATION: "1"
+          SDA_MINIO_ENDPOINT: http://127.0.0.1:9000
+          SDA_MINIO_BUCKET: sda-local
+          SDA_MINIO_REGION: us-east-1
+          SDA_MINIO_ACCESS_KEY_ID: minioadmin
+          SDA_MINIO_SECRET_ACCESS_KEY: minioadmin
         run: python -m pytest -q --no-header -rs
 
   apps-api:
