@@ -1,7 +1,9 @@
+import threading
 from unittest.mock import MagicMock
 
 import pytest
 
+import src.schema_registry.sync as sync_module
 from src.schema_registry.catalog import parse_catalog
 from src.schema_registry.openmetadata.publish import _unwrap
 from src.schema_registry.registry import lookups
@@ -299,6 +301,86 @@ def test_sync_records_a_failed_publish_on_the_run_row(storage):
     assert "server said no" in runs["pwd.vishwakarma.works"]["error"]
     # the snapshot itself survived, so `republish` can still fix it
     assert lookups.latest_snapshot_run(storage, "pwd.vishwakarma.works")["publish_status"] == "failed"
+
+
+_FIELD_DICTIONARY_CATALOG = """
+departments:
+  irrigation:
+    name: Irrigation Department
+    datasets:
+      water:
+        field_dictionary: storage:inputs/irrigation/water.csv
+      canals:
+        field_dictionary: storage:inputs/irrigation/canals.csv
+"""
+
+
+def _seed_field_dictionary_files(storage):
+    for name in ("water", "canals"):
+        storage.write_bytes(
+            f"inputs/irrigation/{name}.csv",
+            b"Dataset Name,Dataset Field,Data Description,Format,Mandatory (Y/N)\n"
+            + f"{name},field,Description,Text,Y\n".encode(),
+        )
+
+
+def test_field_dictionary_datasets_run_concurrently_only_in_local_only_mode(storage, monkeypatch):
+    _seed_field_dictionary_files(storage)
+    monkeypatch.setenv("ENVIRONMENT", "local")
+    monkeypatch.setenv("LOCAL_ONLY", "1")
+    barrier = threading.Barrier(2)
+    worker_threads = set()
+    thread_lock = threading.Lock()
+
+    def run_dictionary(**kwargs):
+        with thread_lock:
+            worker_threads.add(threading.get_ident())
+        barrier.wait(timeout=5)
+        return {}
+
+    monkeypatch.setattr(sync_module, "run_field_dictionary", run_dictionary)
+
+    outcomes = sync(
+        storage, parse_catalog(_FIELD_DICTIONARY_CATALOG),
+        field_dictionary_workers=2,
+    )
+
+    assert len(worker_threads) == 2
+    assert len(outcomes) == 2
+    assert {outcome.ingest for outcome in outcomes} == {"ingested"}
+
+
+def test_field_dictionary_ingestion_defaults_to_serial(storage, monkeypatch):
+    _seed_field_dictionary_files(storage)
+    monkeypatch.setenv("ENVIRONMENT", "local")
+    monkeypatch.setenv("LOCAL_ONLY", "1")
+    monkeypatch.delenv("SYNC_FIELD_DICTIONARY_WORKERS", raising=False)
+    worker_threads = []
+    main_thread = threading.get_ident()
+
+    def run_dictionary(**kwargs):
+        worker_threads.append(threading.get_ident())
+        return {}
+
+    monkeypatch.setattr(sync_module, "run_field_dictionary", run_dictionary)
+
+    sync(storage, parse_catalog(_FIELD_DICTIONARY_CATALOG))
+
+    assert worker_threads == [main_thread, main_thread]
+
+
+def test_parallel_field_dictionary_ingestion_is_refused_outside_local_only(storage, monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("LOCAL_ONLY", "0")
+    monkeypatch.setattr(config, "_current_branch", lambda: "main")
+
+    with pytest.raises(PermissionError, match="parallel field-dictionary ingestion is local-only"):
+        sync(
+            storage, parse_catalog(_FIELD_DICTIONARY_CATALOG),
+            field_dictionary_workers=2,
+        )
+
+    assert not storage.exists(lookups.DEPARTMENTS_PATH)
 
 
 def test_publish_outcome_is_recorded_for_unchanged_tables_too(storage):

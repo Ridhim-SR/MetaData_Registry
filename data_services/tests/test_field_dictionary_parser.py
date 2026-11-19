@@ -280,6 +280,27 @@ def test_bad_format_raises_from_parse_format_full_too():
         parse_format_full("Blob")
 
 
+def test_numeric_digit_range_takes_the_upper_bound():
+    assert parse_format_full("Numeric (8 to 9 digits)") == ("numeric", 9, None)
+
+
+def test_plain_number_is_numeric():
+    assert parse_format_full("number") == ("numeric", None, None)
+
+
+def test_department_date_masks_are_dates():
+    for text in ("DD-MM-YYYY / Date", "DD.MM.YYYY / Date", "DD/MM/YYYY / Date"):
+        assert parse_format_full(text) == ("date", None, None)
+
+
+def test_department_time_mask_is_time():
+    assert parse_format_full("HH.MM / Time") == ("time", None, None)
+
+
+def test_four_digit_year_mask_is_integer():
+    assert parse_format_full("YYYY / Integer") == ("integer", None, None)
+
+
 # --- parse_format: enum / dropdown free text ---------------------------
 
 

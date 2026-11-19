@@ -33,8 +33,13 @@ _PATTERN_CODE_RULE = re.compile(r"^[A-Z]{2,6}[A-Z0-9]{0,4}n{2,14}[A-Z0-9]{0,4}$"
 # was a deliberate choice, not an oversight).
 FORMAT_TYPE_RULES: list[tuple[re.Pattern, str]] = [
     (re.compile(r"^numeric", re.IGNORECASE), "numeric"),
+    (re.compile(r"^number", re.IGNORECASE), "numeric"),
     (re.compile(r"^decimal", re.IGNORECASE), "numeric"),
     (re.compile(r"^date", re.IGNORECASE), "date"),
+    # Department-written date masks, e.g. "DD-MM-YYYY / Date".
+    (re.compile(r"^dd[-./]mm[-./]yyyy", re.IGNORECASE), "date"),
+    # "HH.MM / Time", "HH:MM", "HHMM".
+    (re.compile(r"^(time|hh[\s.:/-]?mm)", re.IGNORECASE), "time"),
     (re.compile(r"^(text|option|alphanumeric|image|file)", re.IGNORECASE), "character varying"),
     (re.compile(r"^(varchar|character varying)", re.IGNORECASE), "character varying"),
     (re.compile(r"^char", re.IGNORECASE), "character"),
@@ -45,13 +50,20 @@ FORMAT_TYPE_RULES: list[tuple[re.Pattern, str]] = [
     (re.compile(r"^enum", re.IGNORECASE), "character varying"),
     (re.compile(r"^dropdown", re.IGNORECASE), "character varying"),
     (re.compile(r"^year", re.IGNORECASE), "integer"),
+    # "YYYY / Integer" -- a four-digit year written as its mask.
+    (re.compile(r"^yyyy", re.IGNORECASE), "integer"),
     (_PATTERN_CODE_RULE, "character varying"),
 ]
 
 # Captures a leading digit/character count in parentheses, e.g.
 # "Numeric (12 Digits)" -> 12, "Alphanumeric (11 Characters)" -> 11,
 # "VARCHAR(30)" -> 30, "String (20-character)" -> 20, "Numeric (10)" -> 10.
-_LENGTH_RE = re.compile(r"\(\s*(\d+)\s*(?:[-\s]?(?:digits?|characters?|chars?))?\s*\)", re.IGNORECASE)
+# A range such as "Numeric (8 to 9 digits)" takes its upper bound (9).
+_LENGTH_RE = re.compile(
+    r"\(\s*(?:\d+\s*(?:to|-)\s*)?(\d+)\s*"
+    r"(?:[-\s]?(?:digits?|characters?|chars?))?\s*\)",
+    re.IGNORECASE,
+)
 
 # "Decimal (18,2)" -> precision 18 / scale 2. Checked before _LENGTH_RE,
 # which deliberately cannot match this shape (it has no closing paren

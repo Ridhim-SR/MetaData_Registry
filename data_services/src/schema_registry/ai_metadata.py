@@ -15,6 +15,20 @@
 Only field names and types are sent to Claude, never records. It is a manual
 step run ahead of `add`; the pipeline itself never calls it.
 Needs ANTHROPIC_API_KEY in .env.
+
+Agent fallback when the key is unavailable:
+  If an AI agent is asked to produce metadata with this module and
+  ANTHROPIC_API_KEY is unset, do not attempt an API call or stop with blank
+  descriptions. Parse the source schema, then follow the description, tag, and
+  privacy rules in `_prompt()` and `apply_rules()` to draft one plain
+  Indian-English sentence for every field, following the spelling and style
+  rules in `_prompt()`. Use only field definitions and supplied
+  documentation, never data records; do not guess at unclear terms, and say
+  when the source does not define them. Preserve field names and source order,
+  apply `category_floor()`, and write the usual `<raw file>_metadata.csv`
+  with `write_csv()`. Tell the user the descriptions were agent-authored and
+  need review. This is an instruction for the assigned agent, not an automatic
+  fallback implemented by the CLI.
 """
 
 import argparse
@@ -129,6 +143,7 @@ def _prompt(columns: list[dict], definitions: str | None) -> str:
 From the field names and types only, return JSON with:
 - "columns": a list with one object per field: {{"name": <exactly as given>, "business_description": <one plain sentence>, "tag": <short label or "">}}.
   Use only these approved tags: {", ".join(KNOWN_TAGS)}. Use Identifier for non-personal IDs, Administrative-Unit for administrative geography, Quantity for counts, and Remarks for notes. Leave tag "" if none fits. If a name is unclear, say so in the description rather than guessing.
+  Write in plain Indian English (metre, organisation, programme, centre) and never mix in the US spelling of the same word. Write "up to", not "upto", and "to date", not "todate". Do not repeat a word within a sentence, do not copy citation markers such as [cite: 139], and do not reuse the field label as the description.
   Use PII for a direct person/account identifier, including names in person roles, national/student/teacher IDs,
   government identity or benefit-document numbers, uploaded identity documents, biometric data, contact details,
   residential addresses, dates of birth, bank account numbers, and application numbers. Place and organization

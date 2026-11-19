@@ -9,12 +9,18 @@ Wasabi local/, dev/ or prod/ folder -- so a run (or
 the BIPP2 server) needs no local copy of anything. Upload once with:
 
     python3 -m src.schema_registry.inputs upload samples/x.txt inputs/pwd/x.txt
+    python3 -m src.schema_registry.inputs upload-batch manifest.csv
     python3 -m src.schema_registry.inputs list inputs/
+
+`upload-batch` reads a CSV with `local_path,storage_key` columns. Relative
+local paths are resolved from the manifest's directory; the complete manifest
+is validated before any file is uploaded.
 
 Whichever way a file arrives, the pipeline archives the exact bytes it
 parsed (archive()) so every snapshot can be traced to its original.
 """
 
+import csv
 import hashlib
 import sys
 from pathlib import Path, PurePosixPath
@@ -49,6 +55,55 @@ def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def read_upload_manifest(manifest_path: str | Path) -> list[tuple[Path, str]]:
+    """Validate a batch-upload manifest before any storage writes begin."""
+
+    manifest = Path(manifest_path)
+    with manifest.open(encoding="utf-8-sig", newline="") as stream:
+        reader = csv.DictReader(stream)
+        required = {"local_path", "storage_key"}
+        if reader.fieldnames is None or not required.issubset(reader.fieldnames):
+            raise ValueError("upload manifest must have local_path and storage_key columns")
+
+        uploads: list[tuple[Path, str]] = []
+        seen_keys: set[str] = set()
+        for line, row in enumerate(reader, start=2):
+            local = (row.get("local_path") or "").strip()
+            raw_key = (row.get("storage_key") or "").strip().replace("\\", "/")
+            if not local or not raw_key:
+                raise ValueError(f"upload manifest line {line} needs local_path and storage_key")
+
+            source = Path(local)
+            if not source.is_absolute():
+                source = manifest.parent / source
+            if not source.is_file():
+                raise FileNotFoundError(f"upload manifest line {line}: local file not found: {source}")
+
+            key_path = PurePosixPath(raw_key)
+            if key_path.is_absolute() or ".." in key_path.parts:
+                raise ValueError(f"upload manifest line {line}: invalid storage key: {raw_key}")
+            key = str(key_path)
+            if key in seen_keys:
+                raise ValueError(f"upload manifest line {line}: duplicate storage key: {key}")
+            seen_keys.add(key)
+            uploads.append((source, key))
+
+    if not uploads:
+        raise ValueError("upload manifest has no files")
+    return uploads
+
+
+def upload_batch(storage: ObjectStorage, uploads: list[tuple[Path, str]]) -> list[tuple[str, int, str]]:
+    """Upload validated files sequentially through one storage client."""
+
+    results = []
+    for source, key in uploads:
+        data = source.read_bytes()
+        storage.write_bytes(key, data)
+        results.append((key, len(data), sha256(data)))
+    return results
+
+
 def archive(storage: ObjectStorage, path: str, data: bytes) -> str:
     """Store `data` at `path` plus `<path>.sha256` (sha256sum format).
     Returns the hash."""
@@ -77,12 +132,23 @@ def _main(argv: list[str]) -> int:
         print(f"Uploaded {local} -> {key} ({len(data)} bytes, sha256 {sha256(data)[:12]}...)")
         print(f"Use it as: SOURCE_FILE={STORAGE_SCHEME}{key}")
         return 0
+    if len(argv) == 2 and argv[0] == "upload-batch":
+        from src.utils.cli import confirm_changes
+
+        manifest = Path(argv[1])
+        uploads = read_upload_manifest(manifest)
+        confirm_changes(f"upload {len(uploads)} file(s) listed in {manifest}")
+        for key, size, digest in upload_batch(storage, uploads):
+            print(f"Uploaded -> {key} ({size} bytes, sha256 {digest[:12]}...)")
+        print(f"Uploaded {len(uploads)} file(s)")
+        return 0
     if argv[:1] == ["list"] and len(argv) <= 2:
         for key in storage.list(argv[1] if len(argv) == 2 else "inputs/"):
             print(f"{STORAGE_SCHEME}{key}")
         return 0
     asked_for_help = argv[:1] in (["-h"], ["--help"])
     print("usage: python3 -m src.schema_registry.inputs upload <local file> <storage key>\n"
+          "       python3 -m src.schema_registry.inputs upload-batch <manifest.csv>\n"
           "       python3 -m src.schema_registry.inputs list [prefix]", file=sys.stdout if asked_for_help else sys.stderr)
     return 0 if asked_for_help else 2
 

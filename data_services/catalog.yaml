@@ -211,16 +211,16 @@ departments:
             metadata: storage:inputs/rural_development_department/awas/awas_pmayg_category_progress_raw_columns_metadata.csv
   horticulture_department:
     name: Horticulture Department
-    description: >-
-      
+    description: >
+
     datasets:
       janhit_horticulture:
         category: CAT-3
         owner: Horticulture Department
         steward:
-        dataset_type: 
+        dataset_type:
         schema_source: Department Provided
-        frequency: 
+        frequency:
         timeline: ongoing
         api_available: N
         description: >-
@@ -449,9 +449,9 @@ departments:
         category: CAT-3
         owner: Horticulture Department
         steward:
-        dataset_type: 
+        dataset_type:
         schema_source: Department Provided
-        frequency: 
+        frequency:
         timeline: ongoing
         api_available: N
         description: >-
@@ -940,7 +940,7 @@ departments:
         schema_source: Public Extraction
         owner: National Remote Sensing Centre, ISRO
         steward:
-        source_url : https://bhuvan-app1.nrsc.gov.in/bhuvan_ntl/
+        source_url: https://bhuvan-app1.nrsc.gov.in/bhuvan_ntl/
         frequency: Annual
         timeline:
         api_available: No
@@ -966,3 +966,168 @@ departments:
           Field definitions for restoration and renovation works, including
           reporting periods, targets, progress, and workflow status.
         field_dictionary: storage:inputs/irrigation_dept/restoration_and_renovation_works/Monitoring_Management_System_Details(S17).csv
+      irrigation_target_and_achievement:
+        category: CAT-3
+        owner: Irrigation Department
+        steward:
+        dataset_type: Administrative
+        schema_source: Department Provided
+        description: >-
+          Field definitions for irrigation targets and achievements, including
+          crop season, previous and current year targets, water consumed, and
+          progress percentages.
+        field_dictionary: storage:inputs/irrigation_dept/irrigation_target_and_achievement/irrigation_target_and_achievement.csv
+      chief_minister_reference_cases_tracking:
+        category: CAT-3
+        owner: Irrigation Department
+        steward:
+        dataset_type: Administrative
+        schema_source: Department Provided
+        description: >-
+          Field definitions for tracking cases referred by the Chief Minister,
+          including division, reporting period, case counts, and status.
+        field_dictionary: storage:inputs/irrigation_dept/chief_minister_reference_cases_tracking/chief_minister_reference_cases_tracking.csv
+      public_representatives_reference_cases_status:
+        category: CAT-3
+        owner: Irrigation Department
+        steward:
+        dataset_type: Administrative
+        schema_source: Department Provided
+        description: >-
+          Field definitions for tracking cases referred by public
+          representatives (MPs, ministers, and MLAs), including case counts
+          and status.
+        field_dictionary: storage:inputs/irrigation_dept/public_representatives_reference_cases_status/public_representatives_reference_cases_status.csv
+      jal_shakti_minister_reference_cases_status:
+        category: CAT-3
+        owner: Irrigation Department
+        steward:
+        dataset_type: Administrative
+        schema_source: Department Provided
+        description: >-
+          Field definitions for tracking cases referred by the Jal Shakti
+          Minister, including information received and pending counts.
+        field_dictionary: storage:inputs/irrigation_dept/jal_shakti_minister_reference_cases_status/jal_shakti_minister_reference_cases_status.csv
+      tail_end_canal_water_supply_progress:
+        category: CAT-3
+        owner: Irrigation Department
+        steward:
+        dataset_type: Administrative
+        schema_source: Department Provided
+        description: >-
+          Field definitions for tail-end canal water supply targets and
+          progress, including rabi and kharif coverage.
+        field_dictionary: storage:inputs/irrigation_dept/tail_end_canal_water_supply_progress/tail_end_canal_water_supply_progress.csv
+      canal_desilting_progress:
+        category: CAT-3
+        owner: Irrigation Department
+        steward:
+        dataset_type: Administrative
+        schema_source: Department Provided
+        description: >-
+          Field definitions for canal desilting (silt clearance) targets and
+          progress, including physical and financial progress.
+        field_dictionary: storage:inputs/irrigation_dept/canal_desilting_progress/canal_desilting_progress.csv
+      inspection_buildings:
+        category: CAT-3
+        owner: Irrigation Department
+        steward:
+        dataset_type: Administrative
+        schema_source: Department Provided
+        description: >-
+          Field definitions for the inspection of irrigation buildings,
+          including buildings used, repairable, suitable for use, and occupied.
+        field_dictionary: storage:inputs/irrigation_dept/inspection_buildings/inspection_buildings.csv
+      organization_wise_revenue_collection:
+        category: CAT-3
+        owner: Irrigation Department
+        steward:
+        dataset_type: Administrative
+        schema_source: Department Provided
+        description: >-
+          Field definitions for organization-wise collection of revenue and
+          non-revenue receipts, including annual targets and monthly
+          achievement.
+        field_dictionary: storage:inputs/irrigation_dept/organization_wise_revenue_collection/organization_wise_revenue_collection.csv
+      budget_allocation_major_heads_4700_4701:
+        category: CAT-3
+        owner: Irrigation Department
+        steward:
+        dataset_type: Administrative
+        schema_source: Department Provided
+        description: >-
+          Field definitions for budget allocation under major heads 4700 and
+          4701, including project counts, allocated funds, and monthly
+          expenditure.
+        field_dictionary: storage:inputs/irrigation_dept/budget_allocation_major_heads_4700_4701/budget_allocation_major_heads_4700_4701.csv
+      illegal_activities_fir:
+        category: CAT-3
+        owner: Irrigation Department
+        steward:
+        dataset_type: Administrative
+        schema_source: Department Provided
+        description: >-
+          Field definitions for irrigation-related illegal activity reports,
+          including tree cutting, FIR details, cases, and penalties.
+        field_dictionary: storage:inputs/irrigation_dept/illegal_activities_fir/illegal_activities_fir.csv
+      ponds_and_water_bodies_development_progress:
+        category: CAT-3
+        owner: Irrigation Department
+        steward:
+        dataset_type: Administrative
+        schema_source: Department Provided
+        description: >-
+          Field definitions for ponds and water bodies development targets and
+          progress, including filling from canals, tube wells, and small dams.
+        field_dictionary: storage:inputs/irrigation_dept/ponds_and_water_bodies_development_progress/ponds_and_water_bodies_development_progress.csv
+      national_green_tribunal_case_tracking:
+        category: CAT-3
+        owner: Irrigation Department
+        steward:
+        dataset_type: Administrative
+        schema_source: Department Provided
+        description: >-
+          Field definitions for tracking cases before the National Green
+          Tribunal, including completed and pending counts and hearing dates.
+        field_dictionary: storage:inputs/irrigation_dept/national_green_tribunal_case_tracking/national_green_tribunal_case_tracking.csv
+      mgnrega_irrigation_works:
+        category: CAT-3
+        owner: Irrigation Department
+        steward:
+        dataset_type: Administrative
+        schema_source: Department Provided
+        description: >-
+          Field definitions for irrigation works carried out under MGNREGA,
+          including proposed targets, project cost, and expenditure.
+        field_dictionary: storage:inputs/irrigation_dept/mgnrega_irrigation_works/mgnrega_irrigation_works.csv
+      inspection_reports:
+        category: CAT-3
+        owner: Irrigation Department
+        steward:
+        dataset_type: Administrative
+        schema_source: Department Provided
+        description: >-
+          Field definitions for office inspection reports, including the number
+          of divisions and sub-divisions inspected by each level.
+        field_dictionary: storage:inputs/irrigation_dept/inspection_reports/inspection_reports.csv
+      open_access_portals:
+        category: CAT-3
+        owner: Irrigation Department
+        steward:
+        dataset_type: Citizen Centric
+        schema_source: Department Provided
+        description: >-
+          Field definitions for the irrigation open-access portals: the canal
+          and irrigation system directory, and contractor registration and
+          management.
+        field_dictionary: storage:inputs/irrigation_dept/open_access_portals/open_access_portals.csv
+      flood_bulletin:
+        category: CAT-3
+        owner: Irrigation Department
+        steward:
+        dataset_type: Citizen Centric
+        schema_source: Department Provided
+        description: >-
+          Field definitions for the daily flood bulletin, including river water
+          levels, flood warnings, and rainfall information.
+        field_dictionary: storage:inputs/irrigation_dept/flood_bulletin/flood_bulletin.csv

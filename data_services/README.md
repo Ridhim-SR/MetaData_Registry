@@ -177,7 +177,7 @@ cp .env.example .env          # then fill in .env -- each setting has a comment
 - `main` and `production` use the company Wasabi (`WASABI_...` in `.env`). **Feature branches never do:** they use your own Wasabi account from the `LOCAL_WASABI_...` lines (section 3b of `.env`), and stop with an error if those are blank.
 - **In this project that "own account" is a local MinIO server** (`infrastructure/minio/`, buckets `sda-local` / `sda-local-backup`), so feature branches run the real S3 code path with zero company credentials in play — see `infrastructure/minio/README.md`. `LOCAL_ONLY=1` (`.env` section 3b) enforces it: local runs refuse any storage or OpenMetadata address that isn't this machine, so local data can never reach a shared server by a mistyped or copied host.
 - **Going live:** merge `main` into `production`, check out `production`, then run `add`/`sync` there.
-- **Every command that changes data asks first.** `add`, `sync`, `backup setup/copy/restore`, `inputs upload` and the other writing commands show where they will write (environment, branch, Wasabi folder, OpenMetadata) and ask twice: type `yes`, then the environment's name. Anything else cancels with nothing changed. Read-only commands (`--dry-run`, `verify`, `inputs list`) don't ask. For scripts, add `--yes` to skip the questions.
+- **Every command that changes data asks first.** `add`, `sync`, `backup setup/copy/restore`, `inputs upload`, `inputs upload-batch` and the other writing commands show where they will write (environment, branch, Wasabi folder, OpenMetadata) and ask twice: type `yes`, then the environment's name. Anything else cancels with nothing changed. Read-only commands (`--dry-run`, `verify`, `inputs list`) don't ask. For scripts, add `--yes` to skip the questions.
 
 ---
 
@@ -275,6 +275,51 @@ used as the table id.
   OpenMetadata has no users in any department team, so no membership was added
   and the ownership rules currently see the team, not a list of people.
 
+#### Irrigation expanded delivery — 2026-11-18
+
+The department's second delivery adds 16 datasets (19 tables, 350 columns) to the
+17 already catalogued. It is three workbooks:
+`Monitoring_Management_System_Details.xlsx`, `Open_Access_Portals.xlsx` and
+`Flood Bulletin (OA).xlsx`.
+
+- `parsers/irrigation_xlsx.py` converts the workbooks into one Field Dictionary
+  CSV per dataset. The dataset roster is the monitoring workbook's own `Index`
+  sheet (`S17` is skipped: it is catalogued already). Both department layouts are
+  mapped onto the parser's header spellings, and `Sample Value` is dropped
+  because one contractor row contains a firm's name and street address.
+- The monitoring sheets put the Hindi column label in a column headed
+  `Description` and ship no English description at all. That header is renamed
+  `Name (Hindi)` in the department's workbook, so the parser reads it as
+  `name_hindi` (the OpenMetadata `displayName`). The pre-patch workbook and the
+  one-off patch script are kept next to the delivery under
+  `.source-backup-20261118/`.
+- The English descriptions are drafted from metadata only (field name, Hindi
+  label, format, allowed values, validations and the department's own remarks;
+  never records), using the rules in `ai_metadata.py`. They live in
+  `prepared/monitoring_descriptions.csv` next to the source, with a readable
+  `monitoring_descriptions_review.md`. Terms the source does not define
+  (`ppa`, `si4`, `Sup`/`Exe`/`Div`) say so in the description instead of being
+  guessed.
+- `irrigation_xlsx.py --descriptions <csv>` fills only blank descriptions, so a
+  description the department supplies always wins, and
+  `--require-descriptions` refuses to write a dataset that still has a gap
+  instead of publishing a column without one.
+- Every description, table name and field name is checked by
+  `src/schema_registry/text_quality.py` before the CSV is written. A known
+  misspelling (`Abtract`, `todate`), a word repeated in one sentence
+  (`Proposed Potential Area proposed`), a copied `[cite: ...]` marker,
+  Devanagari-only text, or a description that is just its label is an error;
+  a US spelling where the house style is Indian English is a warning.
+  `--strict-descriptions` refuses the dataset on an error instead of logging
+  it, and `ai_metadata.py` gives agent drafts the same spelling/style rules.
+- Local verification (MinIO `sda-local`, OpenMetadata `:8585`): `sync
+  --department irrigation_dept` ingested 14 changed dictionaries and published
+  37 tables with 0 failures; read-back shows 273/273 monitoring columns with a
+  Hindi `displayName` and an English description, CAT-3 classification, and
+  `Irrigation Department` ownership. The app API returns the same columns, and
+  the dictionary download keeps its `column_name,data_type,description,tags,
+  data_classification` shape.
+
 Other options: `--format csv|postgres_ddl` (normally guessed from the file name: `.csv` → csv, anything else → postgres_ddl), and `--schema <name>` if the table isn't in the `public` schema.
 
 `add` uploads the file to Wasabi (`dev/inputs/<dept>/<dataset>/<file>`) and updates `catalog.yaml`. It prints what it did:
@@ -329,6 +374,12 @@ Each table still has its own storage lock and audit row, and publishing stays
 ordered after ingestion so a partial worker failure cannot publish an
 incomplete snapshot. Use a lower worker count if Wasabi or the OpenMetadata
 server is rate-limited.
+
+Field-dictionary datasets are serial by default. To benchmark bounded
+concurrency on the local server, use `--field-dictionary-workers 4` with
+`ENVIRONMENT=local` and `LOCAL_ONLY=1`; the option is rejected outside that
+local-only configuration. The existing serial path remains the fallback, and
+OpenMetadata publishing stays serial.
 It prints a summary:
 ```
 TABLE                          INGEST        PUBLISH        DETAIL
@@ -691,6 +742,7 @@ Log file: logs/sync_20261007_164556.log
 |---|---|
 | See uploaded files | `python3 -m src.schema_registry.inputs list` |
 | Upload a file without touching the catalog | `python3 -m src.schema_registry.inputs upload <file> inputs/<dept>/<dataset>/<file>` |
+| Upload several files with one CLI startup | `python3 -m src.schema_registry.inputs upload-batch <manifest.csv>` |
 | Try one table without the catalog | `DEPARTMENT=pwd DATASET=vishwakarma TABLE_NAME=vishwakarma_T SOURCE_FILE=samples/x.txt SOURCE_FORMAT=postgres_ddl python3 -m src.schema_registry.pipeline` (add `DEPARTMENT_NAME="..."` the first time) |
 | Republish one table | `TABLE_ID=pwd.vishwakarma.vishwakarma_t python3 -m src.schema_registry.openmetadata.publish` |
 | Batch many tables from a manifest CSV | `MANIFEST_FILE=manifest.csv python3 -m src.schema_registry.batch` (add `OPENMETADATA_JWT_TOKEN` to publish each) |
@@ -703,6 +755,9 @@ Log file: logs/sync_20261007_164556.log
 | Start OpenMetadata on your laptop | `cd ../infrastructure/openmetadata && docker compose up -d`, then http://localhost:8585 |
 
 `SOURCE_FILE` and metadata files can be a path on your laptop or `storage:<key>` for a file in storage.
+The batch-upload manifest has `local_path,storage_key` columns; relative local
+paths are resolved from the manifest's directory, and all rows are validated
+before the first upload.
 
 ### Environment variables for the direct commands
 
