@@ -30,7 +30,7 @@ anything failed, and prints a summary table either way.
 import argparse
 import os
 import sys
-from concurrent.futures import Executor, ThreadPoolExecutor
+from concurrent.futures import Executor, Future, ThreadPoolExecutor
 from dataclasses import dataclass
 
 from metadata.ingestion.ometa.ometa_api import OpenMetadata
@@ -215,6 +215,7 @@ def sync(
     only_department: str | None = None,
     reclassify: bool = False,
     max_workers: int | None = None,
+    field_dictionary_workers: int | None = None,
 ) -> list[Outcome]:
     """Run the steps in the module docstring. `setup` is the OpenMetadata
     setup callable (custom properties); `client` None = storage only.
@@ -238,6 +239,35 @@ def sync(
     if reclassify and not only_department:
         raise ValueError("reclassify needs --department: re-deriving classifications for every department would rewrite other teams' snapshots")
 
+    dataset_jobs: list[tuple[DepartmentEntry, DatasetEntry]] = []
+    parallel_dictionaries = False
+    if not publish_only:
+        if max_workers is None:
+            try:
+                max_workers = int(os.environ.get("SYNC_MAX_WORKERS", "8"))
+            except ValueError as exc:
+                raise ValueError("SYNC_MAX_WORKERS must be a positive integer") from exc
+        if max_workers < 1:
+            raise ValueError("max_workers must be a positive integer")
+        if field_dictionary_workers is None:
+            try:
+                field_dictionary_workers = int(os.environ.get("SYNC_FIELD_DICTIONARY_WORKERS", "1"))
+            except ValueError as exc:
+                raise ValueError("SYNC_FIELD_DICTIONARY_WORKERS must be a positive integer") from exc
+        if field_dictionary_workers < 1:
+            raise ValueError("field_dictionary_workers must be a positive integer")
+
+        dataset_jobs = [(dept, ds) for dept in departments for ds in dept.datasets]
+        dictionary_jobs = [(dept, ds) for dept, ds in dataset_jobs if ds.field_dictionary]
+        parallel_dictionaries = field_dictionary_workers > 1 and bool(dictionary_jobs)
+        if parallel_dictionaries and (
+            os.environ.get("ENVIRONMENT", "").lower() != "local"
+            or os.environ.get("LOCAL_ONLY", "").lower() not in {"1", "true", "yes"}
+        ):
+            raise PermissionError(
+                "parallel field-dictionary ingestion is local-only; set ENVIRONMENT=local and LOCAL_ONLY=1"
+            )
+
     from src.schema_registry.openmetadata.publish import publish_table
 
     if client is not None and setup is not None and not dry_run:
@@ -251,20 +281,36 @@ def sync(
         # this block and ordered to avoid concurrent OpenMetadata mutations.
         for dept in departments:
             _ensure_department(storage, dept, dry_run)
-        if max_workers is None:
-            try:
-                max_workers = int(os.environ.get("SYNC_MAX_WORKERS", "8"))
-            except ValueError as exc:
-                raise ValueError("SYNC_MAX_WORKERS must be a positive integer") from exc
-        if max_workers < 1:
-            raise ValueError("max_workers must be a positive integer")
-        dataset_jobs = [(dept, ds) for dept in departments for ds in dept.datasets]
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            for dept, ds in dataset_jobs:
-                for outcome in _ingest_dataset(
-                    storage, dept, ds, dry_run, reclassify=reclassify, executor=executor
-                ):
-                    outcomes[outcome.table_id] = outcome
+        if not parallel_dictionaries:
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                for dept, ds in dataset_jobs:
+                    for outcome in _ingest_dataset(
+                        storage, dept, ds, dry_run, reclassify=reclassify, executor=executor
+                    ):
+                        outcomes[outcome.table_id] = outcome
+        else:
+            # Field dictionaries write distinct datasets, with shared registry
+            # files protected by lookups' locks. Keep table-level workers in a
+            # separate pool to avoid nested-executor deadlocks; publication
+            # remains serial below this block.
+            with ThreadPoolExecutor(max_workers=field_dictionary_workers) as dictionary_executor, \
+                    ThreadPoolExecutor(max_workers=max_workers) as table_executor:
+                scheduled: list[list[Outcome] | Future[list[Outcome]]] = []
+                for dept, ds in dataset_jobs:
+                    if ds.field_dictionary:
+                        scheduled.append(dictionary_executor.submit(
+                            _ingest_dataset, storage, dept, ds, dry_run,
+                            reclassify=reclassify, executor=None,
+                        ))
+                    else:
+                        scheduled.append(_ingest_dataset(
+                            storage, dept, ds, dry_run,
+                            reclassify=reclassify, executor=table_executor,
+                        ))
+                for result in scheduled:
+                    job_outcomes = result.result() if isinstance(result, Future) else result
+                    for outcome in job_outcomes:
+                        outcomes[outcome.table_id] = outcome
 
     targets = _tables_to_publish(storage, departments, publish_only, only_department)
     for table_id, allow_category in targets:
@@ -321,6 +367,13 @@ def _main(argv: list[str]) -> int:
         help="maximum parallel table ingestions (default: SYNC_MAX_WORKERS or 8)",
     )
     parser.add_argument(
+        "--field-dictionary-workers",
+        type=int,
+        default=None,
+        help="maximum concurrent field-dictionary datasets (default: SYNC_FIELD_DICTIONARY_WORKERS or 1; "
+             "values above 1 require ENVIRONMENT=local and LOCAL_ONLY=1)",
+    )
+    parser.add_argument(
         "--reclassify", action="store_true",
         help="force re-ingest of unchanged files so stored auto classification/tag values are "
              "re-derived from the current curate.py rules (requires --department)",
@@ -349,6 +402,7 @@ def _main(argv: list[str]) -> int:
         storage, departments, client=client, setup=setup,
         dry_run=args.dry_run, publish_only=args.publish_only, only_department=args.department,
         reclassify=args.reclassify, max_workers=args.workers,
+        field_dictionary_workers=args.field_dictionary_workers,
     )
     print_summary(outcomes)
     failed = any("failed" in (o.ingest, o.publish) for o in outcomes)

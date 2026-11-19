@@ -232,6 +232,150 @@ def test_legacy_export_without_a_hindi_column_still_parses():
     assert table["business_metadata"]["entryDate"]["business_description"] == "प्रविष्टि की दिनांक"
 
 
+# The portal/bulletin workbooks use a second layout: different header
+# spellings, a blank Dataset Name, and a populated Table Name per row.
+_NEW_LAYOUT_HEADERS = [
+    "Dataset Name",
+    "Table Name",
+    "Dataset Field/Variable/Column",
+    "Field Label (Hindi/Regional Language)",
+    "Field Label (English)",
+    "Data/Field/Column Description",
+    "Format/Data Type",
+    "Length",
+    "Allowed Code sets/values",
+    "Reference/Relationship with other key (Foreign Key)",
+    "Source Table",
+    "Mandatory (Y/N)",
+    "Personal Data (Y/N)",
+    "Availability (Public/internal)",
+    "Sample Value",
+    "Notes",
+]
+
+
+def _new_layout_text(rows: list[dict[str, str]]) -> str:
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=_NEW_LAYOUT_HEADERS)
+    writer.writeheader()
+    for row in rows:
+        writer.writerow({**{header: "" for header in _NEW_LAYOUT_HEADERS}, **row})
+    return output.getvalue()
+
+
+def _new_layout_rows() -> list[dict[str, str]]:
+    return [
+        {
+            "Table Name": "Irrigation System Portal",
+            "Dataset Field/Variable/Column": "canal_id_with_type",
+            "Field Label (Hindi/Regional Language)": "नहर आईडी एवं प्रकार",
+            "Data/Field/Column Description": "Unique system code for the canal structure.",
+            "Format/Data Type": "Numeric (8 to 9 digits)",
+            "Mandatory (Y/N)": "Y",
+        },
+        {
+            "Table Name": "Irrigation System Portal",
+            "Dataset Field/Variable/Column": "design_discharge",
+            "Data/Field/Column Description": "Designed discharge of the canal.",
+            "Format/Data Type": "Decimal(10,2)",
+            "Mandatory (Y/N)": "N",
+        },
+        {
+            "Table Name": "Contractor Management",
+            "Dataset Field/Variable/Column": "contractor_firm_name_address",
+            "Data/Field/Column Description": "Firm name and registered address.",
+            "Format/Data Type": "Varchar / Text",
+            "Mandatory (Y/N)": "Y",
+            "Personal Data (Y/N)": "Y",
+        },
+        {
+            "Table Name": "Contractor Management",
+            "Dataset Field/Variable/Column": "registration_validity_date",
+            "Data/Field/Column Description": "Date the registration is valid until.",
+            "Format/Data Type": "DD-MM-YYYY / Date",
+            "Mandatory (Y/N)": "Y",
+        },
+        {
+            "Table Name": "Contractor Management",
+            "Dataset Field/Variable/Column": "forecast_time",
+            "Data/Field/Column Description": "Time the forecast applies to.",
+            "Format/Data Type": "HH.MM / Time",
+            "Mandatory (Y/N)": "N",
+        },
+        {
+            "Table Name": "Contractor Management",
+            "Dataset Field/Variable/Column": "highest_flood_level_year",
+            "Data/Field/Column Description": "Year of the historical peak.",
+            "Format/Data Type": "YYYY / Integer",
+            "Mandatory (Y/N)": "N",
+        },
+    ]
+
+
+def test_new_layout_groups_by_table_name_when_dataset_name_is_blank():
+    tables = parse_irrigation_field_dictionary(
+        _new_layout_text(_new_layout_rows()),
+        default_table_name="open_access_portals",
+    )
+
+    assert list(tables) == ["Irrigation System Portal", "Contractor Management"]
+    assert [column["name"] for column in tables["Irrigation System Portal"]["columns"]] == [
+        "canal_id_with_type",
+        "design_discharge",
+    ]
+    assert [column["name"] for column in tables["Contractor Management"]["columns"]] == [
+        "contractor_firm_name_address",
+        "registration_validity_date",
+        "forecast_time",
+        "highest_flood_level_year",
+    ]
+
+
+def test_new_layout_reads_its_headers_and_format_vocabulary():
+    tables = parse_irrigation_field_dictionary(_new_layout_text(_new_layout_rows()))
+    columns = {
+        column["name"]: column
+        for table in tables.values()
+        for column in table["columns"]
+    }
+    metadata = {
+        name: value
+        for table in tables.values()
+        for name, value in table["business_metadata"].items()
+    }
+
+    # Numeric (8 to 9 digits) keeps the upper bound as its precision.
+    assert (columns["canal_id_with_type"]["data_type"], columns["canal_id_with_type"]["length"]) == (
+        "numeric",
+        9,
+    )
+    assert columns["design_discharge"]["scale"] == 2
+    assert columns["design_discharge"]["length"] == 10
+    assert columns["design_discharge"]["nullable"] is True
+    assert columns["registration_validity_date"]["data_type"] == "date"
+    assert columns["forecast_time"]["data_type"] == "time"
+    assert columns["highest_flood_level_year"]["data_type"] == "integer"
+    assert columns["contractor_firm_name_address"]["data_type"] == "character varying"
+
+    # The Hindi label is the display name; the description stays the business text.
+    assert columns["canal_id_with_type"]["name_hindi"] == "नहर आईडी एवं प्रकार"
+    assert metadata["canal_id_with_type"]["business_description"] == (
+        "Unique system code for the canal structure."
+    )
+
+    # Personal Data (Y/N) is the only access answer in this layout.
+    assert metadata["contractor_firm_name_address"]["classification"] == "PII"
+    assert metadata["canal_id_with_type"]["classification"] == ""
+
+
+def test_a_row_with_neither_dataset_nor_table_name_is_rejected():
+    rows = _new_layout_rows()
+    rows[0]["Table Name"] = ""
+
+    with pytest.raises(ValueError, match="Dataset Name and Table Name are both blank"):
+        parse_irrigation_field_dictionary(_new_layout_text(rows))
+
+
 def test_personal_data_answer_is_classified_as_pii():
     parsed = parse_irrigation_field_dictionary(_dictionary_text(personal_data="Yes"))
     assert parsed["restoration_and_renovation_works"]["business_metadata"]["gadhamuktiId"][

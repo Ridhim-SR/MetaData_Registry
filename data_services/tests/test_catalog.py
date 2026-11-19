@@ -118,7 +118,44 @@ def test_shipped_catalog_is_valid():
 
     irrigation = next(d for d in departments if d.id == "irrigation_dept")
     assert irrigation.name == "Irrigation Department"
-    (works,) = irrigation.datasets
+    # S17 came with the first delivery; the 2026-11 delivery adds every other
+    # tabular dataset the department ships, each described by its own
+    # dataset-level Field Dictionary.
+    assert [ds.name for ds in irrigation.datasets] == [
+        "restoration_and_renovation_works",
+        "irrigation_target_and_achievement",
+        "chief_minister_reference_cases_tracking",
+        "public_representatives_reference_cases_status",
+        "jal_shakti_minister_reference_cases_status",
+        "tail_end_canal_water_supply_progress",
+        "canal_desilting_progress",
+        "inspection_buildings",
+        "organization_wise_revenue_collection",
+        "budget_allocation_major_heads_4700_4701",
+        "illegal_activities_fir",
+        "ponds_and_water_bodies_development_progress",
+        "national_green_tribunal_case_tracking",
+        "mgnrega_irrigation_works",
+        "inspection_reports",
+        "open_access_portals",
+        "flood_bulletin",
+    ]
+    works = irrigation.datasets[0]
     assert works.name == "restoration_and_renovation_works"
-    assert works.fields["category"] == "CAT-3"
-    assert works.fields["dataset_type"] == "Administrative"
+    assert all(ds.fields["category"] == "CAT-3" for ds in irrigation.datasets)
+    assert all(
+        ds.fields["dataset_type"] == "Administrative"
+        for ds in irrigation.datasets
+        if ds.name not in {"open_access_portals", "flood_bulletin"}
+    )
+    assert all(
+        ds.fields["dataset_type"] == "Citizen Centric"
+        for ds in irrigation.datasets
+        if ds.name in {"open_access_portals", "flood_bulletin"}
+    )
+    assert all(ds.fields["owner"] == "Irrigation Department" for ds in irrigation.datasets)
+    assert all(
+        ds.field_dictionary and ds.field_dictionary.startswith("storage:inputs/irrigation_dept/")
+        for ds in irrigation.datasets
+    )
+
