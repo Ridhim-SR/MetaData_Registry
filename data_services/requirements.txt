@@ -19,3 +19,6 @@ ruamel.yaml>=0.18
 # because of this gap before it was added.
 openpyxl>=3.1
 anthropic>=0.40
+# openmetadata-ingestion imports pytz (metadata/utils/time_utils.py) but does not
+# declare it, so a clean CI install fails with ModuleNotFoundError: pytz.
+pytz>=2024.1

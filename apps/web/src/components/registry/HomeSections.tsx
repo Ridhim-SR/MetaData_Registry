@@ -149,11 +149,12 @@ export function HomeAbout() {
             {t("aboutRegistryP2")}
           </p>
         </div>
-        <ul className="grid list-none content-start gap-4 p-0 lg:col-span-5">
+        {/* On wide screens the three boxes split the full height of the text column. */}
+        <ul className="grid list-none gap-4 p-0 lg:col-span-5 lg:grid-rows-3">
           {PRINCIPLES.map((p) => (
             <li
               key={p.title}
-              className="flex items-start gap-4 p-5"
+              className="flex items-start gap-4 p-5 lg:items-center"
               style={{ border: "1px solid var(--border)", borderRadius: 10, background: "var(--bg-alt)" }}
             >
               <IconTile name={p.icon} />

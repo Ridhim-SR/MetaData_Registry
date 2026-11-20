@@ -15,16 +15,12 @@ export function HeadlineStats({ stats: s }: { stats: RegistryStats }) {
   ];
 
   return (
-    <dl
-      aria-label={t("statsAria")}
-      className="grid grid-cols-1 gap-y-5 px-2 py-5 sm:grid-cols-3"
-      style={{ border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)" }}
-    >
-      {stats.map((x, i) => (
+    <dl aria-label={t("statsAria")} className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      {stats.map((x) => (
         <div
           key={x.key}
-          className={`flex items-center gap-4 px-3 sm:px-5 ${i > 0 ? "sm:border-l" : ""}`}
-          style={{ borderColor: "var(--border)" }}
+          className="flex items-center justify-center gap-4 px-5 py-5"
+          style={{ border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg-alt)" }}
         >
           <IconTile name={x.icon} />
           <div className="flex min-w-0 flex-col-reverse">

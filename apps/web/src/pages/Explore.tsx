@@ -343,13 +343,14 @@ export function ExplorePage() {
           })}
         </div>
       )}
-      <ul className="mt-2 max-h-56 space-y-1 overflow-y-auto">
+      <ul className="mt-2 max-h-56 space-y-1 overflow-y-auto pl-1">
         {deptOptions
           .filter((d) => d.display.toLowerCase().includes(deptFilterText.trim().toLowerCase()))
           .map((d) => (
             <li key={d.slug}>
               <label className="flex cursor-pointer items-center gap-2" style={{ minHeight: "32px", fontSize: "0.9375rem", color: "var(--text)" }}>
                 <input
+                  className="shrink-0"
                   type="checkbox"
                   checked={deptSel.includes(d.slug)}
                   onChange={() => toggleList(deptSel, d.slug, setDeptSel)}
@@ -1261,11 +1262,12 @@ function FilterChecklist({
           {t("noMatchesFor", { q: query.trim() })}
         </p>
       )}
-      <ul className="mt-2 max-h-48 space-y-1 overflow-y-auto">
+      <ul className="mt-2 max-h-48 space-y-1 overflow-y-auto pl-1">
         {visible.map(({ value, label, count }) => (
           <li key={value}>
             <label className="flex cursor-pointer items-center gap-2" style={{ minHeight: "32px", fontSize: "0.9375rem", color: "var(--text)" }}>
               <input
+                className="shrink-0"
                 type="checkbox"
                 checked={selected.includes(value)}
                 onChange={() => onToggle(value)}
