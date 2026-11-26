@@ -102,11 +102,17 @@ class S3ObjectStorage(ObjectStorage):
         return list(csv.DictReader(io.StringIO(self.read_bytes(path).decode("utf-8"))))
 
     def write_bytes(self, path: str, data: bytes) -> None:
+        started = time.perf_counter()
         try:
             self.client.put_object(Bucket=self.bucket, Key=self._key(path), Body=data)
         except ClientError as exc:
             self._log_client_error(exc, "write", path)
             raise
+        finally:
+            logger.info(
+                f"Stage timing: stage=s3_write bytes={len(data)} "
+                f"elapsed_ms={(time.perf_counter() - started) * 1000:.1f}"
+            )
 
     def read_bytes(self, path: str) -> bytes:
         try:

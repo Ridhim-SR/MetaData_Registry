@@ -122,7 +122,7 @@ _REQUIRED_HEADERS = ("Dataset Name", "Dataset Field")
 def parse_field_dictionary_text(text: str, label: str = "<text>") -> dict[str, dict]:
     """Parse a multi-table Field Dictionary CSV (columns: Dataset Name,
     Dataset Field, Data Description, Format, Mandatory (Y/N),
-    Personal Data (Y/N), optional tag/Unit, ...) into one entry per distinct
+    Personal Data (Y/N),     optional tag/Unit/Classification, ...) into one entry per distinct
     "Dataset Name",
     each with the canonical raw-column shape
     (name/data_type/length/scale/nullable/default) plus a business_metadata
@@ -189,10 +189,13 @@ def parse_field_dictionary_text(text: str, label: str = "<text>") -> dict[str, d
         # rules, which is what governs access. curate.validate_tag() rejects
         # any tag outside KNOWN_TAGS at ingest rather than silently creating
         # a new one under OpenMetadata's FieldTag classification.
+        classification = (row.get("Classification") or row.get("classification") or "").strip()
         metadata: dict = {
             "business_description": (row.get("Data Description") or "").strip(),
             "tag": (row.get("tag") or "").strip(),
         }
+        if classification:
+            metadata["classification"] = classification
         # An optional `Unit` column (also accepted as "Unit of Measure"/"UOM")
         # answers the field's unit -- INR, %, hectare, ... A blank cell is "not
         # answered", so curate's carry-forward keeps an earlier answer.

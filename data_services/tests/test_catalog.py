@@ -103,6 +103,7 @@ def test_shipped_catalog_is_valid():
         "women_and_child_development_department",
         "non_proprietary_data",
         "irrigation_dept",
+        "updasp",
     ]
 
     # Kanya Sumangala is Women & Child Development, not Agriculture: two

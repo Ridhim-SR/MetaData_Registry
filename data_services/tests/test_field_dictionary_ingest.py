@@ -1,3 +1,6 @@
+import threading
+
+import src.schema_registry.parsers.field_dictionary_ingest as ingest_module
 from src.schema_registry.registry import lookups
 from src.schema_registry.parsers.field_dictionary_ingest import run_field_dictionary
 from src.storage.local import LocalObjectStorage
@@ -9,6 +12,40 @@ def _write_dictionary(tmp_path, rows):
     lines = [header] + [",".join(row) for row in rows]
     path.write_text("\n".join(lines), encoding="utf-8")
     return str(path)
+
+
+def test_tables_in_one_dictionary_are_ingested_concurrently(tmp_path, monkeypatch):
+    """A 22-table dictionary used to be 22 serial pipeline runs. The tables
+    have separate locks/snapshots, so they share a bounded pool instead."""
+
+    storage = LocalObjectStorage(tmp_path / "storage")
+    lookups.register_department(storage, "welfare", "Social Welfare Department")
+    source = _write_dictionary(
+        tmp_path,
+        [
+            ("t1", "first_field", "First", "Text", "Y"),
+            ("t2", "second_field", "Second", "Text", "Y"),
+        ],
+    )
+    barrier = threading.Barrier(2)
+    worker_threads = set()
+    thread_lock = threading.Lock()
+
+    def fake_run(**kwargs):
+        with thread_lock:
+            worker_threads.add(threading.get_ident())
+        barrier.wait(timeout=5)
+        return {"column_count": 1}
+
+    monkeypatch.setattr(ingest_module, "run", fake_run)
+
+    results = run_field_dictionary(
+        department="welfare", dataset="cmsvy", source_file=source, storage=storage, workers=2
+    )
+
+    assert len(worker_threads) == 2
+    assert set(results) == {"t1", "t2"}
+    assert {r["status"] for r in results.values()} == {"ok"}
 
 
 def test_splits_one_file_into_multiple_published_tables(tmp_path):

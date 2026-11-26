@@ -30,6 +30,7 @@ anything failed, and prints a summary table either way.
 import argparse
 import os
 import sys
+import time
 from concurrent.futures import Executor, Future, ThreadPoolExecutor
 from dataclasses import dataclass
 
@@ -114,24 +115,58 @@ def _ingest_dataset(
 
     if ds.field_dictionary:
         label = f"{dept.id}.{ds_slug}.* (field dictionary)"
+        check_started = None
         try:
+            check_started = time.perf_counter()
             data, _ = inputs.read_input(storage, ds.field_dictionary)
             previous = _latest_archived_sha(storage, paths.dataset_source_prefix(dept.id, ds_slug), metadata=False)
             changed = inputs.sha256(data) != previous
+            logger.info(
+                f"Stage timing: stage=change_check dataset_id={dept.id}.{ds_slug} "
+                f"elapsed_ms={(time.perf_counter() - check_started) * 1000:.1f}"
+            )
+            check_started = None
             if not changed and not reclassify:
                 outcomes.append(Outcome(label, "unchanged"))
             elif dry_run:
                 outcomes.append(Outcome(label, "would ingest", detail="field dictionary changed or new" if changed else "reclassify requested"))
             else:
-                results = run_field_dictionary(department=dept.id, dataset=ds.name, source_file=ds.field_dictionary, storage=storage, reclassify=reclassify)
-                outcomes.append(Outcome(label, "ingested", detail=f"{len(results)} table(s)"))
+                results = run_field_dictionary(
+                    department=dept.id, dataset=ds.name, source_file=ds.field_dictionary,
+                    storage=storage, reclassify=reclassify, executor=executor,
+                )
+                if results:
+                    for table_name, result in results.items():
+                        table_id = f"{dept.id}.{ds_slug}.{lookups.slugify(table_name)}"
+                        status = result.get("status")
+                        if status == "ok":
+                            column_count = result.get("column_count")
+                            detail = f"field dictionary; {column_count} columns" if column_count is not None else "field dictionary"
+                            outcomes.append(Outcome(table_id, "ingested", detail=detail))
+                        else:
+                            detail = result.get("error") or "field dictionary returned no success status"
+                            outcomes.append(Outcome(table_id, "failed", detail=detail))
+                else:
+                    outcomes.append(Outcome(label, "ingested", detail="0 table(s)"))
         except Exception as exc:  # noqa: BLE001 -- report and carry on with other tables
+            if check_started is not None:
+                logger.info(
+                    f"Stage timing: stage=change_check dataset_id={dept.id}.{ds_slug} "
+                    f"elapsed_ms={(time.perf_counter() - check_started) * 1000:.1f}"
+                )
             outcomes.append(Outcome(label, "failed", detail=str(exc)))
 
     def ingest_table(table) -> Outcome:
         table_id = f"{dept.id}.{ds_slug}.{lookups.slugify(table.name)}"
         try:
-            reason = _table_needs_ingest(storage, dept.id, ds_slug, table, table_id)
+            check_started = time.perf_counter()
+            try:
+                reason = _table_needs_ingest(storage, dept.id, ds_slug, table, table_id)
+            finally:
+                logger.info(
+                    f"Stage timing: stage=change_check table_id={table_id} "
+                    f"elapsed_ms={(time.perf_counter() - check_started) * 1000:.1f}"
+                )
             if reclassify:
                 reason = f"{reason}; reclassify requested" if reason else "reclassify requested"
             if reason is None:
@@ -216,13 +251,24 @@ def sync(
     reclassify: bool = False,
     max_workers: int | None = None,
     field_dictionary_workers: int | None = None,
+    publish_workers: int | None = None,
 ) -> list[Outcome]:
     """Run the steps in the module docstring. `setup` is the OpenMetadata
     setup callable (custom properties); `client` None = storage only.
     `only_department` limits every step to that one department.
     `reclassify` force-re-ingests even unchanged files so pipeline.run's
     reclassify=True re-derives classification/tag under the current
-    AUTO_* rules (use after fixing curate.py; see pipeline.run)."""
+    AUTO_* rules (use after fixing curate.py; see pipeline.run).
+
+    Concurrency is generic, so it applies to every department in
+    catalog.yaml (and any department added later):
+      * `max_workers` -- tables ingested at once (SYNC_MAX_WORKERS, 8)
+      * `field_dictionary_workers` -- dictionary datasets parsed at once
+        (SYNC_FIELD_DICTIONARY_WORKERS, 4); each dictionary's own tables
+        share the table pool above
+      * `publish_workers` -- bounded OpenMetadata preparation/readback workers
+        (SYNC_PUBLISH_WORKERS, 4). Table upserts use synchronous size-bounded
+        batches; publish.py serializes shared parent creation."""
 
     # Refused before the first storage read: a sync pointed at the company
     # Wasabi (dev/ or prod/) may only run on the branch that owns it -- main
@@ -239,6 +285,14 @@ def sync(
     if reclassify and not only_department:
         raise ValueError("reclassify needs --department: re-deriving classifications for every department would rewrite other teams' snapshots")
 
+    if publish_workers is None:
+        try:
+            publish_workers = int(os.environ.get("SYNC_PUBLISH_WORKERS", "4"))
+        except ValueError as exc:
+            raise ValueError("SYNC_PUBLISH_WORKERS must be a positive integer") from exc
+    if publish_workers < 1:
+        raise ValueError("publish_workers must be a positive integer")
+
     dataset_jobs: list[tuple[DepartmentEntry, DatasetEntry]] = []
     parallel_dictionaries = False
     if not publish_only:
@@ -251,7 +305,7 @@ def sync(
             raise ValueError("max_workers must be a positive integer")
         if field_dictionary_workers is None:
             try:
-                field_dictionary_workers = int(os.environ.get("SYNC_FIELD_DICTIONARY_WORKERS", "1"))
+                field_dictionary_workers = int(os.environ.get("SYNC_FIELD_DICTIONARY_WORKERS", "4"))
             except ValueError as exc:
                 raise ValueError("SYNC_FIELD_DICTIONARY_WORKERS must be a positive integer") from exc
         if field_dictionary_workers < 1:
@@ -259,16 +313,14 @@ def sync(
 
         dataset_jobs = [(dept, ds) for dept in departments for ds in dept.datasets]
         dictionary_jobs = [(dept, ds) for dept, ds in dataset_jobs if ds.field_dictionary]
-        parallel_dictionaries = field_dictionary_workers > 1 and bool(dictionary_jobs)
-        if parallel_dictionaries and (
-            os.environ.get("ENVIRONMENT", "").lower() != "local"
-            or os.environ.get("LOCAL_ONLY", "").lower() not in {"1", "true", "yes"}
-        ):
-            raise PermissionError(
-                "parallel field-dictionary ingestion is local-only; set ENVIRONMENT=local and LOCAL_ONLY=1"
-            )
+        # A separate dictionary pool only pays off when there are at least
+        # two dictionary datasets; one dictionary already parallelizes its
+        # own tables through the shared table pool. Both were previously
+        # local-only while being benchmarked; the registry's per-path locks
+        # (and per-table pipeline locks) are what make this safe on dev/prod.
+        parallel_dictionaries = field_dictionary_workers > 1 and len(dictionary_jobs) > 1
 
-    from src.schema_registry.openmetadata.publish import publish_table
+    from src.schema_registry.openmetadata.publish import publish_table, publish_tables
 
     if client is not None and setup is not None and not dry_run:
         setup()
@@ -290,9 +342,11 @@ def sync(
                         outcomes[outcome.table_id] = outcome
         else:
             # Field dictionaries write distinct datasets, with shared registry
-            # files protected by lookups' locks. Keep table-level workers in a
-            # separate pool to avoid nested-executor deadlocks; publication
-            # remains serial below this block.
+            # files protected by lookups' locks. Their per-table runs share
+            # the table pool (no nested pool: a dictionary worker submits and
+            # waits, table workers never submit back), so a big dictionary
+            # file and ordinary tables overlap without oversubscribing Wasabi.
+            # Publication remains below this block.
             with ThreadPoolExecutor(max_workers=field_dictionary_workers) as dictionary_executor, \
                     ThreadPoolExecutor(max_workers=max_workers) as table_executor:
                 scheduled: list[list[Outcome] | Future[list[Outcome]]] = []
@@ -300,7 +354,7 @@ def sync(
                     if ds.field_dictionary:
                         scheduled.append(dictionary_executor.submit(
                             _ingest_dataset, storage, dept, ds, dry_run,
-                            reclassify=reclassify, executor=None,
+                            reclassify=reclassify, executor=table_executor,
                         ))
                     else:
                         scheduled.append(_ingest_dataset(
@@ -313,8 +367,13 @@ def sync(
                         outcomes[outcome.table_id] = outcome
 
     targets = _tables_to_publish(storage, departments, publish_only, only_department)
-    for table_id, allow_category in targets:
-        outcome = outcomes.setdefault(table_id, Outcome(table_id))
+    publish_jobs = [
+        (table_id, allow_category, outcomes.setdefault(table_id, Outcome(table_id)))
+        for table_id, allow_category in targets
+    ]
+
+    def publish_one(job: tuple[str, bool, Outcome]) -> Outcome:
+        table_id, allow_category, outcome = job
         if outcome.ingest == "failed":
             outcome.publish = "skipped"
         elif client is None or dry_run:
@@ -328,6 +387,41 @@ def sync(
                 outcome.publish = "failed"
                 outcome.detail = f"{outcome.detail}; publish: {exc}".lstrip("; ")
                 _record_publish(storage, table_id, "failed", error=f"{type(exc).__name__}: {exc}")
+        return outcome
+
+    eligible_jobs = [job for job in publish_jobs if job[2].ingest != "failed"]
+    if client is not None and not dry_run and len(eligible_jobs) > 1:
+        try:
+            batch_results = publish_tables(
+                client,
+                storage,
+                [(table_id, allow_category) for table_id, allow_category, _ in eligible_jobs],
+                max_workers=publish_workers,
+            )
+        except Exception as exc:  # noqa: BLE001 -- retain sync's per-table failure reporting
+            batch_results = {
+                table_id: {"status": "failed", "error": f"{type(exc).__name__}: {exc}"}
+                for table_id, _, _ in eligible_jobs
+            }
+        for table_id, _, outcome in publish_jobs:
+            if outcome.ingest == "failed":
+                outcome.publish = "skipped"
+                continue
+            result = batch_results.get(
+                table_id,
+                {"status": "failed", "error": "bulk publisher returned no result for this table"},
+            )
+            if result.get("status") == "published":
+                outcome.publish = "published"
+                _record_publish(storage, table_id, "published")
+            else:
+                error = result.get("error") or "bulk publisher returned an unsuccessful status"
+                outcome.publish = "failed"
+                outcome.detail = f"{outcome.detail}; publish: {error}".lstrip("; ")
+                _record_publish(storage, table_id, "failed", error=error)
+    else:
+        for job in publish_jobs:
+            publish_one(job)
 
     if not publish_only and not only_department:
         listed = {table_id for table_id, _ in targets}
@@ -370,8 +464,14 @@ def _main(argv: list[str]) -> int:
         "--field-dictionary-workers",
         type=int,
         default=None,
-        help="maximum concurrent field-dictionary datasets (default: SYNC_FIELD_DICTIONARY_WORKERS or 1; "
-             "values above 1 require ENVIRONMENT=local and LOCAL_ONLY=1)",
+        help="maximum concurrent field-dictionary datasets (default: SYNC_FIELD_DICTIONARY_WORKERS or 4)",
+    )
+    parser.add_argument(
+        "--publish-workers",
+        type=int,
+        default=None,
+        help="maximum concurrent OpenMetadata publishes (default: SYNC_PUBLISH_WORKERS or 4; "
+             "use 1 for strictly serial publishing)",
     )
     parser.add_argument(
         "--reclassify", action="store_true",
@@ -403,6 +503,7 @@ def _main(argv: list[str]) -> int:
         dry_run=args.dry_run, publish_only=args.publish_only, only_department=args.department,
         reclassify=args.reclassify, max_workers=args.workers,
         field_dictionary_workers=args.field_dictionary_workers,
+        publish_workers=args.publish_workers,
     )
     print_summary(outcomes)
     failed = any("failed" in (o.ingest, o.publish) for o in outcomes)

@@ -1,6 +1,7 @@
 import csv
 import io
 import os
+import time
 import uuid
 from datetime import datetime, timezone
 
@@ -378,6 +379,7 @@ def run(
         # lock) the column-removal guard. The registry (_lookups/) is only
         # updated once the new snapshots are stored, so a rejected run leaves
         # tables.csv/datasets.csv exactly as they were.
+        parse_started = time.perf_counter()
         source_bytes, source_name = inputs.read_input(storage, source_file)
         parsed_columns = parse_source(department_id, table_name, source_format, inputs.decode(source_bytes))
         validate_schema(table_id, parsed_columns)
@@ -395,6 +397,10 @@ def run(
                 f"{table_id}: business_metadata_file has {len(unmatched_metadata_names)} name(s) matching no "
                 f"column, ignored -- check for typos: {', '.join(unmatched_metadata_names)}"
             )
+        logger.info(
+            f"Stage timing: stage=parse table_id={table_id} "
+            f"columns={len(raw_columns)} elapsed_ms={(time.perf_counter() - parse_started) * 1000:.1f}"
+        )
 
         # Locked per table: reading the previous snapshot, deciding whether a
         # removal is allowed, and writing the new raw+curated snapshot must be
