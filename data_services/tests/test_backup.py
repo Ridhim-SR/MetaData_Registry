@@ -1,5 +1,6 @@
 import boto3
 import pytest
+import threading
 from moto import mock_aws
 
 from src.storage import backup
@@ -64,6 +65,44 @@ def test_copy_covers_only_the_given_folder(buckets):
     assert _keys(bak) == ["dev/a.txt"]
     copy(main, bak, "")
     assert _keys(bak) == ["dev/a.txt", "prod/b.txt"]
+
+
+def test_copy_copies_files_concurrently(buckets):
+    """The backup after a big sync is download+upload per file. Two files
+    must be in flight together, not one after the other."""
+
+    main, bak = buckets
+    _put(main, "dev/a.txt", b"a")
+    _put(main, "dev/b.txt", b"b")
+
+    barrier = threading.Barrier(2)
+    lock = threading.Lock()
+    active = 0
+    peak = 0
+    original_get = main.client.get_object
+
+    def overlapping_get(**kwargs):
+        nonlocal active, peak
+        with lock:
+            active += 1
+            peak = max(peak, active)
+        try:
+            barrier.wait(timeout=5)
+            return original_get(**kwargs)
+        finally:
+            with lock:
+                active -= 1
+
+    main.client.get_object = overlapping_get
+    try:
+        copied = copy(main, bak, "dev/", workers=2)
+    finally:
+        main.client.get_object = original_get
+
+    assert copied == ["dev/a.txt", "dev/b.txt"]
+    assert peak == 2
+    assert _get(bak, "dev/a.txt") == b"a"
+    assert _get(bak, "dev/b.txt") == b"b"
 
 
 def test_compare_reports_missing_and_different(buckets):

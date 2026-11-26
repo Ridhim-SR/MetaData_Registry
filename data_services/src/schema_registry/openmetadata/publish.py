@@ -1,7 +1,11 @@
 import json
 import os
 import re
+import threading
+import time
 from collections.abc import Iterable
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 
 import requests
 from src.utils.config import load_env
@@ -9,6 +13,7 @@ from metadata.generated.schema.api.classification.createClassification import (
     CreateClassificationRequest,
 )
 from metadata.generated.schema.api.classification.createTag import CreateTagRequest
+from metadata.generated.schema.api.data.bulkCreateTable import BulkCreateTable
 from metadata.generated.schema.api.data.createDatabase import CreateDatabaseRequest
 from metadata.generated.schema.api.data.createDatabaseSchema import (
     CreateDatabaseSchemaRequest,
@@ -68,6 +73,23 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+# A shared OpenMetadata parent -- service, database, schema, classification,
+# tag, glossary, glossary term -- must be created once. Two publish workers
+# racing on the same one can get a duplicate-name/conflict error, so creation
+# is serialized per entity. Different entities (and each table's own PUT /
+# column patch) still run concurrently. Re-entrant because one ensure helper
+# may call another on the same thread.
+_entity_locks: dict[str, threading.RLock] = {}
+_entity_locks_guard = threading.Lock()
+
+
+def _entity_lock(key: str) -> threading.RLock:
+    with _entity_locks_guard:
+        lock = _entity_locks.get(key)
+        if lock is None:
+            lock = _entity_locks[key] = threading.RLock()
+        return lock
+
 
 def _is_transient_error(exc: BaseException) -> bool:
     """Worth retrying: the server didn't answer at all (connection refused,
@@ -92,8 +114,10 @@ _retry_transient = retry(
 
 
 @_retry_transient
-def _get_by_name(client: OpenMetadata, entity, fqn: str):
-    return client.get_by_name(entity=entity, fqn=fqn)
+def _get_by_name(client: OpenMetadata, entity, fqn: str, fields: list[str] | None = None):
+    if fields is None:
+        return client.get_by_name(entity=entity, fqn=fqn)
+    return client.get_by_name(entity=entity, fqn=fqn, fields=fields)
 
 
 @_retry_transient
@@ -326,6 +350,16 @@ def _ensure_service(
     ingestion bot may not be allowed to edit it, and that must never stop a
     table from being published."""
 
+    with _entity_lock(f"service:{service_name}"):
+        return _ensure_service_unlocked(client, service_name, display_name, description)
+
+
+def _ensure_service_unlocked(
+    client: OpenMetadata,
+    service_name: str,
+    display_name: str,
+    description: str,
+) -> DatabaseService:
     existing = _get_or_none(client, DatabaseService, service_name)
     if existing:
         current = _unwrap(getattr(existing, "displayName", None)) or ""
@@ -474,6 +508,21 @@ def _ensure_database(
     that can be confirmed or changed on a later run, same reasoning as why
     the table itself is always create-or-update rather than get-or-create."""
 
+    with _entity_lock(f"database:{service_fqn}.{database_name}"):
+        return _ensure_database_unlocked(
+            client, service_fqn, database_name, description, category, custom_properties, owner_ref
+        )
+
+
+def _ensure_database_unlocked(
+    client: OpenMetadata,
+    service_fqn: str,
+    database_name: str,
+    description: str,
+    category: str,
+    custom_properties: dict | None,
+    owner_ref: EntityReference | None,
+) -> Database:
     tags = [_tag_label(f"{_SENSITIVITY_CLASSIFICATION}.{category}", TagSource.Classification)] if category else []
     # Every custom property name is always included, blank ("") if unset --
     # so the field is visibly present (not yet answered) rather than the
@@ -513,44 +562,49 @@ def _ensure_database(
 
 def _ensure_schema(client: OpenMetadata, database_fqn: str, schema_name: str) -> DatabaseSchema:
     fqn = f"{database_fqn}.{schema_name}"
-    existing = _get_or_none(client, DatabaseSchema, fqn)
-    if existing:
-        return existing
-    return _create_or_update(client, CreateDatabaseSchemaRequest(name=schema_name, database=database_fqn))
+    with _entity_lock(f"schema:{fqn}"):
+        existing = _get_or_none(client, DatabaseSchema, fqn)
+        if existing:
+            return existing
+        return _create_or_update(client, CreateDatabaseSchemaRequest(name=schema_name, database=database_fqn))
 
 
 def _ensure_classification(client: OpenMetadata, name: str, description: str) -> Classification:
-    existing = _get_or_none(client, Classification, name)
-    if existing:
-        return existing
-    return _create_or_update(client, CreateClassificationRequest(name=name, description=description))
+    with _entity_lock(f"classification:{name}"):
+        existing = _get_or_none(client, Classification, name)
+        if existing:
+            return existing
+        return _create_or_update(client, CreateClassificationRequest(name=name, description=description))
 
 
 def _ensure_tag(client: OpenMetadata, classification_name: str, tag_name: str, description: str) -> Tag:
     fqn = f"{classification_name}.{tag_name}"
-    existing = _get_or_none(client, Tag, fqn)
-    if existing:
-        return existing
-    return _create_or_update(
-        client, CreateTagRequest(classification=classification_name, name=tag_name, description=description)
-    )
+    with _entity_lock(f"tag:{fqn}"):
+        existing = _get_or_none(client, Tag, fqn)
+        if existing:
+            return existing
+        return _create_or_update(
+            client, CreateTagRequest(classification=classification_name, name=tag_name, description=description)
+        )
 
 
 def _ensure_glossary(client: OpenMetadata, name: str, description: str) -> Glossary:
-    existing = _get_or_none(client, Glossary, name)
-    if existing:
-        return existing
-    return _create_or_update(client, CreateGlossaryRequest(name=name, description=description))
+    with _entity_lock(f"glossary:{name}"):
+        existing = _get_or_none(client, Glossary, name)
+        if existing:
+            return existing
+        return _create_or_update(client, CreateGlossaryRequest(name=name, description=description))
 
 
 def _ensure_glossary_term(client: OpenMetadata, glossary_name: str, term_name: str, description: str) -> GlossaryTerm:
     fqn = f"{glossary_name}.{term_name}"
-    existing = _get_or_none(client, GlossaryTerm, fqn)
-    if existing:
-        return existing
-    return _create_or_update(
-        client, CreateGlossaryTermRequest(glossary=glossary_name, name=term_name, description=description)
-    )
+    with _entity_lock(f"glossary_term:{fqn}"):
+        existing = _get_or_none(client, GlossaryTerm, fqn)
+        if existing:
+            return existing
+        return _create_or_update(
+            client, CreateGlossaryTermRequest(glossary=glossary_name, name=term_name, description=description)
+        )
 
 
 def _unique_in_order(values: Iterable[str]) -> list[str]:
@@ -709,8 +763,14 @@ def _ensure_mdsf_levels(client: OpenMetadata) -> None:
 
 _CATEGORY_RE = re.compile(r"^CAT-(\d+)$", re.IGNORECASE)
 
-def _replace_column_fields(client: OpenMetadata, table, columns: list[Column]) -> None:
-    """Set each column's tags and description to exactly this run's values.
+def _patch_table_fields(
+    client: OpenMetadata,
+    table,
+    columns: list[Column],
+    curated_columns: list[dict],
+    curated_path: str,
+) -> None:
+    """Set the table extension and each column's tags/descriptions.
 
     Two OpenMetadata 2.0.2 update quirks make the explicit patch necessary:
 
@@ -724,10 +784,15 @@ def _replace_column_fields(client: OpenMetadata, table, columns: list[Column]) -
     not ours). Tags are always sent, so clearing them really clears them; a
     description is only sent when the curated snapshot has one, because a
     blank cell means "not answered" (the snapshot's carry-forward already
-    keeps the previous text)."""
+    keeps the previous text). The extension and column fields share one patch
+    request to avoid an extra round trip per table."""
 
     server_names = [str(_unwrap(c.name)) for c in (getattr(table, "columns", None) or [])]
-    fields = {}
+    fields = {
+        "extension": {
+            EXTRA_METADATA_PROPERTY: _extra_metadata_json(curated_columns, curated_path),
+        }
+    }
     for column in columns:
         name = str(_unwrap(column.name))
         if name not in server_names:
@@ -737,8 +802,8 @@ def _replace_column_fields(client: OpenMetadata, table, columns: list[Column]) -
         description = _unwrap(getattr(column, "description", None)) or ""
         if description:
             fields[f"columns/{index}/description"] = description
-    if fields:
-        _replace_entity_fields(client, "/tables", _unwrap(table.id), fields, op="add")
+    patch = [{"op": "add", "path": f"/{field}", "value": value} for field, value in fields.items()]
+    _patch_entity(client, "/tables", _unwrap(table.id), patch)
 
 
 def _ensure_tags_and_terms(client: OpenMetadata, curated_columns: list[dict]) -> None:
@@ -793,29 +858,23 @@ def _ensure_tags_and_terms(client: OpenMetadata, curated_columns: list[dict]) ->
             )
 
 
-def publish_table(
+@dataclass
+class _PreparedTable:
+    table_id: str
+    expected_fqn: str
+    curated_path: str
+    curated_columns: list[dict]
+    columns: list[Column]
+    request: CreateTableRequest
+
+
+def _prepare_table(
     client: OpenMetadata,
     storage: ObjectStorage,
     table_id: str,
     service_name: str | None = None,
     allow_category_below_columns: bool = False,
-) -> dict:
-    """Publish one table's latest curated schema snapshot into OpenMetadata
-    as a Table entity (Service -> Database -> Schema -> Table -> Columns).
-
-    This is the one function every publish path (CLI below, or a future
-    batch loop over all registered tables) should call, so the create-or-
-    update logic for the whole entity chain lives in exactly one place.
-    `table_id` is the same hierarchical id used throughout this pipeline
-    ("pwd.vishwakarma.<table>"); service defaults to the department so each
-    department gets its own OpenMetadata database service.
-
-    Refuses to publish a dataset whose `category` is below its most
-    sensitive column's `classification` (see _check_category_covers_columns)
-    unless `allow_category_below_columns=True`.
-
-"""
-
+) -> _PreparedTable:
     department_id, dataset_slug, table_slug = table_id.split(".")
     dataset_id = f"{department_id}.{dataset_slug}"
 
@@ -825,20 +884,13 @@ def publish_table(
     if table_row.get("deleted"):
         raise ValueError(
             f"{table_id} was soft-deleted on {table_row['deleted']} -- it stays out of "
-            f"OpenMetadata until it is re-ingested (run() re-registers it and clears the mark)."
+            "OpenMetadata until it is re-ingested (run() re-registers it and clears the mark)."
         )
     dataset_row = lookups.get_dataset(storage, dataset_id) or {}
-
     curated_path = lookups.latest_curated_snapshot_path(storage, department_id, dataset_slug, table_slug)
     curated_columns = storage.read_csv(curated_path)
-
-    # `category` is optional: blank simply means the dataset carries no
-    # dataset-level CAT tag. When it is set, _ensure_sensitivity_tag() below
-    # refuses a value that isn't in the CAT-1..CAT-4 vocabulary.
     category = dataset_row.get("category", "")
 
-    # Checked before any OpenMetadata call, so a refused publish leaves no
-    # half-updated service/database behind.
     if allow_category_below_columns:
         logger.warning(f"{table_id}: dataset-vs-column category check skipped (allow_category_below_columns=True)")
     else:
@@ -870,34 +922,290 @@ def publish_table(
         owner_ref=_resolve_owner(client, dataset_row.get("owner", "")),
     )
     schema = _ensure_schema(client, _fqn(database), table_row["schema_name"])
-
-    # Built (and, if invalid, raised) before touching tags/glossary terms in
-    # OpenMetadata, so a bad data type fails fast without side effects.
     columns = [_to_column(row) for row in curated_columns]
     _ensure_tags_and_terms(client, curated_columns)
-
-    table = _create_or_update(
-        client,
-        CreateTableRequest(
-            name=table_row["table_name"],
-            tableType=TableType.Regular,
-            databaseSchema=_fqn(schema),
-            columns=_columns_for_put(columns),
-        ),
+    request = CreateTableRequest(
+        name=table_row["table_name"],
+        tableType=TableType.Regular,
+        databaseSchema=_fqn(schema),
+        columns=_columns_for_put(columns),
     )
-    _replace_entity_fields(client, "/tables", _unwrap(table.id),
-                           {"extension": {EXTRA_METADATA_PROPERTY: _extra_metadata_json(curated_columns, curated_path)}},
-                           op="add")
-    _replace_column_fields(client, table, columns)
+    return _PreparedTable(
+        table_id=table_id,
+        expected_fqn=f"{_fqn(schema)}.{table_row['table_name']}",
+        curated_path=curated_path,
+        curated_columns=curated_columns,
+        columns=columns,
+        request=request,
+    )
 
-    logger.info(f"Published {table_id} -> {_fqn(table)} ({len(curated_columns)} column(s)) from {curated_path}")
 
+def _finish_table_publish(client: OpenMetadata, prepared: _PreparedTable, table: Table) -> dict:
+    _patch_table_fields(
+        client,
+        table,
+        prepared.columns,
+        prepared.curated_columns,
+        prepared.curated_path,
+    )
+    logger.info(
+        f"Published {prepared.table_id} -> {_fqn(table)} "
+        f"({len(prepared.curated_columns)} column(s)) from {prepared.curated_path}"
+    )
     return {
-        "table_id": table_id,
+        "table_id": prepared.table_id,
         "fully_qualified_name": _fqn(table),
-        "curated_path": curated_path,
-        "column_count": len(curated_columns),
+        "curated_path": prepared.curated_path,
+        "column_count": len(prepared.curated_columns),
     }
+
+
+def _field_value(value, name: str):
+    return value.get(name) if isinstance(value, dict) else getattr(value, name, None)
+
+
+def _reference_text(value) -> str:
+    if isinstance(value, dict):
+        for key in ("fullyQualifiedName", "fqn", "root", "name"):
+            if key in value:
+                return _reference_text(value[key])
+    return str(_unwrap(value) or "")
+
+
+def _bulk_response_fqn(response) -> str | None:
+    """OpenMetadata 2.0.2's `/tables/bulk` sends two different shapes for
+    `request`, confirmed against a live local instance (2026-11-26): a
+    successful row's `request` is the persisted table's own fully qualified
+    name as a plain string (not JSON, and not an echo of the submitted
+    request); a failed row's `request` is the *submitted* CreateTableRequest
+    as a plain dict (bare `name` + `databaseSchema` fields, not the JSON
+    string the old code expected), so it has to be rebuilt into an fqn."""
+
+    request = _field_value(response, "request")
+    if request is None:
+        return None
+    if isinstance(request, str):
+        return request.casefold()
+    name = _reference_text(_field_value(request, "name"))
+    schema = _reference_text(_field_value(request, "databaseSchema"))
+    return f"{schema}.{name}".casefold() if schema and name else None
+
+
+def _bulk_request_size(prepared: list[_PreparedTable]) -> int:
+    payload = [
+        row.request.model_dump(mode="json", by_alias=True, exclude_none=True)
+        for row in prepared
+    ]
+    return len(json.dumps(payload).encode("utf-8"))
+
+
+def _publish_bulk_batch(
+    client: OpenMetadata,
+    batch: list[_PreparedTable],
+    max_workers: int,
+) -> dict[str, dict]:
+    results: dict[str, dict] = {}
+    by_fqn = {row.expected_fqn.casefold(): row for row in batch}
+    request_bytes = _bulk_request_size(batch)
+    started = time.perf_counter()
+    try:
+        response = client.bulk_create_or_update_tables(
+            BulkCreateTable(tables=[row.request for row in batch])
+        )
+    except Exception as exc:
+        error = f"{type(exc).__name__}: {exc}"
+        logger.error(f"OpenMetadata bulk publish failed for {len(batch)} table(s): {error}")
+        return {row.table_id: {"status": "failed", "error": error} for row in batch}
+    logger.info(
+        f"Stage timing: stage=openmetadata_bulk_upsert tables={len(batch)} "
+        f"request_bytes={request_bytes} elapsed_ms={(time.perf_counter() - started) * 1000:.1f}"
+    )
+
+    entries = [
+        (row, False)
+        for row in (_field_value(response, "successRequest") or [])
+    ] + [
+        (row, True)
+        for row in (_field_value(response, "failedRequest") or [])
+    ]
+    for entry, failed in entries:
+        key = _bulk_response_fqn(entry)
+        prepared = by_fqn.get(key or "")
+        if prepared is None:
+            logger.error("OpenMetadata bulk response contained an uncorrelated table result")
+            continue
+        status = _field_value(entry, "status")
+        message = _field_value(entry, "message")
+        try:
+            status_code = int(status) if status is not None else None
+        except (TypeError, ValueError):
+            status_code = None
+        if failed or (status_code is not None and status_code >= 400):
+            results[prepared.table_id] = {
+                "status": "failed",
+                "error": message or f"OpenMetadata returned status {status_code or 'failure'}",
+            }
+        else:
+            results[prepared.table_id] = {"status": "upserted"}
+
+    for row in batch:
+        results.setdefault(
+            row.table_id,
+            {"status": "failed", "error": "OpenMetadata bulk response omitted this table's result"},
+        )
+    successful = [row for row in batch if results[row.table_id]["status"] == "upserted"]
+
+    def finish(row: _PreparedTable) -> tuple[str, dict]:
+        try:
+            table = _get_by_name(client, Table, row.expected_fqn, fields=["columns"])
+            if table is None:
+                raise ValueError(f"OpenMetadata did not return the table after bulk upsert: {row.expected_fqn}")
+            return row.table_id, {
+                "status": "published",
+                **_finish_table_publish(client, row, table),
+            }
+        except Exception as exc:  # noqa: BLE001 -- preserve per-table results
+            return row.table_id, {"status": "failed", "error": f"{type(exc).__name__}: {exc}"}
+
+    finalize_started = time.perf_counter()
+    with ThreadPoolExecutor(max_workers=min(max_workers, len(successful) or 1)) as executor:
+        results.update(executor.map(finish, successful))
+    logger.info(
+        f"Stage timing: stage=openmetadata_finalize tables={len(successful)} "
+        f"elapsed_ms={(time.perf_counter() - finalize_started) * 1000:.1f}"
+    )
+    return results
+
+
+def publish_tables(
+    client: OpenMetadata,
+    storage: ObjectStorage,
+    tables: Iterable[tuple[str, bool]],
+    max_workers: int = 4,
+    max_batch_tables: int = 25,
+    max_batch_bytes: int = 4 * 1024 * 1024,
+) -> dict[str, dict]:
+    """Synchronously publish bounded table batches with independent results.
+
+    Each input is `(table_id, allow_category_below_columns)`. Successful bulk
+    upserts are read back so the existing exact extension, tag, and
+    description patches are preserved.
+    """
+
+    if max_workers < 1:
+        raise ValueError("max_workers must be a positive integer")
+    if max_batch_tables < 1:
+        raise ValueError("max_batch_tables must be a positive integer")
+    if max_batch_bytes < 1:
+        raise ValueError("max_batch_bytes must be a positive integer")
+
+    results: dict[str, dict] = {}
+    iterator = iter(tables)
+    total_started = time.perf_counter()
+    with ThreadPoolExecutor(max_workers=min(max_workers, max_batch_tables)) as executor:
+        while True:
+            jobs = []
+            for _ in range(max_batch_tables):
+                try:
+                    jobs.append(next(iterator))
+                except StopIteration:
+                    break
+            if not jobs:
+                break
+
+            prepare_started = time.perf_counter()
+
+            def prepare(job: tuple[str, bool]) -> tuple[str, _PreparedTable | None, str | None]:
+                table_id, allow_category = job
+                try:
+                    return table_id, _prepare_table(
+                        client,
+                        storage,
+                        table_id,
+                        allow_category_below_columns=allow_category,
+                    ), None
+                except Exception as exc:  # noqa: BLE001 -- keep independent tables moving
+                    return table_id, None, f"{type(exc).__name__}: {exc}"
+
+            prepared_results = list(executor.map(prepare, jobs))
+            logger.info(
+                f"Stage timing: stage=openmetadata_prepare tables={len(jobs)} "
+                f"elapsed_ms={(time.perf_counter() - prepare_started) * 1000:.1f}"
+            )
+
+            batches: list[list[_PreparedTable]] = []
+            current: list[_PreparedTable] = []
+            for table_id, prepared, error in prepared_results:
+                if error is not None:
+                    results[table_id] = {"status": "failed", "error": error}
+                    continue
+                if prepared is None:
+                    results[table_id] = {"status": "failed", "error": "Table preparation returned no request"}
+                    continue
+                if _bulk_request_size([prepared]) > max_batch_bytes:
+                    results[table_id] = {
+                        "status": "failed",
+                        "error": f"Table request exceeds the configured bulk limit of {max_batch_bytes} bytes",
+                    }
+                    continue
+                candidate = [*current, prepared]
+                if current and _bulk_request_size(candidate) > max_batch_bytes:
+                    batches.append(current)
+                    current = [prepared]
+                else:
+                    current = candidate
+            if current:
+                batches.append(current)
+
+            for batch in batches:
+                results.update(_publish_bulk_batch(client, batch, max_workers))
+
+    logger.info(
+        f"Stage timing: stage=openmetadata_publish tables={len(results)} "
+        f"elapsed_ms={(time.perf_counter() - total_started) * 1000:.1f}"
+    )
+    return results
+
+
+def publish_table(
+    client: OpenMetadata,
+    storage: ObjectStorage,
+    table_id: str,
+    service_name: str | None = None,
+    allow_category_below_columns: bool = False,
+) -> dict:
+    """Publish one table's latest curated schema snapshot into OpenMetadata
+    as a Table entity (Service -> Database -> Schema -> Table -> Columns).
+
+    This is the one function every publish path (CLI below, or a future
+    batch loop over all registered tables) should call, so the create-or-
+    update logic for the whole entity chain lives in exactly one place.
+    `table_id` is the same hierarchical id used throughout this pipeline
+    ("pwd.vishwakarma.<table>"); service defaults to the department so each
+    department gets its own OpenMetadata database service.
+
+    Refuses to publish a dataset whose `category` is below its most
+    sensitive column's `classification` (see _check_category_covers_columns)
+    unless `allow_category_below_columns=True`.
+
+"""
+
+    started = time.perf_counter()
+    try:
+        prepared = _prepare_table(
+            client,
+            storage,
+            table_id,
+            service_name,
+            allow_category_below_columns,
+        )
+        table = _create_or_update(client, prepared.request)
+        return _finish_table_publish(client, prepared, table)
+    finally:
+        logger.info(
+            f"Stage timing: stage=openmetadata_publish table_id={table_id} "
+            f"elapsed_ms={(time.perf_counter() - started) * 1000:.1f}"
+        )
 
 
 # A recreated table is a new entity: everything that lived on the old one and

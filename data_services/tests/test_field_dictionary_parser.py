@@ -124,6 +124,18 @@ def _single(tmp_path, field, description, fmt, mandatory="Y", table="t1"):
     return _write_csv(tmp_path, BASE_HEADERS, [[table, field, description, fmt, mandatory]])
 
 
+def test_classification_field_becomes_business_metadata(tmp_path):
+    source = _write_csv(
+        tmp_path,
+        BASE_HEADERS + ["Classification"],
+        [["t1", "health_status", "Health status", "Text", "Y", "Health"]],
+    )
+
+    metadata = parse_field_dictionary(source)["t1"]["business_metadata"]["health_status"]
+
+    assert metadata["classification"] == "Health"
+
+
 # --- parse_format: existing rules under edge cases ---------------------
 
 

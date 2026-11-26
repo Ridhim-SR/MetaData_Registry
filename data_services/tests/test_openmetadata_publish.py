@@ -1,10 +1,11 @@
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 import requests
-from metadata.generated.schema.entity.data.table import DataType
+from metadata.generated.schema.entity.data.table import DataType, Table
 from metadata.ingestion.ometa.client import APIError
 
 from src.schema_registry.curate import CLASSIFICATION_LEVELS
@@ -14,6 +15,7 @@ from src.schema_registry.openmetadata.publish import (
     _get_by_name,
     _to_column,
     _unwrap,
+    publish_tables,
     publish_table,
 )
 from src.schema_registry.registry import lookups
@@ -99,6 +101,49 @@ def _fake_client():
     return client
 
 
+def _bulk_fake_client(failed_names=()):
+    client = _fake_client()
+    persisted = {}
+
+    def _bulk_upsert(bulk_request):
+        # Shapes below match a live OpenMetadata 2.0.2 instance (confirmed
+        # 2026-11-26, see data_services/README.md's bulk-publish checkpoint):
+        # a successful row's `request` is the persisted entity's own fqn as
+        # a plain string, not an echo of what was submitted; a failed row's
+        # `request` is the submitted CreateTableRequest as a plain dict with
+        # bare `name`/`databaseSchema` strings, not a JSON string.
+        successes, failures = [], []
+        for request in bulk_request.tables:
+            name = _unwrap(request.name)
+            schema = _unwrap(request.databaseSchema)
+            fqn = f"{schema}.{name}"
+            if name in failed_names:
+                failures.append(SimpleNamespace(
+                    request={"name": name, "databaseSchema": schema},
+                    status=400,
+                    message="Rejected table request",
+                ))
+            else:
+                entity = SimpleNamespace(
+                    fullyQualifiedName=fqn,
+                    id=fqn,
+                    name=name,
+                    columns=request.columns,
+                )
+                persisted[fqn] = entity
+                successes.append(SimpleNamespace(request=fqn, status=200, message=None))
+        return SimpleNamespace(successRequest=successes, failedRequest=failures)
+
+    def _get_by_name(entity, fqn, fields=None):
+        if entity is Table and fqn in persisted:
+            return persisted[fqn]
+        raise Exception("Entity not found")
+
+    client.bulk_create_or_update_tables.side_effect = _bulk_upsert
+    client.get_by_name.side_effect = _get_by_name
+    return client
+
+
 def _last_patch_body(client, path_prefix: str) -> dict:
     """{json-pointer path: value} of the most recent JSON-Patch sent to an
     entity under `path_prefix` (e.g. "/databases/", "/tables/")."""
@@ -157,6 +202,81 @@ def test_publish_table_builds_full_entity_chain(tmp_path):
         ["FieldTag.Firm/Contractor-Identifier", "MDSF.PII"],
         ["FieldTag.Financial", "MDSF.Financial"],
     ]
+
+
+def test_publish_tables_batches_requests_and_preserves_per_table_results(tmp_path):
+    storage = _ingested_storage(tmp_path)
+    run(
+        department="pwd",
+        dataset="vishwakarma",
+        table_name="second_table",
+        source_file=_write_ddl(tmp_path),
+        storage=storage,
+        source_format="postgres_ddl",
+        business_metadata_file=_write_tag_csv(tmp_path),
+    )
+    client = _bulk_fake_client(failed_names={"second_table"})
+
+    results = publish_tables(
+        client,
+        storage,
+        [
+            ("pwd.vishwakarma.tbd_confirm_with_pwd", False),
+            ("pwd.vishwakarma.second_table", False),
+        ],
+        max_workers=1,
+    )
+
+    assert results["pwd.vishwakarma.tbd_confirm_with_pwd"]["status"] == "published"
+    assert results["pwd.vishwakarma.second_table"] == {
+        "status": "failed",
+        "error": "Rejected table request",
+    }
+    assert client.bulk_create_or_update_tables.call_count == 1
+    bulk_request = client.bulk_create_or_update_tables.call_args.args[0]
+    assert len(bulk_request.tables) == 2
+    table_patches = [
+        call for call in client.client.patch.call_args_list
+        if call.kwargs["path"].startswith("/tables/")
+    ]
+    assert len(table_patches) == 1
+    assert [op["path"] for op in json.loads(table_patches[0].kwargs["data"])] == [
+        "/extension",
+        "/columns/0/tags",
+        "/columns/1/tags",
+        "/columns/2/tags",
+    ]
+
+
+def test_publish_tables_obeys_count_and_payload_bounds(tmp_path):
+    storage = _ingested_storage(tmp_path)
+    run(
+        department="pwd",
+        dataset="vishwakarma",
+        table_name="second_table",
+        source_file=_write_ddl(tmp_path),
+        storage=storage,
+        source_format="postgres_ddl",
+        business_metadata_file=_write_tag_csv(tmp_path),
+    )
+    jobs = [
+        ("pwd.vishwakarma.tbd_confirm_with_pwd", False),
+        ("pwd.vishwakarma.second_table", False),
+    ]
+    client = _bulk_fake_client()
+
+    results = publish_tables(client, storage, jobs, max_workers=1, max_batch_tables=1)
+    assert all(result["status"] == "published" for result in results.values())
+    assert client.bulk_create_or_update_tables.call_count == 2
+    assert all(len(call.args[0].tables) == 1 for call in client.bulk_create_or_update_tables.call_args_list)
+
+    bounded_client = _bulk_fake_client()
+    oversized = publish_tables(
+        bounded_client, storage, jobs, max_workers=1, max_batch_bytes=1
+    )
+    assert all(result["status"] == "failed" for result in oversized.values())
+    assert all("exceeds the configured bulk limit" in result["error"] for result in oversized.values())
+    bounded_client.bulk_create_or_update_tables.assert_not_called()
 
 
 def test_publish_table_pushes_classification_and_glossary_term(tmp_path):
@@ -334,8 +454,7 @@ def test_publish_table_patches_column_tags_right_after_the_put(tmp_path):
     client = _fake_client()
     publish_table(client, storage, "pwd.vishwakarma.tbd_confirm_with_pwd")
 
-    # publish_table() now sends a second /tables/ patch for the extraMetadata
-    # extension property, so select on the column-tag ops this test is about.
+    # Extension and column fields share one /tables/ patch request.
     table_patches = [
         call for call in client.client.patch.call_args_list
         if call.kwargs["path"].startswith("/tables/") and "/columns/" in call.kwargs["data"]
@@ -345,18 +464,20 @@ def test_publish_table_patches_column_tags_right_after_the_put(tmp_path):
 
     ops = json.loads(table_patches[0].kwargs["data"])
     assert [(op["op"], op["path"]) for op in ops] == [
+        ("add", "/extension"),
         ("add", "/columns/0/tags"),
         ("add", "/columns/1/tags"),
         ("add", "/columns/2/tags"),
     ]
-    assert [[tag["tagFQN"] for tag in op["value"]] for op in ops] == [
+    tag_ops = [op for op in ops if op["path"].endswith("/tags")]
+    assert [[tag["tagFQN"] for tag in op["value"]] for op in tag_ops] == [
         [],  # sno: no rule recognises it, so no classification
         ["FieldTag.Firm/Contractor-Identifier", "MDSF.PII"],
         ["FieldTag.Financial", "MDSF.Financial"],
     ]
     # the labels are the same TagLabel shape OpenMetadata stores, so the patch
     # overwrites rather than appends
-    assert ops[1]["value"][-1] == {
+    assert tag_ops[1]["value"][-1] == {
         "tagFQN": "MDSF.PII",
         "source": "Classification",
         "labelType": "Automated",
@@ -383,9 +504,10 @@ def test_publish_table_patches_an_empty_tag_list_to_clear_a_stale_label(tmp_path
         call for call in client.client.patch.call_args_list if call.kwargs["path"].startswith("/tables/")
     ]
     ops = json.loads(table_patches[-1].kwargs["data"])
-    assert ops[0] == {"op": "add", "path": "/columns/0/tags", "value": []}
+    tag_ops = [op for op in ops if op["path"].endswith("/tags")]
+    assert tag_ops[0] == {"op": "add", "path": "/columns/0/tags", "value": []}
     # the other columns still carry their curated labels
-    assert [[tag["tagFQN"] for tag in op["value"]] for op in ops[1:]] == [
+    assert [[tag["tagFQN"] for tag in op["value"]] for op in tag_ops[1:]] == [
         ["FieldTag.Firm/Contractor-Identifier", "MDSF.PII"],
         ["FieldTag.Financial", "MDSF.Financial"],
     ]
@@ -1018,8 +1140,8 @@ def test_publish_table_stores_unpublished_column_details_as_json_property(tmp_pa
     call = next(c for c in client.client.patch.call_args_list
                 if c.kwargs["path"].startswith("/tables/") and "/extension" in c.kwargs["data"])
     ops = json.loads(call.kwargs["data"])
-    assert [o["path"] for o in ops] == ["/extension"]
-    extra = json.loads(ops[0]["value"]["extraMetadata"])
+    extension = next(o for o in ops if o["path"] == "/extension")
+    extra = json.loads(extension["value"]["extraMetadata"])
     assert extra["curated_file"].startswith("department/pwd/vishwakarma/")
     assert [c["name"] for c in extra["columns"]] == ["sno", "firm_name", "total_cost"]
     sno = extra["columns"][0]

@@ -1,7 +1,9 @@
 import threading
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from metadata.generated.schema.entity.data.table import Table
 
 import src.schema_registry.sync as sync_module
 from src.schema_registry.catalog import parse_catalog
@@ -31,7 +33,12 @@ departments:
 
 def _fake_client():
     client = MagicMock()
-    client.get_by_name.side_effect = Exception("Entity not found")
+    persisted = {}
+
+    def _get_by_name(entity, fqn, fields=None):
+        if entity is Table and fqn in persisted:
+            return persisted[fqn]
+        raise Exception("Entity not found")
 
     def _create_or_update(request):
         entity = MagicMock()
@@ -43,15 +50,42 @@ def _fake_client():
         entity.columns = getattr(request, "columns", None)
         return entity
 
+    def _bulk_upsert(bulk_request):
+        successes = []
+        for request in bulk_request.tables:
+            name = _unwrap(request.name)
+            schema = _unwrap(request.databaseSchema)
+            fqn = f"{schema}.{name}"
+            entity = MagicMock()
+            entity.fullyQualifiedName = fqn
+            entity.id = fqn
+            entity.name = name
+            entity.columns = request.columns
+            persisted[fqn] = entity
+            # A successful row's `request` is the persisted entity's own fqn
+            # as a plain string -- matches a live OpenMetadata 2.0.2 instance,
+            # not an echo of the submitted request (see publish.py's
+            # _bulk_response_fqn and the bulk-publish checkpoint in README.md).
+            successes.append(SimpleNamespace(request=fqn, status=200, message=None))
+        return SimpleNamespace(successRequest=successes, failedRequest=[])
+
+    client.get_by_name.side_effect = _get_by_name
     client.create_or_update.side_effect = _create_or_update
+    client.bulk_create_or_update_tables.side_effect = _bulk_upsert
     return client
 
 
 def _published_tables(client):
-    return sorted(
+    from_bulk = [
+        _unwrap(request.name)
+        for call in client.bulk_create_or_update_tables.call_args_list
+        for request in call.args[0].tables
+    ]
+    from_single = [
         _unwrap(c.args[0].name) for c in client.create_or_update.call_args_list
         if getattr(c.args[0], "columns", None) is not None
-    )
+    ]
+    return sorted(from_bulk + from_single)
 
 
 @pytest.fixture
@@ -267,7 +301,8 @@ def test_field_dictionary_dataset(storage):
     first = sync(storage, catalog, client=client)
     second = sync(storage, catalog, client=_fake_client())
 
-    assert first[0].ingest == "ingested" and "2 table(s)" in first[0].detail
+    assert {o.table_id for o in first} == {"welfare.cmsvy.cmsvy_bride", "welfare.cmsvy.cmsvy_bank"}
+    assert all(o.ingest == "ingested" for o in first)
     assert second[0].ingest == "unchanged"
     assert _published_tables(client) == ["cmsvy_bank", "cmsvy_bride"]
 
@@ -350,10 +385,8 @@ def test_field_dictionary_datasets_run_concurrently_only_in_local_only_mode(stor
     assert {outcome.ingest for outcome in outcomes} == {"ingested"}
 
 
-def test_field_dictionary_ingestion_defaults_to_serial(storage, monkeypatch):
+def test_field_dictionary_ingestion_can_be_forced_serial(storage, monkeypatch):
     _seed_field_dictionary_files(storage)
-    monkeypatch.setenv("ENVIRONMENT", "local")
-    monkeypatch.setenv("LOCAL_ONLY", "1")
     monkeypatch.delenv("SYNC_FIELD_DICTIONARY_WORKERS", raising=False)
     worker_threads = []
     main_thread = threading.get_ident()
@@ -364,23 +397,90 @@ def test_field_dictionary_ingestion_defaults_to_serial(storage, monkeypatch):
 
     monkeypatch.setattr(sync_module, "run_field_dictionary", run_dictionary)
 
-    sync(storage, parse_catalog(_FIELD_DICTIONARY_CATALOG))
+    sync(storage, parse_catalog(_FIELD_DICTIONARY_CATALOG), field_dictionary_workers=1)
 
     assert worker_threads == [main_thread, main_thread]
 
 
-def test_parallel_field_dictionary_ingestion_is_refused_outside_local_only(storage, monkeypatch):
+def test_sync_reports_per_table_field_dictionary_failures(storage, monkeypatch):
+    _seed_field_dictionary_files(storage)
+
+    def run_dictionary(**kwargs):
+        return {
+            "water": {"status": "ok", "column_count": 1},
+            "canals": {"status": "failed", "error": "invalid column definition"},
+        }
+
+    monkeypatch.setattr(sync_module, "run_field_dictionary", run_dictionary)
+
+    outcomes = _by_table(sync(storage, parse_catalog(_FIELD_DICTIONARY_CATALOG)))
+
+    assert outcomes["irrigation.water.water"].ingest == "ingested"
+    assert outcomes["irrigation.water.water"].detail == "field dictionary; 1 columns"
+    assert outcomes["irrigation.canals.canals"].ingest == "failed"
+    assert outcomes["irrigation.canals.canals"].detail == "invalid column definition"
+
+
+def test_parallel_field_dictionary_ingestion_is_allowed_outside_local_only(storage, monkeypatch):
+    """The registry's per-path locks make concurrent dictionaries safe on the
+    shared server too -- this used to be gated to ENVIRONMENT=local."""
+
+    _seed_field_dictionary_files(storage)
     monkeypatch.setenv("ENVIRONMENT", "development")
     monkeypatch.setenv("LOCAL_ONLY", "0")
     monkeypatch.setattr(config, "_current_branch", lambda: "main")
+    barrier = threading.Barrier(2)
+    worker_threads = set()
+    thread_lock = threading.Lock()
 
-    with pytest.raises(PermissionError, match="parallel field-dictionary ingestion is local-only"):
-        sync(
-            storage, parse_catalog(_FIELD_DICTIONARY_CATALOG),
-            field_dictionary_workers=2,
-        )
+    def run_dictionary(**kwargs):
+        with thread_lock:
+            worker_threads.add(threading.get_ident())
+        barrier.wait(timeout=5)
+        return {}
 
-    assert not storage.exists(lookups.DEPARTMENTS_PATH)
+    monkeypatch.setattr(sync_module, "run_field_dictionary", run_dictionary)
+
+    outcomes = sync(
+        storage, parse_catalog(_FIELD_DICTIONARY_CATALOG),
+        field_dictionary_workers=2,
+    )
+
+    assert len(worker_threads) == 2
+    assert len(outcomes) == 2
+    assert {outcome.ingest for outcome in outcomes} == {"ingested"}
+
+
+def test_sync_batches_multiple_table_publishes(storage, monkeypatch):
+    """Multiple eligible tables are sent through one bounded bulk publisher."""
+
+    import src.schema_registry.openmetadata.publish as publish_module
+
+    calls = []
+
+    def fake_publish_tables(client, storage_, tables, max_workers=4, **kwargs):
+        jobs = list(tables)
+        calls.append((jobs, max_workers))
+        return {
+            table_id: {"status": "published", "table_id": table_id}
+            for table_id, _ in jobs
+        }
+
+    monkeypatch.setattr(publish_module, "publish_tables", fake_publish_tables)
+
+    outcomes = _by_table(sync(
+        storage, parse_catalog(_CATALOG), client=_fake_client(), publish_workers=2,
+    ))
+
+    assert len(calls) == 1
+    assert {table_id for table_id, _ in calls[0][0]} == {
+        "pwd.vishwakarma.works",
+        "pwd.vishwakarma.tenders",
+    }
+    assert calls[0][1] == 2
+    assert {o.publish for o in outcomes.values()} == {"published"}
+    runs = {r["table_id"]: r for r in storage.read_csv(lookups.RUNS_PATH)}
+    assert {r["publish_status"] for r in runs.values()} == {"published"}
 
 
 def test_publish_outcome_is_recorded_for_unchanged_tables_too(storage):

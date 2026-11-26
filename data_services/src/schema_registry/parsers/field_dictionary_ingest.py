@@ -1,5 +1,8 @@
 import csv
+import os
 import tempfile
+import time
+from concurrent.futures import Executor, ThreadPoolExecutor
 from pathlib import Path
 
 from metadata.ingestion.ometa.ometa_api import OpenMetadata
@@ -28,6 +31,23 @@ _COLUMN_FIELDS = ["name", "data_type", "length", "nullable", "default", "name_hi
 # existing values. `glossary_term` and `active` are not source fields.
 _METADATA_FIELDS = ["name", "business_description", "tag", "unit", "classification"]
 
+DEFAULT_TABLE_WORKERS = 4
+
+
+def _worker_count(variable: str, default: int) -> int:
+    """Positive integer from the environment, or `default` when unset."""
+
+    raw = os.environ.get(variable, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{variable} must be a positive integer") from exc
+    if value < 1:
+        raise ValueError(f"{variable} must be a positive integer")
+    return value
+
 
 def run_field_dictionary(
     department: str,
@@ -38,6 +58,8 @@ def run_field_dictionary(
     openmetadata_client: OpenMetadata | None = None,
     allow_column_removal: bool = False,
     reclassify: bool = False,
+    workers: int | None = None,
+    executor: Executor | None = None,
 ) -> dict[str, dict]:
     """Ingest a Field Dictionary CSV by splitting it into one temporary per-table
     columns file + business-metadata file per "Dataset Name" group, then
@@ -45,6 +67,12 @@ def run_field_dictionary(
     had submitted one CSV per table. Every existing guarantee (diff-based
     safety guard, locking, retry, auto-tag/auto-classification) applies
     unchanged, since run() itself isn't touched.
+
+    Tables inside one dictionary are independent (their own lock, snapshot
+    and run-log row), so they are ingested through a bounded pool. `executor`
+    lets a caller (sync) share its table pool instead of nesting another one;
+    otherwise `workers` -- FIELD_DICTIONARY_TABLE_WORKERS, default 4 -- sets
+    the pool size. 1 keeps the old strictly serial order.
 
     One bad table doesn't stop the rest: each run() call is isolated, its
     exception is captured, and the result dict records status/error for it
@@ -63,6 +91,7 @@ def run_field_dictionary(
     # table's run() then archives the per-table split it actually parsed.
     source_bytes, source_name = inputs.read_input(storage, source_file)
     text = inputs.decode(source_bytes)
+    parse_started = time.perf_counter()
     if department == "irrigation_dept":
         tables = parse_irrigation_field_dictionary(
             text,
@@ -71,6 +100,11 @@ def run_field_dictionary(
         )
     else:
         tables = parse_field_dictionary_text(text, label=source_file)
+    logger.info(
+        f"Stage timing: stage=parse dataset_id={lookups.slugify(department)}."
+        f"{lookups.slugify(dataset)} tables={len(tables)} "
+        f"elapsed_ms={(time.perf_counter() - parse_started) * 1000:.1f}"
+    )
     archive_path = paths.dataset_source_path(
         lookups.slugify(department), lookups.slugify(dataset), _timestamp(), source_name
     )
@@ -78,7 +112,31 @@ def run_field_dictionary(
     logger.info(f"Field dictionary: archived original -> {archive_path}")
     results: dict[str, dict] = {}
 
+    def _ingest_one(table_name: str, table: dict, columns_path: Path, metadata_path: Path) -> tuple[str, dict]:
+        logger.info(f"Field dictionary: ingesting table '{table_name}' ({len(table['columns'])} column(s))")
+        try:
+            return table_name, {
+                "status": "ok",
+                **run(
+                    department=department,
+                    dataset=dataset,
+                    table_name=table_name,
+                    source_file=str(columns_path),
+                    storage=storage,
+                    source_format="csv",
+                    schema_name=schema_name,
+                    business_metadata_file=str(metadata_path),
+                    openmetadata_client=openmetadata_client,
+                    allow_column_removal=allow_column_removal,
+                    reclassify=reclassify,
+                ),
+            }
+        except Exception as exc:  # noqa: BLE001 -- keep going, report this table as failed
+            logger.error(f"Field dictionary: table '{table_name}' failed: {exc}")
+            return table_name, {"status": "failed", "error": f"{type(exc).__name__}: {exc}"}
+
     with tempfile.TemporaryDirectory() as tmp_dir:
+        jobs: list[tuple[str, dict, Path, Path]] = []
         for table_name, table in tables.items():
             columns_path = Path(tmp_dir) / f"{table_name}_columns.csv"
             with columns_path.open("w", newline="", encoding="utf-8") as f:
@@ -110,28 +168,22 @@ def run_field_dictionary(
                             "classification": meta.get("classification", ""),
                         }
                     )
+            jobs.append((table_name, table, columns_path, metadata_path))
 
-            logger.info(f"Field dictionary: ingesting table '{table_name}' ({len(table['columns'])} column(s))")
-            try:
-                results[table_name] = {
-                    "status": "ok",
-                    **run(
-                        department=department,
-                        dataset=dataset,
-                        table_name=table_name,
-                        source_file=str(columns_path),
-                        storage=storage,
-                        source_format="csv",
-                        schema_name=schema_name,
-                        business_metadata_file=str(metadata_path),
-                        openmetadata_client=openmetadata_client,
-                        allow_column_removal=allow_column_removal,
-                        reclassify=reclassify,
-                    ),
-                }
-            except Exception as exc:  # noqa: BLE001 -- keep going, report this table as failed
-                logger.error(f"Field dictionary: table '{table_name}' failed: {exc}")
-                results[table_name] = {"status": "failed", "error": f"{type(exc).__name__}: {exc}"}
+        if executor is not None:
+            completed = list(executor.map(lambda job: _ingest_one(*job), jobs))
+        else:
+            if workers is None:
+                workers = _worker_count("FIELD_DICTIONARY_TABLE_WORKERS", DEFAULT_TABLE_WORKERS)
+            if workers < 1:
+                raise ValueError("workers must be a positive integer")
+            pool_size = min(workers, len(jobs))
+            if pool_size <= 1:
+                completed = [_ingest_one(*job) for job in jobs]
+            else:
+                with ThreadPoolExecutor(max_workers=pool_size) as pool:
+                    completed = list(pool.map(lambda job: _ingest_one(*job), jobs))
+        results = dict(completed)
 
     ok = sum(1 for r in results.values() if r["status"] == "ok")
     logger.info(f"Field dictionary: {ok}/{len(results)} table(s) ingested")

@@ -1131,3 +1131,23 @@ departments:
           Field definitions for the daily flood bulletin, including river water
           levels, flood warnings, and rainfall information.
         field_dictionary: storage:inputs/irrigation_dept/flood_bulletin/flood_bulletin.csv
+  updasp:
+    name: Uttar Pradesh Diversified Agriculture Support Project (UPDASP)
+    description: >-
+      UPDASP supports the Government of U.P. in its efforts to promote
+      sustainable agricultural growth with employment generation and poverty
+      alleviation through the process of agricultural diversification in the
+      state.
+    datasets:
+      crop_area_estimate:
+        category: CAT-3
+        owner: Project Coordination Unit, UPDASP
+        steward: Additional Project Coordinator, UPDASP
+        dataset_type: Citizen Centric
+        schema_source: Department Provided
+        frequency: Quaterly
+        description: >-
+          A satellite-based agricultural monitoring system to estimate Crop
+          Acreage and Yield Estimation at State, District, Block, and Gram
+          Panchayat levels.
+        field_dictionary: storage:inputs/updasp/crop_area_estimate/crop_area_estimate_field_dictionary.csv

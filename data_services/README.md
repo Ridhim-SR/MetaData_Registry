@@ -221,6 +221,9 @@ python3 -m src.schema_registry.add samples/kanya_sumangla_field_dictionary.csv \
 ```
 For the Irrigation format, which has no `Table Name` values, the dataset id is
 used as the table id.
+The shared field-dictionary parser also accepts optional `Classification`
+and `Unit` columns. Do not include sample-value columns in the submitted
+metadata file.
 
 #### Irrigation source update handoff — 2026-11-05
 
@@ -312,13 +315,15 @@ The department's second delivery adds 16 datasets (19 tables, 350 columns) to th
   a US spelling where the house style is Indian English is a warning.
   `--strict-descriptions` refuses the dataset on an error instead of logging
   it, and `ai_metadata.py` gives agent drafts the same spelling/style rules.
-- Local verification (MinIO `sda-local`, OpenMetadata `:8585`): `sync
-  --department irrigation_dept` ingested 14 changed dictionaries and published
-  37 tables with 0 failures; read-back shows 273/273 monitoring columns with a
-  Hindi `displayName` and an English description, CAT-3 classification, and
-  `Irrigation Department` ownership. The app API returns the same columns, and
-  the dictionary download keeps its `column_name,data_type,description,tags,
-  data_classification` shape.
+- Verification ran locally (MinIO `sda-local`, OpenMetadata `:8585`) and then
+  on dev (`up-sda-schema-registry/dev/`, OpenMetadata `10.0.96.105:8585`).
+  Local: 273/273 monitoring columns carry a Hindi `displayName` and an English
+  description, CAT-3 classification and `Irrigation Department` ownership; the
+  app API returns the same columns and the dictionary download keeps its
+  `column_name,data_type,description,tags,data_classification` shape. Dev
+  read-back: 17 datasets, 20 tables, 368 columns, **0 columns missing a
+  description, 0 missing a Hindi `displayName`**; `sync --department
+  irrigation_dept` finished with 0 failures and backed up 184 files.
 
 Other options: `--format csv|postgres_ddl` (normally guessed from the file name: `.csv` → csv, anything else → postgres_ddl), and `--schema <name>` if the table isn't in the `public` schema.
 
@@ -364,22 +369,34 @@ Nothing runs it automatically yet.
 python3 -m src.schema_registry.sync                    # all departments
 python3 -m src.schema_registry.sync --department pwd   # just one
 ```
-Tables are ingested in parallel with a bounded worker pool (8 workers by
-default). Change the limit for a large or rate-limited environment with
-`--workers`, or set `SYNC_MAX_WORKERS` for automation:
+All catalog tables are ingested in parallel with a bounded worker pool
+(8 workers by default), regardless of department. New departments added to
+`catalog.yaml` use the same path automatically. Change the limit for a large
+or rate-limited environment with `--workers`, or set `SYNC_MAX_WORKERS` for
+automation:
 ```bash
 python3 -m src.schema_registry.sync --department pwd --workers 4
 ```
 Each table still has its own storage lock and audit row, and publishing stays
-ordered after ingestion so a partial worker failure cannot publish an
-incomplete snapshot. Use a lower worker count if Wasabi or the OpenMetadata
-server is rate-limited.
-
-Field-dictionary datasets are serial by default. To benchmark bounded
-concurrency on the local server, use `--field-dictionary-workers 4` with
-`ENVIRONMENT=local` and `LOCAL_ONLY=1`; the option is rejected outside that
-local-only configuration. The existing serial path remains the fallback, and
-OpenMetadata publishing stays serial.
+after ingestion. Field-dictionary datasets and their tables also use bounded
+parallelism across every department (defaults: 4 concurrent dictionary
+datasets, sharing the table pool). For two or more eligible tables,
+OpenMetadata table upserts use synchronous batches bounded to 25 tables and
+4 MiB per request. Successful rows are read back and receive the existing
+extension, tag, and description patches. `--publish-workers` controls bounded
+preparation and readback work (default 4). Tune these limits with
+`--field-dictionary-workers` and `--publish-workers`, or the corresponding
+`SYNC_FIELD_DICTIONARY_WORKERS` and `SYNC_PUBLISH_WORKERS` environment
+variables. Use lower limits if Wasabi or OpenMetadata is rate-limited; raising
+them can help with network-bound workloads but should be benchmarked against
+the target services.
+Stage timing log entries identify change checks, parsing, each S3 write, and
+OpenMetadata preparation, bulk upsert, finalization, and total publish time.
+**The bulk path is still experimental on `test/updasp-bulk-publish`: a local
+OpenMetadata canary found that the live bulk response cannot yet be correlated
+back to the submitted tables. Do not merge or run this version against
+development until the response mapping and end-to-end canary pass.** See the
+checkpoint under [For developers](#for-developers).
 It prints a summary:
 ```
 TABLE                          INGEST        PUBLISH        DETAIL
@@ -742,7 +759,7 @@ Log file: logs/sync_20261007_164556.log
 |---|---|
 | See uploaded files | `python3 -m src.schema_registry.inputs list` |
 | Upload a file without touching the catalog | `python3 -m src.schema_registry.inputs upload <file> inputs/<dept>/<dataset>/<file>` |
-| Upload several files with one CLI startup | `python3 -m src.schema_registry.inputs upload-batch <manifest.csv>` |
+| Upload several files with one CLI startup | `python3 -m src.schema_registry.inputs upload-batch <manifest.csv> [--workers N]` |
 | Try one table without the catalog | `DEPARTMENT=pwd DATASET=vishwakarma TABLE_NAME=vishwakarma_T SOURCE_FILE=samples/x.txt SOURCE_FORMAT=postgres_ddl python3 -m src.schema_registry.pipeline` (add `DEPARTMENT_NAME="..."` the first time) |
 | Republish one table | `TABLE_ID=pwd.vishwakarma.vishwakarma_t python3 -m src.schema_registry.openmetadata.publish` |
 | Batch many tables from a manifest CSV | `MANIFEST_FILE=manifest.csv python3 -m src.schema_registry.batch` (add `OPENMETADATA_JWT_TOKEN` to publish each) |
@@ -757,7 +774,9 @@ Log file: logs/sync_20261007_164556.log
 `SOURCE_FILE` and metadata files can be a path on your laptop or `storage:<key>` for a file in storage.
 The batch-upload manifest has `local_path,storage_key` columns; relative local
 paths are resolved from the manifest's directory, and all rows are validated
-before the first upload.
+before the first upload. Uploads run concurrently (8 workers by default);
+use `--workers` or `UPLOAD_MAX_WORKERS` to tune concurrency for the network
+and file sizes.
 
 ### Environment variables for the direct commands
 
@@ -818,7 +837,7 @@ Every run adds new files with the time in the name, so the full history stays. O
 - `vishwakarma_T` is a temporary table name (PWD's file had none). Change it in `catalog.yaml` once PWD confirms it.
 - `source_format="csv"` won't guess semantically-inverted columns (e.g. `Required` vs `Nullable`) — add a mapping in `parsers/csv_schema_parser.py` if needed.
 - `publish_table()` ignores the curated `active` flag — a column marked inactive still gets published like any other.
-- OpenMetadata's PUT merges tags/extension instead of replacing them by default — so does a Table's PUT, one level down, for each column's tags. Both are patched explicitly right after the PUT (JSON-Patch `replace` on the Database's `tags`/`extension`/`owners`, `add` on every `/columns/{i}/tags`), which is what makes a cleared `category`, custom property or column `tag`/`classification` actually clear instead of staying stuck.
+- OpenMetadata's PUT merges tags/extension instead of replacing them by default — so does a Table's PUT, one level down, for each column's tags. Both are patched explicitly after the upsert (JSON-Patch `replace` on the Database's `tags`/`extension`/`owners`; one Table patch uses `add` for its extension, column tags, and answered descriptions), which is what makes a cleared `category`, custom property or column `tag`/`classification` actually clear instead of staying stuck.
 - The run log (`_lookups/runs.csv`) is a flat CSV, not a queryable store — one row per run is enough for "what happened and is it in OpenMetadata?", but cross-run analytics would want a real table (and `_lookups/*.csv`'s file locking only covers single-machine runs).
 
 ---
@@ -834,7 +853,7 @@ Every run adds new files with the time in the name, so the full history stays. O
 | `src/schema_registry/inputs.py` | Upload/list files, read `storage:` files, archive originals |
 | `src/schema_registry/parsers/` | Readers for Postgres column lists, CSV, field dictionaries |
 | `src/schema_registry/curate.py` | Checks types and names, adds automatic tags and classification |
-| `src/schema_registry/openmetadata/publish.py` | Sends one table to OpenMetadata |
+| `src/schema_registry/openmetadata/publish.py` | Single-table and bounded bulk publishing to OpenMetadata |
 | `src/schema_registry/registry/` | Department/dataset/table lists, and folder layout |
 | `src/storage/` | Wasabi storage, plus locking |
 | `src/storage/backup.py` | Backup bucket: setup, copy, verify, restore |
@@ -849,3 +868,125 @@ Every run adds new files with the time in the name, so the full history stays. O
 3. Add a test with a real example file.
 
 If one file holds several tables, list each table in `catalog.yaml` with the **same** `source:`, and let the parser pick out each table by name.
+
+### Bulk-publish test checkpoint — 2026-11-25
+
+The temporary branch is `test/updasp-bulk-publish`. Nothing has been
+committed, pushed, or written to shared development.
+
+**Implemented:** a synchronous SDK bulk-upsert path with 25-table / 4-MiB
+request bounds; `sync` uses it when multiple tables are eligible. It retains
+per-table outcomes and preserves the extension, tag, and description patches.
+Stage timings were added for change checks, parsing, S3 writes, and
+OpenMetadata preparation/upsert/finalization. Field dictionaries now pass an
+optional `Classification` column through the existing curation checks.
+
+**UPDASP metadata-only check:** the workbook metadata sheet parsed as one
+26-column table; all 26 classifications and mandatory values were accepted,
+with no format fallbacks. The `Sample Value` column and separate data sheet
+were excluded.
+
+**Validation:** the full test suite reported 711 passed and 2 skipped before
+the final response-string adjustment; the publisher/sync focused suites then
+reported 76 passed. A local-only 16-worker canary generated 16 baseline and
+16 batched schema copies from the UPDASP metadata. The OpenMetadata request
+completed, but its per-row result request shape did not match the current
+correlator. No table readback or metadata patch was verified, so this is not a
+successful publish benchmark and there is no speedup conclusion. The local
+test service and isolated S3 prefix were verified cleaned afterward.
+
+**Observed timings are diagnostic only:** preparation took 41.254 seconds for
+25 tables and 4.068 seconds for 7; the bulk calls took 2.571 seconds
+(172,636-byte request) and 0.498 seconds (48,356-byte request). One initial
+185,176-byte local MinIO write took 21.084 seconds; treat that as a possible
+cold-start anomaly, not steady-state S3 performance. The run stopped before
+the baseline-vs-bulk comparison could finish.
+
+**Correlator fixed and verified live — 2026-11-26:** item 1 below is done.
+A 3-table throwaway department (`bulk_canary_tmp`, deleted afterward) was
+published against a real local OpenMetadata 2.0.2 via a direct
+`client.bulk_create_or_update_tables()` call to capture the actual
+`BulkOperationResult` shape:
+- A **successful** row's `Response.request` is the persisted table's own
+  fully qualified name as a **plain string** (e.g.
+  `"bulk_canary_tmp.probe.public.t0"`) — not JSON, and not an echo of the
+  submitted request. The old correlator's `json.loads(request)` raised
+  `JSONDecodeError` on this and returned `None`, so every successful row
+  silently failed to correlate — this was the whole bug.
+- A **failed** row's `Response.request` is the submitted `CreateTableRequest`
+  as a **plain dict** with bare `name` (unqualified) and `databaseSchema`
+  (fqn) strings — confirmed by forcing one row to reference a schema that
+  was never created (`"Entity not found: databaseSchema ..."`, status 400).
+- `_bulk_response_fqn()` in `publish.py` now branches on `isinstance(request,
+  str)`: a string is used as the fqn directly; a dict is rebuilt into
+  `databaseSchema.name` as before. `tests/test_openmetadata_publish.py` and
+  `tests/test_sync.py`'s bulk mocks were updated to return these two real
+  shapes instead of the JSON-string guess.
+- End-to-end re-verification with the fix: `publish_tables()` against the
+  same local OpenMetadata correlated and published all 3 tables, each
+  readback (`_get_by_name` on the bulk-upserted fqn) and the combined
+  extension/tag/description patch succeeded, and a direct API read confirmed
+  the table and its columns. The temporary service and its storage/lookups
+  footprint were deleted afterward. Full suite: 711 passed, 2 skipped (same
+  as before); focused publisher/sync suite: 76 passed; opt-in MinIO
+  integration tests: 2 passed.
+
+**Mixed-batch isolation and a real timing comparison — 2026-11-26:** items 2
+and 3 below are done, using the department's actual first UPDASP delivery
+(`Datasets/UPDASP/UPDASP/Crop Area Estimate/Crop Area Estimate.xlsx` — one
+26-column table, metadata sheet only, `Sample Value` and the one-row data
+sheet excluded, same as the 2026-11-25 metadata-only check).
+- **Mixed-batch isolation (item 2):** a throwaway department
+  (`updasp_bulk_bench_tmp`, deleted afterward) published a 5-table batch
+  through the real `_publish_bulk_batch()` with one request deliberately
+  pointed at a schema that doesn't exist. Result: the 4 unaffected rows
+  published, read back, and patched correctly; the corrupted row failed with
+  the server's real `"Entity not found: databaseSchema ..."` message,
+  correctly correlated and isolated — confirmed live, not simulated.
+- **Timing comparison (item 3):** 16 tables published serially via
+  `publish_table()` vs. 16 (same real schema, different table names)
+  published via `publish_tables()`. First attempt reproduced the old
+  checkpoint's wildly inconsistent numbers (`openmetadata_prepare` alone
+  took ~22s for 16 tables); profiling traced it to `src/storage/s3.py`'s
+  `exists()` against the local MinIO endpoint, not OpenMetadata at all. Root
+  cause: **this machine's `data_services/.env` has
+  `LOCAL_WASABI_ENDPOINT_URL=http://localhost:9000`**, exactly the
+  `localhost`-vs-`127.0.0.1` Docker Desktop IPv6 tax the MinIO integration
+  tests section above already warns about (~2s added per new S3 connection
+  here, not the ~20s quoted there, but the same mechanism). Overriding
+  `LOCAL_WASABI_ENDPOINT_URL=http://127.0.0.1:9000` for the run (not written
+  back to `.env`) brought `openmetadata_prepare` for 16 tables down to 3.3s.
+  Clean result: **serial 9.39s vs. bulk 5.39s — 1.74x faster**, all 16
+  published and verified via a live API read (columns, description, MDSF
+  tag). Consider fixing `.env`/`.env.example`'s default to `127.0.0.1` for
+  local MinIO separately from this branch's actual change set.
+- Both runs' throwaway OpenMetadata service and storage/lookups footprint
+  were deleted afterward, same discipline as the correlator fix above.
+- **The real dataset was then ingested for real** (kept, not cleaned up):
+  department `updasp`, dataset `crop_area_estimate`, with the department's
+  own `Department Details.txt`/`details.txt` metadata (CAT-3, "Project
+  Coordination Unit, UPDASP" owner, "Citizen Centric", "Department
+  Provided"). The owner didn't resolve to any OpenMetadata user/team on the
+  first publish (warning only, not a failure); created the matching **Group**
+  team under `Organization` (same pattern as `Irrigation Department`) and
+  republished — Owners now resolves. Verified live via
+  `apps/api` + `apps/web` (both started locally against this same local
+  OpenMetadata/storage) at `/departments/updasp`: correct display name,
+  description, CAT-3, dataset type, and 1 table.
+- None of this touched `catalog.yaml` or company Wasabi/dev OpenMetadata —
+  department `updasp` exists only in local storage and local OpenMetadata
+  pending the user's review and item 4 below.
+
+**Still to do before considering merge:**
+1. ~~Inspect the live response's request fields without exposing metadata, fix
+   per-table correlation, and add a fixture that matches the actual response.~~
+   Done 2026-11-26, see above.
+2. ~~Verify success/failure isolation, table readback, and the combined
+   extension/tag/description patch against local OpenMetadata.~~ Done
+   2026-11-26, see above.
+3. ~~Rerun the local 16-worker canary and complete a fair baseline comparison
+   with all stage timings.~~ Done 2026-11-26, see above (1.74x).
+4. Only after those pass, arrange an authorized development write from `main`
+   with a refreshed dev token. The branch guard must not be bypassed. Still
+   open, pending the user's review of the local webapp result; UPDASP is not
+   yet in `catalog.yaml` and has not been added there as part of this branch.

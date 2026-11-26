@@ -27,6 +27,7 @@ import argparse
 import json
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
 import boto3
@@ -38,6 +39,7 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 DEFAULT_BACKUP_REGION = "eu-central-1"  # a different region from the main bucket
+DEFAULT_COPY_WORKERS = 8
 LOCK_DAYS = 90  # nothing in the backup can be deleted for this long
 MAIN_KEEP_OLD_VERSIONS_DAYS = 90  # overwritten/deleted files stay restorable this long
 BACKUP_KEEP_OLD_VERSIONS_DAYS = 365
@@ -113,19 +115,58 @@ def compare(source: Bucket, target: Bucket, prefix: str) -> Diff:
     return diff
 
 
-def copy(source: Bucket, target: Bucket, prefix: str, overwrite: bool = True, dry_run: bool = False) -> list[str]:
+def _worker_count(variable: str, default: int) -> int:
+    """Positive integer from the environment, or `default` when unset."""
+
+    raw = os.environ.get(variable, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{variable} must be a positive integer") from exc
+    if value < 1:
+        raise ValueError(f"{variable} must be a positive integer")
+    return value
+
+
+def copy(
+    source: Bucket,
+    target: Bucket,
+    prefix: str,
+    overwrite: bool = True,
+    dry_run: bool = False,
+    workers: int | None = None,
+) -> list[str]:
     """Copy what `target` lacks (and, with overwrite, what differs) from
     `source`. Never deletes anything. Returns the keys copied. Downloads
     and re-uploads rather than a server-side copy, so the two buckets can
-    be in different regions."""
+    be in different regions.
+
+    Files are independent, so a bounded pool overlaps the download+upload
+    round trips -- the first full copy of a large catalog is otherwise one
+    file after another across regions. `workers` defaults to
+    BACKUP_MAX_WORKERS (8); 1 restores the strictly serial copy."""
 
     diff = compare(source, target, prefix)
     keys = diff.missing + (diff.different if overwrite else [])
-    if not dry_run:
-        for key in keys:
-            body = source.client.get_object(Bucket=source.name, Key=key)["Body"].read()
-            target.client.put_object(Bucket=target.name, Key=key, Body=body)
-    return keys
+    if dry_run or not keys:
+        return keys
+    if workers is None:
+        workers = _worker_count("BACKUP_MAX_WORKERS", DEFAULT_COPY_WORKERS)
+    if workers < 1:
+        raise ValueError("workers must be a positive integer")
+
+    def _copy_one(key: str) -> str:
+        body = source.client.get_object(Bucket=source.name, Key=key)["Body"].read()
+        target.client.put_object(Bucket=target.name, Key=key, Body=body)
+        return key
+
+    pool_size = min(workers, len(keys))
+    if pool_size == 1:
+        return [_copy_one(key) for key in keys]
+    with ThreadPoolExecutor(max_workers=pool_size) as executor:
+        return list(executor.map(_copy_one, keys))
 
 
 def _prefix(storage_prefix: str, everything: bool) -> str:
