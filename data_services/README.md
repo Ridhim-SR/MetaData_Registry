@@ -977,16 +977,21 @@ sheet excluded, same as the 2026-11-25 metadata-only check).
   department `updasp` exists only in local storage and local OpenMetadata
   pending the user's review and item 4 below.
 
-**Still to do before considering merge:**
+**Checklist — all done, merged to `main` 2026-11-26 (PR #68):**
 1. ~~Inspect the live response's request fields without exposing metadata, fix
    per-table correlation, and add a fixture that matches the actual response.~~
-   Done 2026-11-26, see above.
+   Done, see above.
 2. ~~Verify success/failure isolation, table readback, and the combined
-   extension/tag/description patch against local OpenMetadata.~~ Done
-   2026-11-26, see above.
+   extension/tag/description patch against local OpenMetadata.~~ Done, see
+   above.
 3. ~~Rerun the local 16-worker canary and complete a fair baseline comparison
-   with all stage timings.~~ Done 2026-11-26, see above (1.74x).
-4. Only after those pass, arrange an authorized development write from `main`
-   with a refreshed dev token. The branch guard must not be bypassed. Still
-   open, pending the user's review of the local webapp result; UPDASP is not
-   yet in `catalog.yaml` and has not been added there as part of this branch.
+   with all stage timings.~~ Done, see above (1.74x).
+4. ~~Only after those pass, arrange an authorized development write from
+   `main` with a refreshed dev token. The branch guard must not be
+   bypassed.~~ Done: `updasp`/`crop_area_estimate` is onboarded in
+   `catalog.yaml`, uploaded to dev Wasabi, and published to dev
+   OpenMetadata — 26/26 columns, owner, CAT-3, and custom properties all
+   confirmed via a direct API read against `10.0.96.105`. The dev token used
+   was a temporary admin-login session token (the `ingestion-bot` token in
+   `.env` had expired 2026-11-05); **refreshing `DEV_OPENMETADATA_JWT_TOKEN`
+   from Settings → Bots → ingestion-bot is still an open follow-up.**
