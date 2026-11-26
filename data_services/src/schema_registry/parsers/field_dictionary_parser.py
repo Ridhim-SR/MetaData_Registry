@@ -117,6 +117,7 @@ def parse_format(format_text: str) -> tuple[str, int | None]:
 # Columns the file must carry to be a field dictionary at all -- without
 # them there is no grouping key and no field name, i.e. nothing to parse.
 _REQUIRED_HEADERS = ("Dataset Name", "Dataset Field")
+_HINDI_NAME_HEADERS = {"name_hindi", "hindi_name"}
 
 
 def parse_field_dictionary_text(text: str, label: str = "<text>") -> dict[str, dict]:
@@ -152,6 +153,14 @@ def parse_field_dictionary_text(text: str, label: str = "<text>") -> dict[str, d
             f"Field dictionary is missing required column(s) {missing}. "
             f"Headers found: {reader.fieldnames}"
         )
+    normalized_headers = {
+        re.sub(r"[^\w]+", "_", header.strip().lower()).strip("_"): header
+        for header in (reader.fieldnames or [])
+    }
+    hindi_name_header = next(
+        (normalized_headers[name] for name in _HINDI_NAME_HEADERS if name in normalized_headers),
+        None,
+    )
 
     for row in reader:
         table_name = (row.get("Dataset Name") or "").strip()
@@ -216,6 +225,9 @@ def parse_field_dictionary_text(text: str, label: str = "<text>") -> dict[str, d
                 "default": None,
             }
         )
+        name_hindi = (row.get(hindi_name_header) or "").strip() if hindi_name_header else ""
+        if name_hindi:
+            table["columns"][-1]["name_hindi"] = name_hindi
         table["business_metadata"][field_name] = metadata
 
     for table_name, table in tables.items():
@@ -231,4 +243,3 @@ def parse_field_dictionary(path: str) -> dict[str, dict]:
 
     with open(path, newline="", encoding="utf-8-sig") as f:
         return parse_field_dictionary_text(f.read(), label=str(path))
-

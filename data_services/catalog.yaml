@@ -23,8 +23,8 @@
 departments:
   # PWD (vishwakarma) is owned by another team. It is left active here exactly
   # as main has it, so merging this branch into main never comments it out --
-  # the catalog is main's source of truth and this branch only adds agri_dept
-  # and rural_development_department below. Local runs that must not touch PWD
+  # the catalog is main's source of truth and this branch adds departments
+  # below without changing PWD. Local runs that must not touch PWD
   # scope themselves instead of editing this file:
   #     python3 -m src.schema_registry.sync --department agri_dept
   pwd:
@@ -1151,3 +1151,58 @@ departments:
           Acreage and Yield Estimation at State, District, Block, and Gram
           Panchayat levels.
         field_dictionary: storage:inputs/updasp/crop_area_estimate/crop_area_estimate_field_dictionary.csv
+
+  sericulture:
+    name: Directorate of Sericulture
+    description: >-
+      The Directorate of Sericulture, Uttar Pradesh is the state government
+      body responsible for promoting silk farming (sericulture), mulberry
+      cultivation, silkworm rearing, cocoon marketing, and reeling across
+      Uttar Pradesh.
+    datasets:
+      monthly_progress_report:
+        category: CAT-3
+        dataset_type: Administrative
+        schema_source: Department Provided
+        api_available: N
+        owner: Directorate of Sericulture
+        steward:
+        frequency: Monthly
+        timeline:
+        description: >-
+          Monthly district-wise reporting of sericulture physical targets and
+          achievements by financial year, reporting month, program, and
+          measurement unit.
+        source_url:
+        field_dictionary: storage:inputs/sericulture/monthly_progress_report/monthly_progress_report.csv
+      mukhyamantri_resham_vikas_yojana:
+        category: CAT-3
+        dataset_type: Citizen Centric
+        schema_source: Department Provided
+        api_available: N
+        owner: Directorate of Sericulture
+        steward:
+        frequency:
+        timeline:
+        description: >-
+          Beneficiary applications to the Mukhyamantri Resham Vikas Yojana,
+          including scheme selection, beneficiary and project details, land
+          records, bank details for subsidy transfer, uploaded documents, and
+          application status.
+        source_url:
+        field_dictionary: storage:inputs/sericulture/mukhyamantri_resham_vikas_yojana/mukhyamantri_resham_vikas_yojana.csv
+      resham_mitra:
+        category: CAT-3
+        dataset_type: Citizen Centric
+        schema_source: Department Provided
+        api_available: N
+        owner: Directorate of Sericulture
+        steward:
+        frequency:
+        timeline:
+        description: >-
+          Resham Mitra beneficiary registration and scheme application
+          information, including identity and contact details, land and bank
+          information, supporting documents, and application status.
+        source_url:
+        field_dictionary: storage:inputs/sericulture/resham_mitra/resham_mitra.csv

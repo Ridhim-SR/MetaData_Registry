@@ -92,6 +92,20 @@ def test_data_description_becomes_business_metadata(tmp_path):
     assert business_metadata["col_a"]["business_description"] == "What this field means"
 
 
+@pytest.mark.parametrize("header", ["name_hindi", "Name (Hindi)", "Hindi Name"])
+def test_hindi_name_is_carried_beside_field_name(tmp_path, header):
+    source = _write_csv(
+        tmp_path,
+        BASE_HEADERS + [header],
+        [["t1", "financial_year", "Reporting year", "Text", "Y", "वित्तीय वर्ष"]],
+    )
+
+    column = parse_field_dictionary(source)["t1"]["columns"][0]
+
+    assert column["name"] == "financial_year"
+    assert column["name_hindi"] == "वित्तीय वर्ष"
+
+
 @pytest.mark.skipif(not SAMPLE.exists(), reason=f"{SAMPLE} is gitignored and not present")
 def test_real_sample_file_parses_into_seven_tables():
     tables = parse_field_dictionary(str(SAMPLE))
