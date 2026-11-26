@@ -103,6 +103,7 @@ def test_shipped_catalog_is_valid():
         "women_and_child_development_department",
         "non_proprietary_data",
         "irrigation_dept",
+        "sericulture",
     ]
 
     # Kanya Sumangala is Women & Child Development, not Agriculture: two
@@ -159,3 +160,43 @@ def test_shipped_catalog_is_valid():
         for ds in irrigation.datasets
     )
 
+    sericulture = next(d for d in departments if d.id == "sericulture")
+    assert sericulture.name == "Directorate of Sericulture"
+    assert sericulture.description == (
+        "The Directorate of Sericulture, Uttar Pradesh is the state government "
+        "body responsible for promoting silk farming (sericulture), mulberry "
+        "cultivation, silkworm rearing, cocoon marketing, and reeling across "
+        "Uttar Pradesh."
+    )
+    assert [ds.name for ds in sericulture.datasets] == [
+        "monthly_progress_report",
+        "mukhyamantri_resham_vikas_yojana",
+        "resham_mitra",
+    ]
+    assert all(
+        ds.field_dictionary and ds.field_dictionary.startswith("storage:inputs/sericulture/")
+        for ds in sericulture.datasets
+    )
+    monthly_report = sericulture.datasets[0]
+    assert monthly_report.fields["category"] == "CAT-3"
+    assert monthly_report.fields["owner"] == "Directorate of Sericulture"
+    assert monthly_report.fields["frequency"] == "Monthly"
+    assert monthly_report.fields["dataset_type"] == "Administrative"
+    assert monthly_report.fields["schema_source"] == "Department Provided"
+    assert monthly_report.fields["api_available"] == "N"
+    assert "district-wise reporting" in monthly_report.fields["dataset_description"]
+    assert monthly_report.fields["steward"] == ""
+    assert monthly_report.fields["timeline"] == ""
+
+    scheme, resham = sericulture.datasets[1:]
+    for dataset in (scheme, resham):
+        assert dataset.fields["category"] == "CAT-3"
+        assert dataset.fields["dataset_type"] == "Citizen Centric"
+        assert dataset.fields["schema_source"] == "Department Provided"
+        assert dataset.fields["api_available"] == "N"
+        assert dataset.fields["owner"] == "Directorate of Sericulture"
+        assert dataset.fields["dataset_description"]
+        assert dataset.fields["steward"] == ""
+        assert dataset.fields["frequency"] == ""
+        assert dataset.fields["timeline"] == ""
+        assert dataset.fields["source_url"] == ""

@@ -54,8 +54,10 @@ def run_field_dictionary(
     tables that were fine.
 
     Returns {table_name: run()'s own result dict (+ "status": "ok")}, one
-    entry per table found in the file. `department` must already be
-    registered, same precondition as run() itself.
+    entry per table found in the file. The original dictionary is archived
+    only after every table succeeds, so a failed submission is retried by
+    the next sync. `department` must already be registered, same precondition
+    as run() itself.
     """
 
     # `source_file` may be a local path or a storage:<key> (see inputs.py).
@@ -71,16 +73,13 @@ def run_field_dictionary(
         )
     else:
         tables = parse_field_dictionary_text(text, label=source_file)
-    archive_path = paths.dataset_source_path(
-        lookups.slugify(department), lookups.slugify(dataset), _timestamp(), source_name
-    )
-    inputs.archive(storage, archive_path, source_bytes)
-    logger.info(f"Field dictionary: archived original -> {archive_path}")
     results: dict[str, dict] = {}
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         for table_name, table in tables.items():
-            columns_path = Path(tmp_dir) / f"{table_name}_columns.csv"
+            # The table name is already in the storage directory path. Short
+            # split-file names keep archived paths below Windows MAX_PATH.
+            columns_path = Path(tmp_dir) / "columns.csv"
             with columns_path.open("w", newline="", encoding="utf-8") as f:
                 writer = csv.DictWriter(f, fieldnames=_COLUMN_FIELDS)
                 writer.writeheader()
@@ -96,7 +95,7 @@ def run_field_dictionary(
                         }
                     )
 
-            metadata_path = Path(tmp_dir) / f"{table_name}_metadata.csv"
+            metadata_path = Path(tmp_dir) / "metadata.csv"
             with metadata_path.open("w", newline="", encoding="utf-8") as f:
                 writer = csv.DictWriter(f, fieldnames=_METADATA_FIELDS)
                 writer.writeheader()
@@ -134,6 +133,12 @@ def run_field_dictionary(
                 results[table_name] = {"status": "failed", "error": f"{type(exc).__name__}: {exc}"}
 
     ok = sum(1 for r in results.values() if r["status"] == "ok")
+    if results and ok == len(results):
+        archive_path = paths.dataset_source_path(
+            lookups.slugify(department), lookups.slugify(dataset), _timestamp(), source_name
+        )
+        inputs.archive(storage, archive_path, source_bytes)
+        logger.info(f"Field dictionary: archived original -> {archive_path}")
     logger.info(f"Field dictionary: {ok}/{len(results)} table(s) ingested")
     return results
 

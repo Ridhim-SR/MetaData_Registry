@@ -92,6 +92,28 @@ def test_data_description_becomes_business_metadata(tmp_path):
     assert business_metadata["col_a"]["business_description"] == "What this field means"
 
 
+def test_hindi_field_label_is_preserved_on_the_column(tmp_path):
+    path = tmp_path / "field_dictionary.csv"
+    with path.open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(
+            stream,
+            fieldnames=["Dataset Name", "Dataset Field", "Format", "name_hindi"],
+        )
+        writer.writeheader()
+        writer.writerow(
+            {
+                "Dataset Name": "t1",
+                "Dataset Field": "district_name",
+                "Format": "Text",
+                "name_hindi": "जनपद का नाम",
+            }
+        )
+
+    columns = parse_field_dictionary(str(path))["t1"]["columns"]
+
+    assert columns[0]["name_hindi"] == "जनपद का नाम"
+
+
 @pytest.mark.skipif(not SAMPLE.exists(), reason=f"{SAMPLE} is gitignored and not present")
 def test_real_sample_file_parses_into_seven_tables():
     tables = parse_field_dictionary(str(SAMPLE))

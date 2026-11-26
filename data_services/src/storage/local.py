@@ -53,7 +53,9 @@ class LocalObjectStorage(ObjectStorage):
         full = self._full_path(path)
         full.parent.mkdir(parents=True, exist_ok=True)
 
-        fd, tmp_path = tempfile.mkstemp(dir=full.parent, prefix=f".{full.name}.", suffix=".tmp")
+        # A copy of the destination name can exceed Windows' MAX_PATH limit
+        # for deep registry paths. tempfile still supplies a unique suffix.
+        fd, tmp_path = tempfile.mkstemp(dir=full.parent, prefix=".write-", suffix=".tmp")
         try:
             with os.fdopen(fd, "wb") as f:
                 f.write(data)

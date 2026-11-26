@@ -211,6 +211,11 @@ def parse_field_dictionary_text(text: str, label: str = "<text>") -> dict[str, d
                 "scale": spec.scale,
                 "nullable": nullable,
                 "default": None,
+                **(
+                    {"name_hindi": (row.get("name_hindi") or "").strip()}
+                    if (row.get("name_hindi") or "").strip()
+                    else {}
+                ),
             }
         )
         table["business_metadata"][field_name] = metadata
@@ -228,4 +233,3 @@ def parse_field_dictionary(path: str) -> dict[str, dict]:
 
     with open(path, newline="", encoding="utf-8-sig") as f:
         return parse_field_dictionary_text(f.read(), label=str(path))
-

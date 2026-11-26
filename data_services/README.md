@@ -194,6 +194,35 @@ Do it the same way every time. Examples use PWD; replace the file, department, d
 | You also have a file with column descriptions/tags | C |
 | One file contains a field dictionary, with or without table names | D |
 
+**Sericulture Excel workbooks:** these use three different layouts, so
+convert them with the department-specific parser before `add`:
+
+```powershell
+python -m src.schema_registry.parsers.sericulture_xlsx `
+    --input-dir samples/sericulture `
+    --out-dir samples/sericulture/field_dictionaries `
+    --overwrite
+```
+
+The converter writes one field-dictionary CSV per workbook, keeps the field
+descriptions, Hindi labels, units and source type/length details, and excludes
+sample/example values. The original workbooks remain unchanged. In
+`Resham Mitra.xlsx`, beneficiary name, Aadhaar and mobile number appear again
+as pre-filled application fields; the converter combines each repeated
+field's descriptions into one schema column because the workbook identifies
+them as the same registered beneficiary values.
+
+Upload each generated dictionary to storage and update the catalog with:
+
+```powershell
+Get-ChildItem samples/sericulture/field_dictionaries/*.csv | ForEach-Object {
+    $dataset = $_.BaseName
+    python -m src.schema_registry.add $_.FullName `
+        --department sericulture --dataset $dataset --field-dictionary
+}
+python -m src.schema_registry.sync --department sericulture
+```
+
 **A: existing department**
 ```bash
 python3 -m src.schema_registry.add samples/pwd_vishwakarma_full_raw_columns.txt \

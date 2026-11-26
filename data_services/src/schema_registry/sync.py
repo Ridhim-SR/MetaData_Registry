@@ -119,14 +119,37 @@ def _ingest_dataset(
             previous = _latest_archived_sha(storage, paths.dataset_source_prefix(dept.id, ds_slug), metadata=False)
             changed = inputs.sha256(data) != previous
             if not changed and not reclassify:
-                outcomes.append(Outcome(label, "unchanged"))
+                registered = storage.read_csv(lookups.TABLES_PATH) if storage.exists(lookups.TABLES_PATH) else []
+                dataset_id = f"{dept.id}.{ds_slug}"
+                outcomes.extend(
+                    Outcome(row["table_id"], "unchanged")
+                    for row in registered
+                    if row["dataset_id"] == dataset_id
+                )
             elif dry_run:
                 outcomes.append(Outcome(label, "would ingest", detail="field dictionary changed or new" if changed else "reclassify requested"))
             else:
                 results = run_field_dictionary(department=dept.id, dataset=ds.name, source_file=ds.field_dictionary, storage=storage, reclassify=reclassify)
-                outcomes.append(Outcome(label, "ingested", detail=f"{len(results)} table(s)"))
+                outcomes.extend(
+                    Outcome(
+                        f"{dept.id}.{ds_slug}.{lookups.slugify(table_name)}",
+                        "ingested" if result.get("status") == "ok" else "failed",
+                        detail=(
+                            f"{result.get('column_count', '?')} columns"
+                            if result.get("status") == "ok"
+                            else result.get("error", "field dictionary table ingestion failed")
+                        ),
+                    )
+                    for table_name, result in results.items()
+                )
         except Exception as exc:  # noqa: BLE001 -- report and carry on with other tables
-            outcomes.append(Outcome(label, "failed", detail=str(exc)))
+            registered = storage.read_csv(lookups.TABLES_PATH) if storage.exists(lookups.TABLES_PATH) else []
+            dataset_id = f"{dept.id}.{ds_slug}"
+            matching = [row for row in registered if row["dataset_id"] == dataset_id]
+            if matching:
+                outcomes.extend(Outcome(row["table_id"], "failed", detail=str(exc)) for row in matching)
+            else:
+                outcomes.append(Outcome(label, "failed", detail=str(exc)))
 
     def ingest_table(table) -> Outcome:
         table_id = f"{dept.id}.{ds_slug}.{lookups.slugify(table.name)}"

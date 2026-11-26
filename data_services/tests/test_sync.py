@@ -1,15 +1,23 @@
 import threading
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
 import src.schema_registry.sync as sync_module
-from src.schema_registry.catalog import parse_catalog
+from src.schema_registry.add import add
+from src.schema_registry.catalog import load_catalog, parse_catalog
 from src.schema_registry.openmetadata.publish import _unwrap
 from src.schema_registry.registry import lookups
 from src.schema_registry.sync import sync
 from src.storage.local import LocalObjectStorage
 from src.utils import config
+
+_SERICULTURE_SAMPLES = Path(__file__).resolve().parents[1] / "samples" / "sericulture"
+_HAS_SERICULTURE_WORKBOOKS = all(
+    next(_SERICULTURE_SAMPLES.rglob(name), None) is not None
+    for name in ("MPR.xlsx", "Resham Mitra.xlsx", "Mukhyamantri Resham Vikas Yojana.xlsx")
+)
 
 _CATALOG = """
 departments:
@@ -264,12 +272,93 @@ def test_field_dictionary_dataset(storage):
     )
     client = _fake_client()
 
-    first = sync(storage, catalog, client=client)
-    second = sync(storage, catalog, client=_fake_client())
+    first = _by_table(sync(storage, catalog, client=client))
+    second = _by_table(sync(storage, catalog, client=_fake_client()))
 
-    assert first[0].ingest == "ingested" and "2 table(s)" in first[0].detail
-    assert second[0].ingest == "unchanged"
+    assert {table_id: outcome.ingest for table_id, outcome in first.items()} == {
+        "welfare.cmsvy.cmsvy_bride": "ingested",
+        "welfare.cmsvy.cmsvy_bank": "ingested",
+    }
+    assert {table_id: outcome.ingest for table_id, outcome in second.items()} == {
+        "welfare.cmsvy.cmsvy_bride": "unchanged",
+        "welfare.cmsvy.cmsvy_bank": "unchanged",
+    }
     assert _published_tables(client) == ["cmsvy_bank", "cmsvy_bride"]
+
+
+def test_field_dictionary_failure_is_reported_and_not_published(storage):
+    storage.write_bytes(
+        "inputs/welfare/dict.csv",
+        b"Dataset Name,Dataset Field,Data Description,Format,Mandatory (Y/N)\n"
+        b"cmsvy_bride,bride_name,Name,Text,Y\n"
+        b"cmsvy_bank,account_no,Account,Numeric (12 Digits),Y\n",
+    )
+    catalog = parse_catalog(
+        "departments:\n  welfare:\n    name: Social Welfare\n    datasets:\n      cmsvy:\n"
+        "        field_dictionary: storage:inputs/welfare/dict.csv\n"
+    )
+    sync(storage, catalog)
+
+    storage.write_bytes(
+        "inputs/welfare/dict.csv",
+        b"Dataset Name,Dataset Field,Data Description,Format,Mandatory (Y/N)\n"
+        b"cmsvy_bride,bride_name,Name,Text,Y\ncmsvy_bride,bride_name,Duplicate,Text,Y\n"
+        b"cmsvy_bank,account_no,Account,Numeric (12 Digits),Y\n",
+    )
+    client = _fake_client()
+
+    outcomes = _by_table(sync(storage, catalog, client=client))
+
+    assert outcomes["welfare.cmsvy.cmsvy_bride"].ingest == "failed"
+    assert outcomes["welfare.cmsvy.cmsvy_bride"].publish == "skipped"
+    assert "duplicate column name" in outcomes["welfare.cmsvy.cmsvy_bride"].detail
+    assert outcomes["welfare.cmsvy.cmsvy_bank"].ingest == "ingested"
+    assert "cmsvy_bride" not in _published_tables(client)
+
+
+@pytest.mark.skipif(
+    not _HAS_SERICULTURE_WORKBOOKS,
+    reason="Sericulture workbooks are local and git-ignored",
+)
+def test_sericulture_workbooks_add_and_sync_end_to_end(storage, tmp_path):
+    from src.schema_registry.parsers.sericulture_xlsx import convert_all
+
+    dictionaries = convert_all(_SERICULTURE_SAMPLES, tmp_path / "dictionaries")
+    project_catalog = Path(__file__).resolve().parents[1] / "catalog.yaml"
+    test_catalog = tmp_path / "catalog.yaml"
+    test_catalog.write_text(project_catalog.read_text(encoding="utf-8"), encoding="utf-8")
+    for dataset, source in dictionaries.items():
+        add(
+            storage,
+            test_catalog,
+            str(source),
+            department="sericulture",
+            dataset=dataset,
+        )
+
+    catalog = load_catalog(test_catalog)
+    department = next(dept for dept in catalog if dept.id == "sericulture")
+    expected_tables = {f"sericulture.{dataset}.{dataset}" for dataset in dictionaries}
+    assert {
+        f"sericulture.{dataset.name}.{dataset.name}"
+        for dataset in department.datasets
+    } == expected_tables
+
+    first = _by_table(sync(storage, [department], max_workers=1))
+    second = _by_table(sync(storage, [department], max_workers=1))
+    registered = {row["table_id"] for row in storage.read_csv(lookups.TABLES_PATH)}
+
+    assert set(first) == expected_tables
+    assert {table_id: outcome.ingest for table_id, outcome in first.items()} == {
+        table_id: "ingested" for table_id in expected_tables
+    }
+    assert {table_id: outcome.ingest for table_id, outcome in second.items()} == {
+        table_id: "unchanged" for table_id in expected_tables
+    }
+    assert registered == expected_tables
+    assert all(outcome.publish == "skipped" for outcome in first.values())
+    assert all(not row["error"] for row in storage.read_csv(lookups.RUNS_PATH))
+    assert len(storage.list("department/sericulture/")) > 0
 
 
 def test_sync_records_the_publish_outcome_on_the_run_row(storage):
@@ -336,7 +425,7 @@ def test_field_dictionary_datasets_run_concurrently_only_in_local_only_mode(stor
         with thread_lock:
             worker_threads.add(threading.get_ident())
         barrier.wait(timeout=5)
-        return {}
+        return {kwargs["dataset"]: {"status": "ok", "column_count": 1}}
 
     monkeypatch.setattr(sync_module, "run_field_dictionary", run_dictionary)
 
@@ -360,7 +449,7 @@ def test_field_dictionary_ingestion_defaults_to_serial(storage, monkeypatch):
 
     def run_dictionary(**kwargs):
         worker_threads.append(threading.get_ident())
-        return {}
+        return {kwargs["dataset"]: {"status": "ok", "column_count": 1}}
 
     monkeypatch.setattr(sync_module, "run_field_dictionary", run_dictionary)
 

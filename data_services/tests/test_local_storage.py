@@ -45,3 +45,18 @@ def test_a_persistent_permission_error_is_still_raised(tmp_path, monkeypatch):
 
     assert not storage.exists("x.csv")
     assert storage.list("") == []
+
+
+def test_atomic_write_uses_short_temp_name_for_deep_paths(tmp_path):
+    """The temp name must not push an otherwise valid target over Windows' MAX_PATH."""
+
+    storage = LocalObjectStorage(tmp_path)
+    target_length = 250
+    filename_length = target_length - len(str(storage.root)) - len(os.sep) - len(".csv")
+    filename = f"{'x' * filename_length}.csv"
+    target = storage._full_path(filename)
+    assert len(str(target)) == target_length
+
+    storage.write_bytes(filename, b"long path")
+
+    assert storage.read_bytes(filename) == b"long path"
